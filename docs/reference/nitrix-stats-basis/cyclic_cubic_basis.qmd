@@ -1,0 +1,45 @@
+---
+title: "cyclic_cubic_basis"
+generated: true
+description: "Build a cyclic cubic P-spline basis for a periodic covariate `x`."
+---
+
+[‹ back to `nitrix.stats.basis`](../nitrix-stats-basis.qmd)
+
+<!-- nitrix:gen sig:cyclic_cubic_basis -->
+```python
+cyclic_cubic_basis(x: Float[Array, ' n'], n_basis: int = 10, *, degree: int = 3, penalty_order: int = 2, bounds: Optional[Tuple[float, float]] = None, center: bool = True) -> SplineBasis
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:cyclic_cubic_basis -->
+Build a cyclic cubic P-spline basis for a periodic covariate `x`.
+
+For periodic covariates (cortical angle, phase, time-of-day): a uniform
+cyclic B-spline design (the basis wraps at the period ends, matching `f`,
+`f'`, `f''`) with a circular difference penalty (`mgcv`'s `bs='cp'`).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:cyclic_cubic_basis -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Float` | `n` | — | `(n,)` covariate values. |
+| `n_basis` | `int` | — | `10` | Number of cyclic basis functions `k`. |
+| `degree` | `int` | — | `3` | B-spline degree (default `3`) and circular difference order (`2`). |
+| `penalty_order` | `int` | — | `2` | B-spline degree (default `3`) and circular difference order (`2`). |
+| `bounds` | `Optional[Tuple[float, float]]` | — | `None` | `(lo, hi)` = the period; `hi` is identified with `lo`. Defaults to the data range (pass the true period for a partial-cycle sample). |
+| `center` | `bool` | — | `True` | Sum-to-zero identifiability constraint (default `True`). |
+
+**Returns** `SplineBasis`. The [`SplineBasis`](../nitrix-stats-basis/SplineBasis.qmd) for the cyclic smooth (`kind='cyclic'`).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:cyclic_cubic_basis -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

@@ -4,24 +4,24 @@
 """
 Sectioned ELL -- bucketed-row format for variable-degree adjacencies.
 
-Per SPEC §4.2, the naive ELL layout pads every row to the
-global ``k_max``.  That's memory-efficient when ``k_max ≈
-median(k)`` but pathological when the worst-case row is much
-larger -- e.g. distance-thresholded neighbourhoods in irregular
-point clouds (k_max can be 10-100× the median) or atlas-parcel
-adjacencies (parcel sizes vary by 1-2 orders of magnitude).
+The naive ELL layout pads every row to the global :math:`k_{\\max}`.  That is
+memory-efficient when :math:`k_{\\max} \\approx \\operatorname{median}(k)` but
+pathological when the worst-case row is much larger -- e.g. distance-thresholded
+neighbourhoods in irregular point clouds (:math:`k_{\\max}` can be 10-100x the
+median) or atlas-parcel adjacencies (parcel sizes vary by 1-2 orders of
+magnitude).
 
-The sectioned-ELL trick: bucket rows by ``ceil(log2(degree))``, run
-``semiring_ell_matmul`` once per bucket with the bucket's *local*
-``k_max``, and scatter the results back to the original row order.
-Memory cost is dominated by the largest bucket, not by the worst-
-case row.
+The sectioned-ELL trick: bucket rows by :math:`\\lceil \\log_2(\\mathrm{degree})
+\\rceil`, run :func:`~nitrix.semiring.semiring_ell_matmul` once per bucket with
+the bucket's *local* :math:`k_{\\max}`, and scatter the results back to the
+original row order.  Memory cost is dominated by the largest bucket, not by the
+worst-case row.
 
 This is a Python-level wrapper around the existing
-``semiring_ell_matmul`` kernel -- no new kernel code.  Construction
-is *not* JIT-compatible because the per-bucket shapes are data-
-dependent.  Reuse is JIT-friendly (the per-bucket matmuls trace
-once and the dispatch is a static Python loop).
+:func:`~nitrix.semiring.semiring_ell_matmul` kernel -- no new kernel code.
+Construction is *not* JIT-compatible because the per-bucket shapes are
+data-dependent.  Reuse is JIT-friendly (the per-bucket matmuls trace once and
+the dispatch is a static Python loop).
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ class SectionedELL:
     Attributes
     ----------
     sections
-        One ``ELL`` per bucket.  Each bucket has its own
+        One :class:`~nitrix.sparse.ELL` per bucket.  Each bucket has its own
         ``k_max``; this is the whole point of the structure.
     row_groups
         ``len(sections)`` arrays of original-row indices, one
@@ -100,14 +100,22 @@ class SectionedELL:
         Tuple[Tuple[ELL, ...], Tuple[NDArray[Any], ...]],
         Tuple[int, int, Any],
     ]:
-        """Children: ``(sections, row_groups)``; aux: scalars.
+        """Flatten into pytree children and static auxiliary data.
 
-        The per-bucket ``ELL`` pytrees carry the differentiable ``values``
-        leaves; the row-group index arrays ride along as leaves (integer ->
-        zero/float0 cotangent).  The *number* of buckets is structural
-        (encoded in the treedef), so the static Python dispatch loop length
-        in the matmul is preserved across a trace.  ``(n_rows, n_cols,
-        identity)`` are hashable static aux.
+        The per-bucket :class:`~nitrix.sparse.ELL` pytrees carry the
+        differentiable ``values`` leaves; the row-group index arrays ride along
+        as leaves (integer -> zero/float0 cotangent).  The *number* of buckets
+        is structural (encoded in the treedef), so the static Python dispatch
+        loop length in the matmul is preserved across a trace.
+
+        Returns
+        -------
+        children : tuple
+            A two-element tuple ``(sections, row_groups)`` of the pytree
+            children: the per-bucket :class:`~nitrix.sparse.ELL` sections and
+            the tuple of row-group index arrays.
+        aux_data : tuple
+            The hashable static auxiliary data ``(n_rows, n_cols, identity)``.
         """
         return (self.sections, self.row_groups), (
             self.n_rows,
@@ -138,13 +146,26 @@ class SectionedELL:
 
 
 def _default_bucket(degree: int) -> int:
-    """Default bucketing: ``ceil(log2(max(degree, 1)))``.
+    """Default bucketing: :math:`\\lceil \\log_2(\\max(\\mathrm{degree}, 1))
+    \\rceil`.
+
+    Maps a row's neighbour count to a bucket index:
 
     - degree 0 -> bucket 0 with k_max = 1 (and an identity-only row).
     - degree 1 -> bucket 0 with k_max = 1.
     - degree 2 -> bucket 1 with k_max = 2.
     - degree 3-4 -> bucket 2 with k_max = 4.
     - degree 5-8 -> bucket 3 with k_max = 8.  etc.
+
+    Parameters
+    ----------
+    degree : int
+        Number of neighbours (non-pad entries) in the row.
+
+    Returns
+    -------
+    int
+        The index of the bucket the row is assigned to.
     """
     if degree <= 1:
         return 0
@@ -152,7 +173,19 @@ def _default_bucket(degree: int) -> int:
 
 
 def _bucket_kmax(bucket: int) -> int:
-    """Largest degree placeable in bucket ``b``."""
+    """Largest degree placeable in a bucket.
+
+    Parameters
+    ----------
+    bucket : int
+        The bucket index (as produced by :func:`_default_bucket`).
+
+    Returns
+    -------
+    int
+        The bucket's nominal maximum degree: ``1`` for bucket 0, otherwise
+        :math:`2^{\\mathrm{bucket}}`.
+    """
     return 1 if bucket == 0 else 2**bucket
 
 
@@ -165,7 +198,7 @@ def sectioned_ell_from_ragged(
     pad_index: int = 0,
     bucket_by: Optional[Callable[[int], int]] = None,
 ) -> SectionedELL:
-    """Build a ``SectionedELL`` from ragged per-row neighbour lists.
+    """Build a :class:`SectionedELL` from ragged per-row neighbour lists.
 
     Parameters
     ----------
@@ -187,13 +220,15 @@ def sectioned_ell_from_ragged(
 
     Returns
     -------
-    A ``SectionedELL`` with one ``ELL`` per non-empty bucket.
+    SectionedELL
+        A :class:`SectionedELL` with one :class:`~nitrix.sparse.ELL` per
+        non-empty bucket.
 
     Notes
     -----
     Runs on the host (not JIT-compatible).  Construction is
     typically done once per adjacency (e.g., once per mesh or once
-    per pre-computed k-NN graph); the resulting ``SectionedELL``
+    per pre-computed k-NN graph); the resulting :class:`SectionedELL`
     can then be passed through JIT'd code many times.
     """
     n_rows = len(values_per_row)
@@ -295,8 +330,8 @@ def sectioned_semiring_ell_matmul(
 ) -> Num[Array, 'm ncol']:
     """Sectioned-ELL semiring matrix multiplication.
 
-    For each bucket, run ``semiring_ell_matmul`` and scatter the
-    result back to the original row positions.  The bucket loop is
+    For each bucket, run :func:`~nitrix.semiring.semiring_ell_matmul` and
+    scatter the result back to the original row positions.  The bucket loop is
     Python-level (one trace per bucket); scatter-back uses
     ``jnp.zeros(...).at[row_indices].set(...)``.
 
@@ -310,11 +345,13 @@ def sectioned_semiring_ell_matmul(
         Algebra to reduce under.
     backend
         ``"auto"``, ``"pallas-cuda"``, or ``"jax"``.  Passed through
-        to the per-bucket ``semiring_ell_matmul`` calls.
+        to the per-bucket :func:`~nitrix.semiring.semiring_ell_matmul` calls.
 
     Returns
     -------
-    Array of shape ``(n_rows, ncol)``.
+    Num[Array, 'n_rows ncol']
+        The dense result, shape ``(n_rows, ncol)``, with each bucket's rows
+        scattered back to their original positions.
 
     Notes
     -----
@@ -323,8 +360,8 @@ def sectioned_semiring_ell_matmul(
     ``ncol``.  This is consistent with "no neighbours -> no
     contribution".
 
-    For the ``LOG`` and ``TROPICAL_*`` algebras with ``-inf`` /
-    ``+inf`` identities, empty rows produce ``-inf`` / ``+inf``
+    For the :data:`~nitrix.semiring.LOG` and ``TROPICAL_*`` algebras with
+    ``-inf`` / ``+inf`` identities, empty rows produce ``-inf`` / ``+inf``
     outputs respectively, which is the algebra-correct answer.
     """
     if B.shape[-2] != sectioned.n_cols:
@@ -368,18 +405,19 @@ def sectioned_semiring_ell_rmatvec(
     *,
     semiring: Semiring[Any] = REAL,
 ) -> Num[Array, 'n_cols ncol']:
-    """Sectioned-ELL adjoint (transpose) matvec: ``Y = Aᵀ X``.
+    """Sectioned-ELL adjoint (transpose) matvec: :math:`Y = A^{\\top} X`.
 
-    The transpose companion of ``sectioned_semiring_ell_matmul``.  Where
+    The transpose companion of :func:`sectioned_semiring_ell_matmul`.  Where
     the forward gathers ``B`` (indexed by ``n_cols``) and scatter-*sets*
     each bucket's rows back to original order, the adjoint gathers ``X``
     (indexed by the original ``n_rows``) at each bucket's source rows,
-    runs the per-bucket ``semiring_ell_rmatvec`` scatter into the shared
-    ``n_cols`` axis, and *sums* the bucket contributions.
+    runs the per-bucket :func:`~nitrix.semiring.semiring_ell_rmatvec` scatter
+    into the shared ``n_cols`` axis, and *sums* the bucket contributions.
 
     Composing forward + adjoint gives the symmetric-part matvec
-    ``½(A X + Aᵀ X)`` over a SectionedELL -- used by the spectral solvers
-    on bucketed adjacencies whose construction did not preserve symmetry.
+    :math:`\\tfrac{1}{2}(A X + A^{\\top} X)` over a :class:`SectionedELL` --
+    used by the spectral solvers on bucketed adjacencies whose construction did
+    not preserve symmetry.
 
     Parameters
     ----------
@@ -389,11 +427,14 @@ def sectioned_semiring_ell_rmatvec(
         Dense operand indexed by the original row axis, ``(n_rows, ncol)``.
     semiring
         Algebra to reduce under.  **REAL only** (the additive scatter
-        adjoint; see ``semiring_ell_rmatvec``); other algebras raise.
+        adjoint; see :func:`~nitrix.semiring.semiring_ell_rmatvec`); other
+        algebras raise.
 
     Returns
     -------
-    Array of shape ``(n_cols, ncol)``.
+    Num[Array, 'n_cols ncol']
+        The dense adjoint result, shape ``(n_cols, ncol)``, summed over all
+        bucket contributions.
     """
     if semiring is not REAL:
         raise NotImplementedError(

@@ -4,14 +4,13 @@
 """
 Pure-JAX reference for scaled-dot-product attention.
 
-This is the bit-faithful oracle the fused Pallas path (suite Phase 2) is
-certified against, and the implementation ilex pins its forward-parity
-oracle to (``backend='jax'``).  It is the canonical
-``einsum -> (+ bias) -> (mask / causal) -> softmax -> einsum`` with at
-least float32 score / softmax accumulation, differentiated by ordinary
-XLA autodiff (no hand-written VJP -- that lives on the fused path).
-
-See ``docs/feature-requests/nn-forward-kernels-suite.md`` §7.1.
+This is the bit-faithful oracle that the fused Pallas path is certified
+against, and the implementation that consumers may pin as a forward-parity
+oracle by requesting ``backend='jax'``.  It is the canonical
+``einsum -> (+ bias) -> (mask / causal) -> softmax -> einsum`` recipe with at
+least float32 score and softmax accumulation, differentiated by ordinary
+XLA autodiff (no hand-written vector-Jacobian product -- that lives on the
+fused path).
 """
 
 from __future__ import annotations
@@ -34,16 +33,45 @@ _QK_RMS_EPS = 1e-6
 
 
 def default_scale(head_dim: int) -> float:
-    """Softmax temperature ``1 / sqrt(head_dim)`` (the SDPA default)."""
+    """Softmax temperature :math:`1 / \\sqrt{d}` (the SDPA default).
+
+    Parameters
+    ----------
+    head_dim
+        Size :math:`d` of the per-head query/key dimension.
+
+    Returns
+    -------
+    float
+        The scalar softmax temperature :math:`1 / \\sqrt{d}` applied to the
+        query-key logits.
+    """
     return 1.0 / math.sqrt(float(head_dim))
 
 
 def qk_rms_norm(z: Float[Array, '... d']) -> Float[Array, '... d']:
-    """RMSNorm over the trailing head dim (QK-norm; no mean, no learnable scale).
+    """Root-mean-square normalisation over the trailing head dimension.
 
-    ``z̄ = z / sqrt(mean(z², axis=-1) + eps)``.  A cheap pure-elementwise pre-op
-    applied to ``q`` and ``k`` before the dot; autodiff-native, so it composes
-    with both the reference and the fused kernel without touching either.
+    Applies QK-norm --- root-mean-square normalisation with no mean
+    subtraction and no learnable scale ---
+    :math:`\\bar z = z / \\sqrt{\\operatorname{mean}(z^2) + \\varepsilon}`,
+    where the mean is taken over the trailing axis and
+    :math:`\\varepsilon` is a small constant.  This is a cheap, purely
+    elementwise pre-operation applied to the queries and keys before their
+    dot product; it is autodiff-native, so it composes with both the
+    reference and the fused kernel without touching either.
+
+    Parameters
+    ----------
+    z
+        Input tensor of shape ``(..., d)``; normalisation is over the
+        trailing head dimension ``d``.
+
+    Returns
+    -------
+    Float[Array, '... d']
+        The input scaled elementwise so that each trailing-axis vector has
+        unit root-mean-square, with the same shape and dtype as ``z``.
     """
     ms = jnp.mean(jnp.square(z), axis=-1, keepdims=True)
     return z * jax.lax.rsqrt(ms + _QK_RMS_EPS)
@@ -62,10 +90,13 @@ def reference_scaled_dot_product_attention(
 ) -> Float[Array, '... h s d_v']:
     """Reference scaled-dot-product attention (oracle).
 
-    Computes ``softmax(scale * q @ kᵀ + bias  [masked]) @ v`` over the key
-    axis ``t``.  Leading dims ``...`` (batch) and the head axis ``h`` are
-    handled by ``einsum`` broadcasting; ``bias`` / ``mask`` broadcast
-    against ``(..., h, s, t)``.
+    Computes
+    :math:`\\operatorname{softmax}(\\mathrm{scale} \\cdot q\\,k^{\\top} + b)\\,v`
+    over the key axis ``t``, where the softmax logits are masked (set to
+    :math:`-\\infty`) at excluded entries before normalisation and the
+    additive bias :math:`b` is optional.  Leading dimensions ``...`` (batch)
+    and the head axis ``h`` are handled by ``einsum`` broadcasting, and
+    ``bias`` / ``mask`` broadcast against ``(..., h, s, t)``.
 
     Parameters
     ----------
@@ -90,16 +121,18 @@ def reference_scaled_dot_product_attention(
 
     Returns
     -------
-    Attention output of shape ``(..., h, s, d_v)`` in
-    ``result_type(q, k, v)``.
+    Float[Array, '... h s d_v']
+        Attention output of shape ``(..., h, s, d_v)`` in the common
+        result type of ``q``, ``k`` and ``v``.
 
     Notes
     -----
-    All compute runs in at least float32: a float16/bfloat16 input is upcast to
-    float32 for QK-norm / scores / softmax / value-aggregation and cast back at
-    the end (the fp32-accumulation invariant, SPEC §2 tenet 11), so the oracle is
-    platform-stable; float64 inputs stay float64.  A fully masked query row
-    yields ``nan`` (degenerate; callers keep >= 1 key).
+    All compute runs in at least float32: a float16 or bfloat16 input is
+    upcast to float32 for QK-norm, scores, softmax and value aggregation, and
+    cast back at the end, so the oracle is platform-stable (no bfloat16
+    tensor-core multiply variance); float64 inputs stay float64.  A fully
+    masked query row yields ``nan`` (a degenerate case; callers should keep at
+    least one key per query).
     """
     if scale is None:
         scale = default_scale(q.shape[-1])

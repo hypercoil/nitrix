@@ -20,12 +20,8 @@ Submodules:
 - ``ode``        -- ODE integrators (euler / midpoint / rk4 /
   local_linearization)
   for continuous-time / neural-ODE models.
-- ``fixed_point`` -- ``fixed_point_solve`` (the implicit-VJP fixed-point
-  iteration), re-exported at the package top level.
-
-This subpackage didn't exist in the legacy code (the utilities
-lived in ``functional.linear`` etc.); it's a Phase 1 rename and
-consolidation.
+- ``fixed_point`` -- :func:`fixed_point_solve` (the implicit-VJP
+  fixed-point iteration), re-exported at the package top level.
 """
 
 from . import normalize, ode, spatial, tensor_ops

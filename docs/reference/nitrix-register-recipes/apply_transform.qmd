@@ -1,0 +1,51 @@
+---
+title: "apply_transform"
+generated: true
+description: "Apply a recovered transform to an in-memory image / label map."
+---
+
+[‹ back to `nitrix.register.recipes`](../nitrix-register-recipes.qmd)
+
+<!-- nitrix:gen sig:apply_transform -->
+```python
+apply_transform(image: Float[Array, '*spatial'], result: object, *, reference_shape: Optional[tuple[int, ...]] = None, method: Optional[Interpolator] = None, mode: BoundaryMode = 'constant', cval: float = 0.0) -> Float[Array, '*rspatial']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:apply_transform -->
+Apply a recovered transform to an in-memory image / label map.
+
+Resamples `image` -- an array in the **moving** frame of the registration
+that produced `result` (a second contrast, a label map, an atlas) -- onto
+the reference (fixed) grid by the recovered transform.  Dispatches on the
+result: a homogeneous matrix ([`rigid_register`](../nitrix-register-recipes/rigid_register.qmd) / [`affine_register`](../nitrix-register-recipes/affine_register.qmd)
+-- the self-contained `fixed -> moving` voxel map) or a dense displacement
+field ([`greedy_syn_register`](../nitrix-register/greedy_syn_register.qmd) /
+[`diffeomorphic_demons_register`](../nitrix-register-diffeomorphic/diffeomorphic_demons_register.qmd)).  In-memory resampling only -- image
+**file** I/O is out of scope.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:apply_transform -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `image` | `Float` | `*spatial` | — | Single-channel array to resample, on the registration's moving grid. |
+| `result` | `object` | — | — | A [`RegistrationResult`](../nitrix-register/RegistrationResult.qmd) (uses `.matrix`) or a diffeomorphic result (uses `.displacement`). |
+| `reference_shape` | `Optional[tuple[int, ...]]` | — | `None` | Output grid for a **matrix** result; `None` -> `image.shape` (correct when moving and fixed share a grid, the [`IndexSpace`](../nitrix-register/IndexSpace.qmd) norm -- pass the fixed shape for [`WorldSpace`](../nitrix-register/WorldSpace.qmd) / differing grids). A displacement result defines its own output grid. |
+| `method` | `Optional[Interpolator]` | — | `None` | Interpolation kernel; `None` -> `NearestNeighbour` for an **integer** `image` (label-preserving, no interpolation bleed) and `Linear` otherwise. For anti-aliased multi-label resampling pass `MultiLabel(labels=...)`; for overlap of a warped label map see `nitrix.metrics.dice` / `nitrix.metrics.jaccard`. |
+| `mode` | `BoundaryMode` | — | `'constant'` | Out-of-bounds handling (default `'constant'` 0 -- background). |
+| `cval` | `float` | — | `0.0` | Out-of-bounds handling (default `'constant'` 0 -- background). |
+
+**Returns** `Float` — shape `*rspatial`. `image` resampled onto the reference grid (same dtype as `image`).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:apply_transform -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `*rspatial` | a variadic group of axes (`rspatial`) |
+<!-- nitrix:/gen -->

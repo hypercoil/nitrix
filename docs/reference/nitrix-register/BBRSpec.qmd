@@ -1,0 +1,28 @@
+---
+title: "BBRSpec"
+generated: true
+description: "Static configuration for [`bbr_register`](../nitrix-register/bbr_register.qmd)."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._bbr`.*
+
+<!-- nitrix:gen sig:BBRSpec -->
+```python
+class BBRSpec
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:BBRSpec -->
+Static configuration for [`bbr_register`](../nitrix-register/bbr_register.qmd).
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:BBRSpec.__init__ -->
+```python
+__init__(step: float = 1.0, slope: float = 0.5, q0: float = 0.0, iterations: int = 50, schedule: Optional[tuple[float, ...]] = (4.0, 2.0, 1.0), search: Optional[BBRSearch] = BBRSearch(), mode: ConvergenceMode = 'fixed', convergence: Convergence = Convergence(), rotation_step: float = 0.03, translation_step: float = 2.0, step_decay: float = 0.92, interpolation: Interpolator = Linear(), boundary_mode: BoundaryMode = 'nearest', cval: float = 0.0, eps: float = 0.001) -> None
+```
+<!-- nitrix:/gen -->
+

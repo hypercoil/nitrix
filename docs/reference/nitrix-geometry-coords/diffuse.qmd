@@ -1,0 +1,12 @@
+---
+title: "diffuse"
+generated: true
+description: "Alias for compactness_penalty."
+---
+
+[‹ back to `nitrix.geometry.coords`](../nitrix-geometry-coords.qmd)
+
+<!-- nitrix:gen sig:diffuse -->
+`diffuse` is an alias for [`compactness_penalty`](compactness_penalty.qmd).
+<!-- nitrix:/gen -->
+

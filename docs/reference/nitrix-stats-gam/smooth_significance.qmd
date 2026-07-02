@@ -1,0 +1,55 @@
+---
+title: "smooth_significance"
+generated: true
+description: "Approximate significance test for each smooth term (Wood, 2013)."
+---
+
+[‹ back to `nitrix.stats.gam`](../nitrix-stats-gam.qmd)
+
+<!-- nitrix:gen sig:smooth_significance -->
+```python
+smooth_significance(result: GAMResult, smooths: Sequence[Smooth]) -> SmoothTest
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:smooth_significance -->
+Approximate significance test for each smooth term (Wood, 2013).
+
+The `mgcv::summary.gam` smooth-term test in its integer-rank form
+(`mgcv:::testStat` with `type=1`): project the smooth's coefficients
+through its design's QR factor ($R$, with $R^{\top} R =
+X^{\top} X$), eigendecompose the projected Bayesian covariance
+$R V R^{\top}$, and form the rank-truncated quadratic form
+$T_r = \beta^{\top} V_r^{-}\,\beta$ with the rank set to the rounded
+effective degrees of freedom.  $T_r$ is approximately
+$\chi^2_r$ for a fixed-dispersion family, or
+$F_{r,\,N - \text{edf}_{\text{total}}}$ for an estimated scale -- the
+single "is `s(x)` significant, edf, p" line a developmental / brain-age
+GAM analyst reads off `summary.gam`.
+
+The test uses the forward-only `sym_eig_jacobi` eigensolver and is
+**not** differentiated through.  The fractional-rank refinement (the
+`mgcv` default `type=0`, which needs the weighted-chi-square CDF) is a
+documented follow-up; the integer-rank test reproduces
+`testStat(..., type=1)` and tracks the default closely.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:smooth_significance -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `result` | `GAMResult` | — | — | A [`GAMResult`](../nitrix-stats-gam/GAMResult.qmd) from [`gam_fit`](../nitrix-stats-gam/gam_fit.qmd). |
+| `smooths` | `Sequence[Smooth]` | — | — | The same sequence of smooth terms passed to [`gam_fit`](../nitrix-stats-gam/gam_fit.qmd), in the same order (their `design` supplies each term's model matrix). |
+
+**Returns** `SmoothTest`. The per-smooth test statistic, effective degrees of freedom, reference rank, and p-value, each a `(V, m)` array.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:smooth_significance -->
+### References
+
+Wood, S. N. (2013). On p-values for smooth components of an extended
+generalized additive model. Biometrika, 100(1), 221-228.
+https://doi.org/10.1093/biomet/ass048
+<!-- nitrix:/gen -->
+

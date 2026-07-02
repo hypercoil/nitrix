@@ -1,0 +1,82 @@
+---
+title: "lme_f_contrast"
+generated: true
+description: "Per-voxel F-test of a multi-row mixed-model contrast $C  beta = 0$."
+---
+
+[‹ back to `nitrix.stats.lme.reml`](../nitrix-stats-lme-reml.qmd)
+
+<!-- nitrix:gen sig:lme_f_contrast -->
+```python
+lme_f_contrast(result: 'Union[REMLResult, LMEResult]', contrast: Float[Array, 'L p'], *, dof: ContrastDof = 'satterthwaite', X: Optional[Float[Array, 'N p']] = None, Z: Optional[Float[Array, 'N q']] = None) -> LMEFContrast
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:lme_f_contrast -->
+Per-voxel F-test of a multi-row mixed-model contrast $C \beta = 0$.
+
+For an $L$-row contrast matrix $C$ (a single `(p,)` row is
+promoted to $L = 1$), the Wald F-statistic is
+
+$$
+F = (C \beta)^{\top} (C \operatorname{Cov}(\beta) C^{\top})^{-1}
+    (C \beta) / L
+$$
+
+with $\operatorname{Cov}(\beta) = (X^{\top} V^{-1} X)^{-1}$ from
+`result.fixed_cov`.  The denominator degrees of freedom use the
+**Fai-Cornelius / lmerTest** multivariate-Satterthwaite construction
+(`dof='satterthwaite'`, the default):
+
+1. eigendecompose
+   $M = C \operatorname{Cov}(\beta) C^{\top}
+   = P \operatorname{diag}(d) P^{\top}$ (a small $L \times L$
+   symmetric solve, cuSOLVER-free `sym_eig_jacobi`);
+2. each eigendirection $l_m = (P^{\top} C)_m$ is an independent 1-df
+   contrast with variance $d_m$ and a per-direction Satterthwaite
+   $\nu_m = 2 d_m^2 / (g_m^{\top} \operatorname{Cov}(\theta)\, g_m)$,
+   $g_{m,k} = w_m^{\top} M_k w_m$,
+   $w_m = \operatorname{Cov}(\beta)\, l_m$ (the same $M_k$ /
+   $\operatorname{Cov}(\theta)$ the fit formed, `result.grad_m` /
+   `result.theta_cov`);
+3. combine by the E-method:
+   $E = \sum_m \nu_m / (\nu_m - 2)$ over $\nu_m > 2$, and
+   $\mathrm{df}_2 = 2 E / (E - L)$.
+
+For $L = 1$ this collapses **exactly** to [`lme_t_contrast`](../nitrix-stats-lme-reml/lme_t_contrast.qmd)
+($F = t^2$, `df2` the t-Satterthwaite df, same p-value).  The
+F-statistic is differentiable; the denominator df is not (the iterative
+eigensolver feeds it under `stop_gradient` -- a model-selection-style
+scalar).
+
+`dof='kr'` instead applies the **Kenward-Roger** small-sample correction:
+the adjusted covariance $\Phi_A$ and the moment-matched
+scaled-$F$, referred to $F(L, m)$.  It rebuilds the rotated
+basis, so re-pass the original design as `X=` / `Z=` (the compressed
+[`REMLResult`](../nitrix-stats-lme-reml/REMLResult.qmd) does not retain it); $F = t^2$ consistency with
+`lme_t_contrast(dof='kr')` holds for $L = 1$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:lme_f_contrast -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `result` | `'Union[REMLResult, LMEResult]'` | — | — | A [`REMLResult`](../nitrix-stats-lme-reml/REMLResult.qmd) ([`reml_fit`](../nitrix-stats-lme-reml/reml_fit.qmd), the scalar-intercept tier) **or** an [`LMEResult`](../nitrix-stats-lme-reml/LMEResult.qmd) ([`lme_fit`](../nitrix-stats-lme-reml/lme_fit.qmd) with a random slope) -- both carry the `fixed_cov` / `theta_cov` / `grad_m` inference fields. `dof='kr'` accepts only a [`REMLResult`](../nitrix-stats-lme-reml/REMLResult.qmd). |
+| `contrast` | `Float` | `L` × `p` | — | `(L, p)` contrast matrix (or a `(p,)` single-row contrast). |
+| `dof` | `ContrastDof` | — | `'satterthwaite'` | `'satterthwaite'` (default) or `'kr'` (Kenward-Roger; pass `X` / `Z`). |
+| `X` | `Optional[Float[Array, 'N p']]` | — | `None` | The original fixed `(N, p)` / random `(N, q)` design -- required for `dof='kr'`. |
+| `Z` | `Optional[Float[Array, 'N q']]` | — | `None` | The original fixed `(N, p)` / random `(N, q)` design -- required for `dof='kr'`. |
+
+**Returns** `LMEFContrast`. The per-voxel F-contrast record [`LMEFContrast`](../nitrix-stats-lme-reml/LMEFContrast.qmd) `(f, df1, df2, p_value)`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:lme_f_contrast -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `L` | *(undocumented — add to `_dimensions.yml`)* |
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

@@ -1,37 +1,49 @@
 ---
 title: "nitrix.stats.gaussian"
 generated: true
-signature-hash: acd0692a924f97e5
+signature-hash: 5d07409157d10136
+description: "Closed-form diagonal-Gaussian quantities."
+listing:
+  id: nitrix-stats-gaussian-symbols
+  contents: "nitrix-stats-gaussian/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
-Auto-generated scaffold for `nitrix.stats.gaussian` (signatures only). Replace the
-skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
-`check_reference_staleness.py` flags this page if the underlying
-signatures drift from this stub.
+Auto-generated scaffold for `nitrix.stats.gaussian`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
 
-## `kl_diagonal_gaussian` {#kl_diagonal_gaussian}
+<!-- nitrix:gen overview:__module__ -->
+Closed-form diagonal-Gaussian quantities.
 
-```python
-kl_diagonal_gaussian(mean: Float[Array, '...'], log_var: Float[Array, '...'], *, axis: Optional[_AxisArg]=None, reduction: Reduction='sum') -> Float[Array, '...']
-```
+- [`kl_diagonal_gaussian`](nitrix-stats-gaussian/kl_diagonal_gaussian.qmd) -- KL divergence of a diagonal Gaussian
+  $\mathcal{N}(\mu, \operatorname{diag} e^{\ell})$ from the
+  standard normal $\mathcal{N}(0, I)$, in closed form.
+- [`gaussian_nll`](nitrix-stats-gaussian/gaussian_nll.qmd) -- negative log-likelihood of observations under a
+  diagonal Gaussian.
 
-KL divergence of ``N(mean, diag exp(log_var))`` from ``N(0, I)``.
+Both are parameterised by the log-variance `log_var` (the log of the
+variance) rather than the variance or standard deviation: this keeps the
+variance positive without a clamp and turns the $1 / \sigma^2$ and
+$\log \sigma^2$ terms into a numerically benign
+$e^{-\ell}$ / $\ell$, where $\ell$ denotes the
+log-variance.
+<!-- nitrix:/gen -->
 
-**Parameters** — *TODO: document each parameter.*
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
 
-**Returns** — *TODO.*
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->
 
-## `gaussian_nll` {#gaussian_nll}
+## Symbols
 
-```python
-gaussian_nll(x: Float[Array, '...'], mean: Float[Array, '...'], log_var: Float[Array, '...'], *, axis: Optional[_AxisArg]=None, reduction: Reduction='mean') -> Float[Array, '...']
-```
-
-Negative log-likelihood of ``x`` under ``N(mean, exp(log_var))``.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
+::: {#nitrix-stats-gaussian-symbols}
+:::

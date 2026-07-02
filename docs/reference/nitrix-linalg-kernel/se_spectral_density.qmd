@@ -1,0 +1,47 @@
+---
+title: "se_spectral_density"
+generated: true
+description: "Squared-exponential (RBF) spectral density in `dim` dimensions."
+---
+
+[‹ back to `nitrix.linalg.kernel`](../nitrix-linalg-kernel.qmd)
+
+<!-- nitrix:gen sig:se_spectral_density -->
+```python
+se_spectral_density(omega: Float[Array, '...'], *, rho: Union[float, Float[Array, '']], amplitude: float = 1.0, dim: int = 1) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:se_spectral_density -->
+Squared-exponential (RBF) spectral density in `dim` dimensions.
+
+Evaluates the power spectral density
+$S(w) = a^2 (2\pi)^{D/2} \rho^{D} \exp(-\rho^2 \|w\|^2 / 2)$
+(with amplitude $a$ and input dimension $D$) -- the
+$D$-dimensional Fourier transform of
+$k(r) = a^2 \exp(-r^2 / (2 \rho^2))$, i.e. scikit-learn's
+`RBF(length_scale=rho)` scaled by $a^2$.  At `dim=1` this
+reduces to $a^2 \sqrt{2\pi}\, \rho \exp(-\rho^2 w^2 / 2)$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:se_spectral_density -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `omega` | `Float` | `...` | — | Frequency magnitude $\\|w\\|$, of arbitrary shape. Integer inputs are promoted to the default float dtype before the density is formed (an integer `omega` would otherwise truncate `rho` to zero). |
+| `rho` | `Union[float, Float[Array, '']]` | — | — | Length scale $\rho$ (scalar or scalar array). |
+| `amplitude` | `float` | — | `1.0` | Kernel amplitude $a$; the density scales as $a^2$. |
+| `dim` | `int` | — | `1` | Input dimension $D$ (`1` for the one-dimensional case). |
+
+**Returns** `Float` — shape `...`. Spectral density evaluated elementwise at `omega`, matching its (float-promoted) shape and dtype.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:se_spectral_density -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

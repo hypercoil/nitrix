@@ -1,0 +1,20 @@
+---
+title: "POISSON"
+generated: true
+description: "The Poisson family: log link, variance :math:` mu` -- log-linear counts."
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+*Re-exported here; defined in `nitrix.stats._family`.*
+
+<!-- nitrix:gen sig:POISSON -->
+```python
+POISSON = Family(name='poisson', has_fixed_dispersion=True, link=(lambda mu: jnp.log(jnp.clip(mu, _EPS, None))), linkinv=_safe_exp, mu_eta=_safe_exp, variance=_identity, unit_deviance=_poisson_deviance, init_mu=(lambda y: y + 0.1), loglik=_poisson_loglik, eta_bound=_ETA_MAX)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:POISSON -->
+The Poisson family: log link, variance $\mu$ -- log-linear counts.
+<!-- nitrix:/gen -->
+

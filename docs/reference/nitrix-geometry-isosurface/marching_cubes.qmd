@@ -1,0 +1,37 @@
+---
+title: "marching_cubes"
+generated: true
+description: "Extract the `level` isosurface of a scalar volume as a triangle mesh."
+---
+
+[‹ back to `nitrix.geometry.isosurface`](../nitrix-geometry-isosurface.qmd)
+
+<!-- nitrix:gen sig:marching_cubes -->
+```python
+marching_cubes(volume: NDArray[Any], *, level: float = 0.0, spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0)) -> Mesh
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:marching_cubes -->
+Extract the `level` isosurface of a scalar volume as a triangle mesh.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:marching_cubes -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `volume` | `NDArray[Any]` | — | — | Scalar field, shape `(X, Y, Z)`. For a signed-distance field pass the default `level=0` (negative inside). |
+| `level` | `float` | — | `0.0` | Isovalue. A grid corner is "inside" when `volume < level`. |
+| `spacing` | `Tuple[float, float, float]` | — | `(1.0, 1.0, 1.0)` | Per-axis voxel size; vertex coordinates are in physical units (`index * spacing`). |
+
+**Returns** `Mesh`. A watertight, manifold `Mesh` with outward-oriented faces (normals pointing toward increasing scalar value). Empty (0 vertices, 0 faces) if the level set does not intersect the volume.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:marching_cubes -->
+::: {.callout-note}
+Host-side NumPy construction (data-dependent size); not differentiable.
+Marching-tetrahedra engine (see module docstring).
+:::
+<!-- nitrix:/gen -->
+

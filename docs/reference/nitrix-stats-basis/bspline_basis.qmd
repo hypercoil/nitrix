@@ -1,0 +1,41 @@
+---
+title: "bspline_basis"
+generated: true
+description: "Build a P-spline smooth basis for covariate `x`."
+---
+
+[‹ back to `nitrix.stats.basis`](../nitrix-stats-basis.qmd)
+
+<!-- nitrix:gen sig:bspline_basis -->
+```python
+bspline_basis(x: Float[Array, ' n'], n_basis: int = 10, *, degree: int = 3, penalty_order: int = 2, bounds: Optional[Tuple[float, float]] = None, center: bool = True) -> SplineBasis
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:bspline_basis -->
+Build a P-spline smooth basis for covariate `x`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:bspline_basis -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Float` | `n` | — | `(n,)` covariate values. |
+| `n_basis` | `int` | — | `10` | Number of B-spline basis functions `k` (`mgcv`'s `k`; default `10`). |
+| `degree` | `int` | — | `3` | B-spline degree (default `3`, cubic). |
+| `penalty_order` | `int` | — | `2` | Order of the difference penalty (default `2` -- penalise curvature, the standard P-spline). |
+| `bounds` | `Optional[Tuple[float, float]]` | — | `None` | `(lo, hi)` knot range. Defaults to a small margin around the data range so the boundary knots are not exactly at the extreme points. |
+| `center` | `bool` | — | `True` | Apply the sum-to-zero identifiability constraint (default `True`); the returned basis then has `k - 1` columns. |
+
+**Returns** `SplineBasis`. The [`SplineBasis`](../nitrix-stats-basis/SplineBasis.qmd) holding the design, penalty, and re-evaluation parameters (`kind='bspline'`).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:bspline_basis -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

@@ -1,191 +1,154 @@
 ---
 title: "nitrix.stats.lme.reml"
 generated: true
-signature-hash: 4b527e8109ea873a
+signature-hash: 2fa9be29438b703b
+description: "Variance-components REML for voxelwise linear mixed-effects models."
+listing:
+  id: nitrix-stats-lme-reml-symbols
+  contents: "nitrix-stats-lme-reml/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
-Auto-generated scaffold for `nitrix.stats.lme.reml` (signatures only). Replace the
-skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
-`check_reference_staleness.py` flags this page if the underlying
-signatures drift from this stub.
+Auto-generated scaffold for `nitrix.stats.lme.reml`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
 
-## `REMLResult` {#REMLResult}
-
-*decorated:* `@register_result(children=('theta_hat', 'beta_hat', 'log_lik', 'fixed_cov', 'theta_cov', 'grad_m'))`, `@dataclass(frozen=True)`
-
-```python
-class REMLResult
-```
-
-Per-voxel REML fit output.
-
-*TODO: class overview.*
-
-
-### Methods
-
-```python
-sigma_b_sq(self) -> Float[Array, 'V']
-```
-
-```python
-sigma_e_sq(self) -> Float[Array, 'V']
-```
-
-```python
-cov_re(self) -> Float[Array, 'V 1 1']
-```
-
-Random-effect covariance as the uniform ``(V, k, k)`` block (D2): the
-
-```python
-re_labels(self) -> Tuple[str, ...]
-```
-
-Names of the ``k`` random-effect dimensions of :attr:`cov_re`.
-
-## `LMEResult` {#LMEResult}
-
-*decorated:* `@register_result(children=('beta_hat', 'cov_re', 'sigma_e_sq', 'log_lik', 'fixed_cov', 'theta_cov', 'grad_m'), aux=('tier',))`, `@dataclass(frozen=True)`
-
-```python
-class LMEResult
-```
-
-Block-Woodbury (R2) mixed-model fit output -- one correlated / diagonal
-
-*TODO: class overview.*
-
-
-### Methods
-
-```python
-re_labels(self) -> Tuple[str, ...]
-```
-
-Names of the ``r`` within-factor random-effect dimensions of
-
-## `NestedLMEResult` {#NestedLMEResult}
-
-*decorated:* `@register_result(children=('beta_hat', 'var_outer', 'var_inner', 'sigma_e_sq', 'log_lik'), aux=('tier',))`, `@dataclass(frozen=True)`
-
-```python
-class NestedLMEResult
-```
-
-Nested two-level mixed-model fit output (the ``lme_fit`` R3 path).
-
-*TODO: class overview.*
-
-
-### Methods
-
-```python
-cov_re(self) -> Float[Array, 'V 2 2']
-```
-
-Random-effect covariance as the uniform ``(V, k, k)`` block (D2): the
-
-```python
-re_labels(self) -> Tuple[str, ...]
-```
-
-Names of the ``k`` random-effect dimensions of :attr:`cov_re`.
-
-## `CrossedLMEResult` {#CrossedLMEResult}
-
-*decorated:* `@register_result(children=('beta_hat', 'var_group', 'var_cross', 'sigma_e_sq', 'log_lik'), aux=('tier',))`, `@dataclass(frozen=True)`
-
-```python
-class CrossedLMEResult
-```
-
-Crossed two-factor mixed-model fit output (the ``lme_fit`` R4 path).
-
-*TODO: class overview.*
-
-
-### Methods
-
-```python
-cov_re(self) -> Float[Array, 'V 2 2']
-```
-
-Random-effect covariance as the uniform ``(V, k, k)`` block (D2): the
-
-```python
-re_labels(self) -> Tuple[str, ...]
-```
-
-Names of the ``k`` random-effect dimensions of :attr:`cov_re`.
-
-## `LMEContrast` {#LMEContrast}
-
-```python
-class LMEContrast
-```
-
-Per-voxel mixed-model t-contrast result.
-
-*TODO: class overview.*
-
-## `LMEFContrast` {#LMEFContrast}
-
-```python
-class LMEFContrast
-```
-
-Per-voxel mixed-model F-contrast result.
-
-*TODO: class overview.*
-
-## `reml_fit` {#reml_fit}
-
-```python
-reml_fit(Y: Float[Array, 'V N'], X: Float[Array, 'N p'], Z: Float[Array, 'N q'], *, theta_init: Optional[Float[Array, 'V 2']]=None, n_iter: int=20, damping: float=1e-06, block: Optional[int]=None, low_rank: Optional[bool]=None) -> REMLResult
-```
-
-Voxelwise variance-components REML fit.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `lme_fit` {#lme_fit}
-
-```python
-lme_fit(Y: Float[Array, 'V N'], X: Float[Array, 'N p'], *, group: Int[Array, 'N'], z: Optional[Float[Array, 'N r']]=None, inner: Optional[Int[Array, 'N']]=None, cross: Optional[Int[Array, 'N']]=None, corr: Optional[Union[str, CorrSpec]]=None, time: Optional[Float[Array, 'N']]=None, structure: Structure='unstructured', n_iter: int=20, damping: float=1e-06, block: Optional[int]=None, low_rank: Optional[bool]=None) -> Union[REMLResult, LMEResult, NestedLMEResult, CorrLMEResult, CrossedLMEResult]
-```
-
-Voxelwise mixed model, dispatched to the cheapest exact solver.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `lme_t_contrast` {#lme_t_contrast}
-
-```python
-lme_t_contrast(result: 'Union[REMLResult, LMEResult]', contrast: Float[Array, 'p'], *, dof: ContrastDof='satterthwaite', X: Optional[Float[Array, 'N p']]=None, Z: Optional[Float[Array, 'N q']]=None) -> LMEContrast
-```
-
-Per-voxel t-test of a mixed-model fixed-effect contrast ``c^T beta = 0``.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `lme_f_contrast` {#lme_f_contrast}
-
-```python
-lme_f_contrast(result: 'Union[REMLResult, LMEResult]', contrast: Float[Array, 'L p'], *, dof: ContrastDof='satterthwaite', X: Optional[Float[Array, 'N p']]=None, Z: Optional[Float[Array, 'N q']]=None) -> LMEFContrast
-```
-
-Per-voxel F-test of a multi-row mixed-model contrast ``C beta = 0``.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
+<!-- nitrix:gen overview:__module__ -->
+Variance-components REML for voxelwise linear mixed-effects models.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### The model
+
+For each voxel $v$, the linear mixed-effects model is
+
+``
+y_v = X beta_v + Z b_v + eps_v
+``
+
+with $b_v \sim \mathcal{N}(0, \sigma_b^2 I_q)$,
+$\epsilon_v \sim \mathcal{N}(0, \sigma_e^2 I_N)$, so the marginal
+covariance of the response is
+$V = \sigma_b^2 Z Z^{\top} + \sigma_e^2 I_N$.
+
+The fixed-effect design `X` and random-effect design `Z` are
+**shared** across voxels (the typical fMRI / dMRI case: one
+group-level design, applied to every voxel's response).  Only the
+per-voxel response $y_v$ varies.
+
+The profile REML (Restricted Maximum Likelihood) negative log-
+likelihood, after profiling out $\beta$, is
+
+$$
+\mathrm{nll}(\theta) = \tfrac{1}{2}
+    \bigl[\log|V| + \log|X^{\top} V^{-1} X|
+    + r^{\top} V^{-1} r\bigr]
+$$
+
+where $r = y - X \hat{\beta}$ and
+$\hat{\beta} = (X^{\top} V^{-1} X)^{-1} X^{\top} V^{-1} y$.  The
+variance components are parameterised as $\theta = \log(\sigma^2)$
+(log-space) so optimisation is unconstrained.
+
+### The fast lmm spectral trick
+
+Following Lippert et al. (2011), eigendecompose
+$Z Z^{\top} = U \Lambda U^{\top}$.  In the rotated basis
+$y_{\mathrm{rot}} = U^{\top} y$,
+$X_{\mathrm{rot}} = U^{\top} X$, the total covariance is diagonal:
+
+$$
+V_{\mathrm{rot}} = \sigma_b^2 \Lambda + \sigma_e^2 I
+    = \operatorname{diag}(d), \qquad
+d_i = \sigma_b^2 \lambda_i + \sigma_e^2 .
+$$
+
+Every operation in the Newton iteration becomes elementwise on
+$d$: $\log|V| = \sum_i \log d_i$; $V^{-1}$ is
+$\operatorname{diag}(1/d)$;
+$X^{\top} V^{-1} X = \sum_i x_i x_i^{\top} / d_i$.  Per-iteration
+cost drops from $O(N^3)$ (naive) to $O(N p^2 + N)$ (rotated).
+
+The eigendecomposition of $Z Z^{\top}$ is computed **once** at the
+outer call -- shared across all voxels via a vmap closure.
+
+### Memory regime
+
+For `V` voxels, `N` subjects, `p` fixed-effect coefficients:
+
+- Shared (computed once):
+  - `U`, $\Lambda$: `(N, N)` + `(N,)`  --  $\sim 4 N^2$
+    bytes.
+  - `X_rot`: `(N, p)`.
+- Per-voxel (vmap):
+  - `y_rot`: `(N,)`.
+  - `XtVinvX`: `(p, p)`.  Tiny.
+  - `beta`: `(p,)`.
+- Per-Newton-step intermediates: `(N,)` arrays.
+
+Total HBM at `V = 100k`, `N = 30`, `p = 5`:
+
+- `Y`: `100k * 30 * 4 = 12 MB`.
+- Per-voxel results: `100k * (2 + 5 + 1) * 4 = ~3 MB`.
+- Newton-step intermediates (vmapped): `100k * 30 * 4 = 12 MB` peak.
+
+Total ~30 MB.  Fits trivially.  At `V = 1M`, `N = 100`,
+`p = 10`: `~500 MB` -- still comfortable on a 24 GB GPU.
+
+### Solver
+
+The per-voxel inner loop is the shared `_varcomp` AI-REML engine:
+size-dispatched fixed-effect algebra (closed-form for $p \le 2$,
+`LU` for $p > 2$ -- no per-voxel cuSOLVER `potrf` / `syevd`)
+and *analytic* REML score + average-information curvature (no
+second-order autodiff through a Cholesky).  See `_varcomp` for
+the derivation.  The $Z Z^{\top}$ eigendecomposition that supplies
+the diagonalising basis is the one shared, one-off `safe_eigh` call.
+
+### Differentiability
+
+Implementation uses `jax.lax.scan` over a fixed number of
+Newton steps; each step is fully differentiable, so backward-
+mode AD through the fit works (unrolled gradient through the
+scan).  At `n_iter = 20` the unrolled grad has ~20 stacked
+sub-graphs -- a real memory cost.  For applications that
+differentiate through the fit (e.g., differentiable model
+selection), pass a smaller `n_iter` or wait for the implicit-
+function-theorem VJP follow-up.
+
+### References
+
+- Lindstrom, M. J., & Bates, D. M. (1988). Newton-Raphson and
+  EM algorithms for linear mixed-effects models for repeated-measures
+  data.  Journal of the American Statistical Association, 83(404),
+  1014-1022.  https://doi.org/10.1080/01621459.1988.10478693
+- Lippert, C., Listgarten, J., Liu, Y., Kadie, C. M., Davidson, R. I.,
+  & Heckerman, D. (2011). FaST linear mixed models for genome-wide
+  association studies.  Nature Methods, 8(10), 833-835.
+  https://doi.org/10.1038/nmeth.1681
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `2` | *(undocumented — add to `_dimensions.yml`)* |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `r` | *(undocumented — add to `_dimensions.yml`)* |
+| `nt` | *(undocumented — add to `_dimensions.yml`)* |
+| `N` | observations — time points, subjects, or sampled points |
+| `q` | random-effect columns |
+| `L` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-stats-lme-reml-symbols}
+:::

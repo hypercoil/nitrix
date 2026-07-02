@@ -1,76 +1,95 @@
 # -*- coding: utf-8 -*-
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
-"""
+r"""
 Mass-univariate Gaussian-process regression with lengthscale estimation.
 
-``gp_fit`` fits, per element (voxel / vertex / fixel), a Gaussian-process
-smooth of a single covariate ``x`` with its kernel **lengthscale ``rho``
-estimated by REML** -- the piece the fixed-``rho`` :func:`~nitrix.stats.basis.hsgp_basis`
-(which rides ``gam_fit`` unchanged) leaves open::
+:func:`gp_fit` fits, per element (voxel / vertex / fixel), a Gaussian-process
+smooth of a single covariate ``x`` with its kernel lengthscale :math:`\rho`
+estimated by REML -- the piece the fixed-:math:`\rho`
+:func:`~nitrix.stats.basis.hsgp_basis` (which rides :func:`~nitrix.stats.gam.gam_fit`
+unchanged) leaves open:
 
-    y_v = T alpha_v + f_v(x) + e_v,   f_v ~ GP(0, sigma_f^2 K_rho),
-    e_v ~ N(0, sigma_e^2)
+.. math::
 
-The engine is the Hilbert-space approximation (HSGP; Solin-Sarkka 2020,
-Riutort-Mayol/Burkner 2023): ``f`` is expanded in a **fixed** Laplace-Dirichlet
-eigenbasis ``Phi = [phi_j(x)]`` on the bounded domain ``[c - L, c + L]``, and the
-kernel enters *only* through the spectral-density weights
-``s_j(rho) = S_rho(sqrt(lambda_j))`` (:func:`~nitrix.linalg.kernel.spectral_density`).
-This is what makes lengthscale estimation tractable: because ``Phi`` does **not**
-depend on ``rho``, the GP is a penalised regression with a fixed design and a
-**diagonal, ``rho``-dependent penalty** ``S(rho) = diag(1 / s_j(rho))`` -- the
-REML criterion is smooth in ``rho`` with **no eigendecomposition in the loop**
-(contrast the kriging :func:`~nitrix.stats.basis.gp_basis`, whose eigenbasis
-moves with ``rho``).
+    y_v = T \alpha_v + f_v(x) + e_v, \quad
+    f_v \sim \mathcal{GP}(0, \sigma_f^2 K_\rho), \quad
+    e_v \sim \mathcal{N}(0, \sigma_e^2).
+
+The engine is the Hilbert-space approximation (HSGP; Solin & Sarkka 2020,
+Riutort-Mayol et al. 2023): :math:`f` is expanded in a fixed Laplace-Dirichlet
+eigenbasis :math:`\Phi = [\phi_j(x)]` on the bounded domain :math:`[c - L, c + L]`,
+and the kernel enters only through the spectral-density weights
+:math:`s_j(\rho) = S_\rho(\sqrt{\lambda_j})`
+(:func:`~nitrix.linalg.kernel.spectral_density`).  This is what makes lengthscale
+estimation tractable: because :math:`\Phi` does not depend on :math:`\rho`, the GP
+is a penalised regression with a fixed design and a diagonal, :math:`\rho`-dependent
+penalty :math:`S(\rho) = \operatorname{diag}(1 / s_j(\rho))` -- the REML criterion
+is smooth in :math:`\rho` with no eigendecomposition in the loop (contrast the
+kriging :func:`~nitrix.stats.basis.gp_basis`, whose eigenbasis moves with
+:math:`\rho`).
 
 Two profiled parameters, one shared search
 ------------------------------------------
 
-For a candidate ``rho`` the model is a Gaussian penalised regression with the
-single smoothing parameter ``lambda = sigma_e^2 / sigma_f^2`` (the GAM identity:
-the Fellner-Schall smoothing parameter *is* the inverse GP amplitude).  So:
+For a candidate :math:`\rho` the model is a Gaussian penalised regression with the
+single smoothing parameter :math:`\lambda = \sigma_e^2 / \sigma_f^2` (the GAM
+identity: the Fellner-Schall smoothing parameter *is* the inverse GP amplitude).
+So:
 
-- **Inner** (fixed ``rho``): the generalized Fellner-Schall step (Wood & Fasiolo
-  2017) selects ``lambda`` -- exactly the ``gam_fit`` machinery, here with one
-  diagonal penalty ``diag(1 / s(rho))`` on the smooth block.
-- **Outer** (select ``rho``): a 1-D search over ``log rho`` of the **pooled REML
-  marginal likelihood** ``sum_v V_r(rho, lambda_v)``, on a fixed log-spaced grid
-  with a parabolic refinement.  ``rho`` is **shared across elements** (one
-  eigenbasis, one smoothness), while the amplitude ``sigma_f^2`` and noise
-  ``sigma_e^2`` are **per element** -- the natural mass-univariate factoring.
+- **Inner** (fixed :math:`\rho`): the generalized Fellner-Schall step (Wood &
+  Fasiolo 2017) selects :math:`\lambda` -- exactly the
+  :func:`~nitrix.stats.gam.gam_fit` machinery, here with one diagonal penalty
+  :math:`\operatorname{diag}(1 / s(\rho))` on the smooth block.
+- **Outer** (select :math:`\rho`): a 1-D search over :math:`\log \rho` of the
+  pooled REML marginal likelihood :math:`\sum_v V_r(\rho, \lambda_v)`, on a fixed
+  log-spaced grid with a parabolic refinement.  :math:`\rho` is shared across
+  elements (one eigenbasis, one smoothness), while the amplitude
+  :math:`\sigma_f^2` and noise :math:`\sigma_e^2` are per element -- the natural
+  mass-univariate factoring.
 
-Every solve is cuSOLVER-free (``linalg._smalllinalg``) and ``jit`` / ``vmap``
-clean; the only ``N``-sized objects are the one-off cross-products ``X^T Y`` and
-``diag(Y Y^T)``, so peak memory is ``O(V (m + q)^2)`` -- no per-element ``(N, N)``
-GP covariance is ever materialised.
+Every solve is cuSOLVER-free and ``jit`` / ``vmap`` clean; the only ``N``-sized
+objects are the one-off cross-products :math:`X^{\top} Y` and
+:math:`\operatorname{diag}(Y Y^{\top})`, so peak memory is
+:math:`O(V (m + q)^2)` -- no per-element ``(N, N)`` GP covariance is ever
+materialised.
 
 REML criterion
 --------------
 
-With the scale ``sigma_e^2`` profiled out, the per-element restricted negative
-log-likelihood (up to an additive constant in ``n`` and ``M_0`` only -- the same
-for every ``rho`` and every competing GP model on a given ``y``) is
+With the scale :math:`\sigma_e^2` profiled out, the per-element restricted
+negative log-likelihood (up to an additive constant in :math:`n` and :math:`M_0`
+only -- the same for every :math:`\rho` and every competing GP model on a given
+:math:`y`) is
 
-    -2 l_R = (n - M_0) log(D_p) + log|H| - log|S_lambda|_+,
+.. math::
 
-with ``H = X^T X + S_lambda`` the penalised Hessian, ``D_p = y^T y - beta^T X^T y``
-the penalised residual sum of squares, ``S_lambda = lambda diag(0, 1/s(rho))``,
-``log|S_lambda|_+ = m log lambda - sum_j log s_j(rho)`` its log-pseudo-determinant,
-and ``M_0`` the number of unpenalised (fixed-effect) columns.  ``GPResult.log_mlik``
-reports ``l_R`` (so larger is better; the dropped constant cancels in any
-model comparison on the same data).
+    -2 l_R = (n - M_0) \log(D_p) + \log|H| - \log|S_\lambda|_+,
+
+with :math:`H = X^{\top} X + S_\lambda` the penalised Hessian,
+:math:`D_p = y^{\top} y - \beta^{\top} X^{\top} y` the penalised residual sum of
+squares, :math:`S_\lambda = \lambda \operatorname{diag}(0, 1/s(\rho))`,
+:math:`\log|S_\lambda|_+ = m \log \lambda - \sum_j \log s_j(\rho)` its
+log-pseudo-determinant, and :math:`M_0` the number of unpenalised (fixed-effect)
+columns.  :attr:`GPResult.log_mlik` reports :math:`l_R` (so larger is better; the
+dropped constant cancels in any model comparison on the same data).
 
 References
 ----------
 - Solin, A. & Sarkka, S. (2020). Hilbert space methods for reduced-rank Gaussian
   process regression.  Statistics and Computing 30, 419-446.
-- Riutort-Mayol, G. et al. (2023). Practical Hilbert space approximate Bayesian
-  Gaussian processes for probabilistic programming.  Stat. Comput. 33, 17.
+  :doi:`10.1007/s11222-019-09886-w`
+- Riutort-Mayol, G., Burkner, P.-C., Andersen, M. R., Solin, A. & Vehtari, A.
+  (2023). Practical Hilbert space approximate Bayesian Gaussian processes for
+  probabilistic programming.  Statistics and Computing 33, 17.
+  :doi:`10.1007/s11222-022-10167-2`
 - Wood, S. N. & Fasiolo, M. (2017). A generalized Fellner-Schall method for
   smoothing parameter optimization.  Biometrics 73, 1071-1081.
-- Wood, S. N. (2011). Fast stable restricted maximum likelihood ... J. R.
-  Statist. Soc. B 73, 3-36.
+  :doi:`10.1111/biom.12666`
+- Wood, S. N. (2011). Fast stable restricted maximum likelihood and marginal
+  likelihood estimation of semiparametric generalized linear models.  Journal of
+  the Royal Statistical Society, Series B 73, 3-36.
+  :doi:`10.1111/j.1467-9868.2010.00749.x`
 """
 
 from __future__ import annotations
@@ -150,7 +169,7 @@ __all__ = [
 )
 @dataclass(frozen=True)
 class GPResult:
-    """Per-element Gaussian-process fit output (``gp_fit``).
+    r"""Per-element Gaussian-process fit output (from :func:`gp_fit`).
 
     Some fields are engine- or mode-conditional: ``lo`` / ``hi`` / ``boundary``
     drive ``engine='hsgp'`` re-evaluation only; ``nd_meta`` is set only for a
@@ -163,25 +182,27 @@ class GPResult:
     coef
         ``(V, p)`` coefficients over ``[fixed | smooth]`` (``p = n_fixed + rank``):
         the unpenalised fixed effects (intercept then any ``parametric`` columns)
-        followed by the ``rank`` smooth-basis coefficients ``gamma`` (HSGP
-        eigenfunctions, or kernel eigenfeatures ``U Lambda^{1/2}`` for
+        followed by the ``rank`` smooth-basis coefficients :math:`\gamma` (HSGP
+        eigenfunctions, or kernel eigenfeatures :math:`U \Lambda^{1/2}` for
         ``engine='exact'``).
     cov_unscaled
-        ``(V, p, p)`` Bayesian covariance ``(X^T X + S_lambda)^{-1}``; multiply by
-        ``dispersion`` for the scaled posterior covariance.
+        ``(V, p, p)`` Bayesian covariance :math:`(X^{\top} X + S_\lambda)^{-1}`;
+        multiply by ``dispersion`` for the scaled posterior covariance.
     theta
-        ``(V, 3)`` per-element hyperparameters ``[log sigma_f^2, log sigma_e^2,
-        log rho]``.  The lengthscale ``rho`` is shared, so its column is constant
-        across elements.
+        ``(V, 3)`` per-element hyperparameters
+        :math:`[\log \sigma_f^2, \log \sigma_e^2, \log \rho]`.  The lengthscale
+        :math:`\rho` is shared, so its column is constant across elements.
     log_mlik
-        ``(V,)`` REML log marginal likelihood at the selected ``(rho, lambda_v)``
-        (up to an additive constant in ``n`` / ``n_fixed`` only).
+        ``(V,)`` REML log marginal likelihood at the selected
+        :math:`(\rho, \lambda_v)` (up to an additive constant in ``n`` /
+        ``n_fixed`` only).
     edf
-        ``(V,)`` total effective degrees of freedom ``tr((X^T X + S_lambda)^{-1}
-        X^T X)`` (fixed effects plus the smooth).
+        ``(V,)`` total effective degrees of freedom
+        :math:`\operatorname{tr}((X^{\top} X + S_\lambda)^{-1} X^{\top} X)` (fixed
+        effects plus the smooth).
     dispersion
-        ``(V,)`` residual-scale estimate ``sigma_e^2`` (the residual is
-        ``sigma_e^2 R(corr_rho)`` when a ``corr`` structure is fitted).
+        ``(V,)`` residual-scale estimate :math:`\sigma_e^2` (the residual is
+        :math:`\sigma_e^2 R(\rho_c)` when a ``corr`` structure is fitted).
     corr_rho
         ``(V,)`` natural residual-correlation parameter of the ``corr`` structure
         (lag-1 AR / decay / exchangeable correlation); ``0`` when ``corr='iid'``.
@@ -201,23 +222,25 @@ class GPResult:
         Smooth-basis rank ``m`` (HSGP eigenfunctions, or retained kernel
         eigenfeatures for ``engine='exact'``).
     n_fixed
-        Number of unpenalised fixed-effect columns ``M_0`` (intercept + parametric).
+        Number of unpenalised fixed-effect columns :math:`M_0`
+        (intercept + parametric).
     lo, hi, boundary
         Domain descriptors recorded for ``engine='hsgp'`` re-evaluation: the data
-        range ``[lo, hi]`` and the boundary factor ``L = boundary * (hi - lo) / 2``
+        range ``[lo, hi]`` and the boundary factor
+        :math:`L = \mathrm{boundary} \cdot (\mathrm{hi} - \mathrm{lo}) / 2`
         (unused by ``engine='exact'``, which rebuilds the kernel from ``x_train``).
     nd_meta
         ``None`` for a 1-D fit; for a multi-dimensional fit (``X`` is ``(N, D)``)
         a hashable tuple ``(m_per, bounds, ard_rho)`` -- the per-axis ranks, the
         per-axis ``(lo, hi)``, and (for ARD) the per-axis lengthscales -- used to
-        rebuild the tensor-product eigenbasis in :func:`gp_predict`.  ``theta[:, 2]``
-        then carries ``log rho`` (the shared isotropic lengthscale, or the
-        geometric mean of the ARD lengthscales).
+        rebuild the tensor-product eigenbasis in :func:`gp_predict`.
+        ``theta[:, 2]`` then carries :math:`\log \rho` (the shared isotropic
+        lengthscale, or the geometric mean of the ARD lengthscales).
     family
         Response family name: ``'gaussian'`` (default; exact REML), or
         ``'binomial'`` / ``'poisson'`` for a non-Gaussian GP whose lengthscale is
-        estimated by PQL-REML (``theta``'s ``log sigma_e^2`` column is then the
-        quasi-likelihood dispersion, ``1`` nominally for those families, and
+        estimated by PQL-REML (``theta``'s :math:`\log \sigma_e^2` column is then
+        the quasi-likelihood dispersion, ``1`` nominally for those families, and
         ``coef`` is on the *link* scale -- see :func:`gp_predict` ``type=``).
     """
 
@@ -263,10 +286,29 @@ def _normalise_kernel(kernel: str) -> str:
 
 
 def _kernel_gram(r: np.ndarray, kernel: str, rho: float) -> np.ndarray:
-    """Stationary covariance ``k(r)`` on a distance array ``r`` (host numpy),
-    matched to scikit-learn ``Matern(length_scale=rho)`` / ``RBF(length_scale=rho)``
-    -- the same parameterisation as :func:`~nitrix.linalg.kernel.spectral_density`,
-    so the exact engine and the HSGP engine share a lengthscale convention."""
+    r"""Evaluate a stationary covariance :math:`k(r)` on a distance array.
+
+    Computes the kernel on the host (numpy), matched to scikit-learn
+    ``Matern(length_scale=rho)`` / ``RBF(length_scale=rho)`` -- the same
+    parameterisation as :func:`~nitrix.linalg.kernel.spectral_density`, so the
+    exact engine and the HSGP engine share a lengthscale convention.
+
+    Parameters
+    ----------
+    r
+        Distance array (any shape); non-negative separations
+        :math:`|x - x'|`.
+    kernel
+        Kernel name, normalised via :func:`_normalise_kernel`: ``'rbf'`` /
+        ``'matern12'`` / ``'matern32'`` / ``'matern52'`` (aliases accepted).
+    rho
+        Lengthscale :math:`\rho` (floored at ``1e-12``).
+
+    Returns
+    -------
+    numpy.ndarray
+        Covariance :math:`k(r)`, same shape as ``r``.
+    """
     k = _normalise_kernel(kernel)
     rho = max(float(rho), 1e-12)
     if k == 'rbf':
@@ -283,14 +325,38 @@ def _kernel_gram(r: np.ndarray, kernel: str, rho: float) -> np.ndarray:
 def _exact_eigen(
     x_np: np.ndarray, kernel: str, rho: float, rank: int
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Leading ``rank`` Karhunen-Loeve eigenpairs of the kernel Gram ``K_rho`` on
-    ``x`` (host ``eigh`` -- data-independent of ``Y``, hence cuSOLVER-free).
+    r"""Leading Karhunen-Loeve eigenpairs of the kernel Gram matrix.
 
-    Returns ``(U_k, sqrt_lam_k)`` with ``U_k`` ``(N, rank)`` and ``sqrt_lam_k``
-    ``(rank,)``: the training design is ``Phi = U_k diag(sqrt_lam_k)`` (so
-    ``Phi Phi^T`` is the rank-``rank`` truncation of ``K_rho``, exact when
-    ``rank == N``), and the out-of-sample feature map is ``Phi(x*) = K(x*, x)
-    U_k diag(1/sqrt_lam_k)`` (Nystrom)."""
+    Computes the leading ``rank`` eigenpairs of the kernel Gram
+    :math:`K_\rho` on the covariate ``x`` via a host ``numpy.linalg.eigh`` -- the
+    decomposition is independent of the response ``Y``, hence cuSOLVER-free and
+    shared across all elements.
+
+    Parameters
+    ----------
+    x_np
+        ``(N,)`` covariate (host numpy).
+    kernel
+        Stationary kernel name (see :func:`_kernel_gram`).
+    rho
+        Lengthscale :math:`\rho`.
+    rank
+        Number of leading eigenpairs to retain.
+
+    Returns
+    -------
+    U_k : numpy.ndarray
+        ``(N, rank)`` leading eigenvectors :math:`U_k`.
+    sqrt_lam_k : numpy.ndarray
+        ``(rank,)`` square roots of the corresponding eigenvalues (floored at
+        ``1e-12``).  The training design is
+        :math:`\Phi = U_k \operatorname{diag}(\mathrm{sqrt\_lam\_k})` (so
+        :math:`\Phi \Phi^{\top}` is the rank-``rank`` truncation of
+        :math:`K_\rho`, exact when ``rank == N``), and the out-of-sample feature
+        map is
+        :math:`\Phi(x^*) = K(x^*, x)\, U_k \operatorname{diag}(1/\mathrm{sqrt\_lam\_k})`
+        (Nystrom).
+    """
     r = np.abs(x_np[:, None] - x_np[None, :])
     K = _kernel_gram(r, kernel, rho)
     w, U = np.linalg.eigh(0.5 * (K + K.T))
@@ -302,7 +368,30 @@ def _exact_eigen(
 def _exact_features_train(
     x_np: np.ndarray, kernel: str, rho: float, rank: int, dtype: Any
 ) -> Float[Array, 'N rank']:
-    """The exact-engine training design ``Phi = U_k diag(sqrt_lam_k)`` (host)."""
+    r"""Build the exact-engine training design (host).
+
+    Assembles the kernel-eigenfeature design
+    :math:`\Phi = U_k \operatorname{diag}(\mathrm{sqrt\_lam\_k})` from the leading
+    eigenpairs (:func:`_exact_eigen`).
+
+    Parameters
+    ----------
+    x_np
+        ``(N,)`` covariate (host numpy).
+    kernel
+        Stationary kernel name (see :func:`_kernel_gram`).
+    rho
+        Lengthscale :math:`\rho`.
+    rank
+        Number of retained kernel eigenfeatures.
+    dtype
+        Output array dtype.
+
+    Returns
+    -------
+    Float[Array, 'N rank']
+        The training design :math:`\Phi`.
+    """
     U_k, sqrt_lam = _exact_eigen(x_np, kernel, rho, rank)
     return jnp.asarray(U_k * sqrt_lam[None, :], dtype=dtype)
 
@@ -315,8 +404,34 @@ def _exact_features_predict(
     rank: int,
     dtype: Any,
 ) -> Float[Array, 'g rank']:
-    """The exact-engine out-of-sample design ``Phi(x*) = K(x*, x) U_k / sqrt_lam``
-    (Nystrom), consistent with :func:`_exact_features_train`."""
+    r"""Build the exact-engine out-of-sample design (host).
+
+    Assembles the Nystrom feature map
+    :math:`\Phi(x^*) = K(x^*, x)\, U_k / \mathrm{sqrt\_lam}` from the training-grid
+    eigenpairs (:func:`_exact_eigen`), consistent with
+    :func:`_exact_features_train`.
+
+    Parameters
+    ----------
+    x_new_np
+        ``(g,)`` prediction covariate (host numpy).
+    x_train_np
+        ``(N,)`` original training covariate (host numpy); the kernel Gram is
+        rebuilt on this grid.
+    kernel
+        Stationary kernel name (see :func:`_kernel_gram`).
+    rho
+        Lengthscale :math:`\rho`.
+    rank
+        Number of retained kernel eigenfeatures.
+    dtype
+        Output array dtype.
+
+    Returns
+    -------
+    Float[Array, 'g rank']
+        The out-of-sample design :math:`\Phi(x^*)`.
+    """
     U_k, sqrt_lam = _exact_eigen(x_train_np, kernel, rho, rank)
     r = np.abs(x_new_np[:, None] - x_train_np[None, :])
     k_cross = _kernel_gram(r, kernel, rho)  # (g, N)
@@ -345,14 +460,51 @@ def _quantities(
     Float[Array, ''],
     Float[Array, ''],
 ]:
-    """At smoothing parameter ``lambda`` (penalty ``S = lambda diag(d)``), return
-    ``(V, log|H|, beta, edf, rss, D_p)`` from the cross-products ``c = X^T y`` and
-    ``g = y^T y``.
+    r"""Penalised-regression quantities at a fixed smoothing parameter.
 
-    ``H = X^T X + lambda diag(d) + ridge I``; ``V = H^{-1}``; ``beta = V c``;
-    ``edf = tr(V X^T X)``; ``rss = ||y - X beta||^2``; ``D_p = y^T y - beta^T c``
-    is the penalised residual sum of squares (``= rss + beta^T S beta``).  This is
-    the ``K = 1`` case of :func:`nitrix.stats._penreml.mb_quantities`.
+    At smoothing parameter :math:`\lambda` (penalty
+    :math:`S = \lambda \operatorname{diag}(d)`), returns the penalised-regression
+    quantities from the cross-products :math:`c = X^{\top} y` and
+    :math:`g = y^{\top} y`.  Here
+    :math:`H = X^{\top} X + \lambda \operatorname{diag}(d) + \mathrm{ridge}\, I`;
+    :math:`V = H^{-1}`; :math:`\beta = V c`;
+    :math:`\mathrm{edf} = \operatorname{tr}(V X^{\top} X)`;
+    :math:`\mathrm{rss} = \|y - X \beta\|^2`; and
+    :math:`D_p = y^{\top} y - \beta^{\top} c` is the penalised residual sum of
+    squares (:math:`= \mathrm{rss} + \beta^{\top} S \beta`).  This is the
+    ``K = 1`` case of :func:`nitrix.stats._penreml.mb_quantities`.
+
+    Parameters
+    ----------
+    lam
+        Scalar smoothing parameter :math:`\lambda`.
+    c
+        ``(p,)`` cross-product :math:`X^{\top} y`.
+    g
+        Scalar :math:`y^{\top} y`.
+    xtx
+        ``(p, p)`` cross-product :math:`X^{\top} X`.
+    d
+        ``(p,)`` penalty diagonal :math:`d`.
+    p
+        Number of design columns.
+    ridge
+        Small stabiliser on the penalised normal equations.
+
+    Returns
+    -------
+    V : Float[Array, 'p p']
+        The Bayesian covariance :math:`H^{-1}`.
+    logdet_h : Float[Array, '']
+        The log-determinant :math:`\log|H|`.
+    beta : Float[Array, ' p']
+        The penalised coefficients :math:`\beta`.
+    edf : Float[Array, '']
+        The effective degrees of freedom :math:`\operatorname{tr}(V X^{\top} X)`.
+    rss : Float[Array, '']
+        The residual sum of squares :math:`\|y - X \beta\|^2`.
+    D_p : Float[Array, '']
+        The penalised residual sum of squares :math:`y^{\top} y - \beta^{\top} c`.
     """
     return mb_quantities(jnp.atleast_1d(lam), c, g, xtx, d[None, :], p, ridge)
 
@@ -370,13 +522,44 @@ def _fs_lambda(
     lam_floor: float,
     lam_ceil: float,
 ) -> Float[Array, '']:
-    """Generalized Fellner-Schall selection of the single smoothing parameter
-    ``lambda`` for the diagonal penalty ``diag(d)``, from cross-products.
+    r"""Generalized Fellner-Schall selection of the smoothing parameter.
 
-    ``tr(S_lambda^+ S) = m / lambda`` for a disjoint diagonal penalty, so the
-    update is ``lambda <- lambda (m / lambda - tr(V diag(d))) / (energy / phi)``
-    with ``energy = beta^T diag(d) beta`` and ``phi = rss / (n - edf)``.  This is
-    the ``K = 1`` case of :func:`nitrix.stats._penreml.mb_fs` (rank ``m``).
+    Selects the single smoothing parameter :math:`\lambda` for the diagonal
+    penalty :math:`\operatorname{diag}(d)` from the cross-products, by the
+    generalized Fellner-Schall update.  For a disjoint diagonal penalty
+    :math:`\operatorname{tr}(S_\lambda^+ S) = m / \lambda`, so the update is
+    :math:`\lambda \leftarrow \lambda\,(m / \lambda - \operatorname{tr}(V \operatorname{diag}(d))) / (\mathrm{energy} / \phi)`
+    with :math:`\mathrm{energy} = \beta^{\top} \operatorname{diag}(d) \beta` and
+    :math:`\phi = \mathrm{rss} / (n - \mathrm{edf})`.  This is the ``K = 1`` case
+    of :func:`nitrix.stats._penreml.mb_fs` (rank :math:`m`).
+
+    Parameters
+    ----------
+    c
+        ``(p,)`` cross-product :math:`X^{\top} y`.
+    g
+        Scalar :math:`y^{\top} y`.
+    xtx
+        ``(p, p)`` cross-product :math:`X^{\top} X`.
+    d
+        ``(p,)`` penalty diagonal :math:`d`.
+    n
+        Number of observations :math:`n`.
+    p
+        Number of design columns.
+    m
+        Rank of the penalised (smooth) block.
+    n_outer
+        Number of Fellner-Schall iterations.
+    ridge
+        Small stabiliser on the penalised normal equations.
+    lam_floor, lam_ceil
+        Clamp on the smoothing parameter :math:`\lambda`.
+
+    Returns
+    -------
+    Float[Array, '']
+        The selected scalar smoothing parameter :math:`\lambda`.
     """
     ranks = jnp.asarray([m], dtype=xtx.dtype)
     return mb_fs(
@@ -393,11 +576,43 @@ def _reml_nll(
     m: int,
     n_fixed: int,
 ) -> Float[Array, '']:
-    """Per-element restricted negative log-likelihood ``-2 l_R`` (full, incl. the
-    ``(n, M_0)`` constant):  ``(n - M_0) log D_p + log|H| - log|S_lambda|_+ +
-    (n - M_0)(log 2pi + 1 - log(n - M_0))``, with ``log|S_lambda|_+ = m log lambda
-    + sum_j log(1/s_j)``.  The ``K = 1`` case of
-    :func:`nitrix.stats._penreml.mb_reml_nll` (rank ``m``)."""
+    r"""Per-element restricted negative log-likelihood :math:`-2 l_R`.
+
+    Evaluates the full criterion (including the constant in :math:`n` and
+    :math:`M_0`),
+
+    .. math::
+
+        -2 l_R = (n - M_0) \log D_p + \log|H| - \log|S_\lambda|_+
+        + (n - M_0)(\log 2\pi + 1 - \log(n - M_0)),
+
+    with :math:`\log|S_\lambda|_+ = m \log \lambda + \sum_j \log(1/s_j)`.  This is
+    the ``K = 1`` case of :func:`nitrix.stats._penreml.mb_reml_nll` (rank
+    :math:`m`).
+
+    Parameters
+    ----------
+    d_p
+        Scalar penalised residual sum of squares :math:`D_p`.
+    logdet_h
+        Scalar log-determinant :math:`\log|H|` of the penalised Hessian.
+    lam
+        Scalar smoothing parameter :math:`\lambda`.
+    log_pdet_pen
+        Scalar :math:`\sum_j \log(1/s_j)` -- the penalty's log-pseudo-determinant
+        contribution from the spectral weights.
+    n
+        Number of observations :math:`n`.
+    m
+        Rank of the penalised (smooth) block.
+    n_fixed
+        Number of unpenalised fixed-effect columns :math:`M_0`.
+
+    Returns
+    -------
+    Float[Array, '']
+        The scalar :math:`-2 l_R`.
+    """
     return mb_reml_nll(
         d_p,
         logdet_h,
@@ -436,8 +651,55 @@ def _gp_fit_one(
     Float[Array, ''],
     Float[Array, ''],
 ]:
-    """Single-element fit at fixed ``rho`` (penalty diagonal ``d``).  Returns
-    ``(beta, V, lambda, edf, dispersion, log_mlik)``."""
+    r"""Single-element penalised fit at a fixed lengthscale.
+
+    Selects the smoothing parameter :math:`\lambda` by generalized Fellner-Schall
+    (:func:`_fs_lambda`), then evaluates the penalised-regression quantities
+    (:func:`_quantities`) and the REML criterion (:func:`_reml_nll`) at the fixed
+    penalty diagonal ``d`` (i.e. a fixed :math:`\rho`).
+
+    Parameters
+    ----------
+    c
+        ``(p,)`` cross-product :math:`X^{\top} y`.
+    g
+        Scalar :math:`y^{\top} y`.
+    xtx
+        ``(p, p)`` cross-product :math:`X^{\top} X`.
+    d
+        ``(p,)`` penalty diagonal :math:`d`.
+    log_pdet_pen
+        Scalar penalty log-pseudo-determinant contribution.
+    n
+        Number of observations :math:`n`.
+    p
+        Number of design columns.
+    m
+        Rank of the penalised (smooth) block.
+    n_fixed
+        Number of unpenalised fixed-effect columns.
+    n_outer
+        Number of Fellner-Schall iterations.
+    ridge
+        Small stabiliser on the penalised normal equations.
+    lam_floor, lam_ceil
+        Clamp on the smoothing parameter :math:`\lambda`.
+
+    Returns
+    -------
+    beta : Float[Array, ' p']
+        The penalised coefficients :math:`\beta`.
+    V : Float[Array, 'p p']
+        The Bayesian covariance :math:`(X^{\top} X + S_\lambda)^{-1}`.
+    lam : Float[Array, '']
+        The selected smoothing parameter :math:`\lambda`.
+    edf : Float[Array, '']
+        The effective degrees of freedom.
+    dispersion : Float[Array, '']
+        The residual scale :math:`\phi = \mathrm{rss} / (n - \mathrm{edf})`.
+    log_mlik : Float[Array, '']
+        The REML log marginal likelihood :math:`l_R = -\tfrac12 (-2 l_R)`.
+    """
     lam = _fs_lambda(
         c, g, xtx, d, n, p, m, n_outer, ridge, lam_floor, lam_ceil
     )
@@ -462,8 +724,45 @@ def _pooled_nll_one(
     lam_floor: float,
     lam_ceil: float,
 ) -> Float[Array, '']:
-    """The per-element ``-2 l_R`` at fixed ``rho`` (its own ``lambda_v``); summed
-    over elements this is the pooled REML objective minimised over ``rho``."""
+    r"""One element's :math:`-2 l_R` at a fixed lengthscale.
+
+    Selects the element's own smoothing parameter :math:`\lambda_v` by generalized
+    Fellner-Schall, then returns its restricted negative log-likelihood at the
+    fixed penalty diagonal ``d`` (a fixed :math:`\rho`).  Summed over elements this
+    is the pooled REML objective minimised over :math:`\rho`.
+
+    Parameters
+    ----------
+    c
+        ``(p,)`` cross-product :math:`X^{\top} y`.
+    g
+        Scalar :math:`y^{\top} y`.
+    xtx
+        ``(p, p)`` cross-product :math:`X^{\top} X`.
+    d
+        ``(p,)`` penalty diagonal :math:`d`.
+    log_pdet_pen
+        Scalar penalty log-pseudo-determinant contribution.
+    n
+        Number of observations :math:`n`.
+    p
+        Number of design columns.
+    m
+        Rank of the penalised (smooth) block.
+    n_fixed
+        Number of unpenalised fixed-effect columns.
+    n_outer
+        Number of Fellner-Schall iterations.
+    ridge
+        Small stabiliser on the penalised normal equations.
+    lam_floor, lam_ceil
+        Clamp on the smoothing parameter :math:`\lambda`.
+
+    Returns
+    -------
+    Float[Array, '']
+        The element's :math:`-2 l_R`.
+    """
     lam = _fs_lambda(
         c, g, xtx, d, n, p, m, n_outer, ridge, lam_floor, lam_ceil
     )
@@ -485,13 +784,47 @@ def _pooled_nll_from_design(
     lam_ceil: float,
     block: Optional[int],
 ) -> Float[Array, '']:
-    """Pooled ``-2 l_R`` for a design ``X`` whose smooth columns move with ``rho``
-    (the ``engine='exact'`` case: the cross-products are rebuilt per ``rho``).
+    r"""Pooled :math:`-2 l_R` for a design whose smooth columns move with ``rho``.
 
-    The per-element reduction goes through ``blocked_vmap`` so ``block`` bounds
-    the rho-search's peak memory (``O(block * p**2)``) exactly as it bounds the
-    final fit -- for ``engine='exact'`` with ``rank=N`` the per-element Hessian
-    is ``(N, N)``, so an un-chunked search over all ``V`` is the OOM cliff."""
+    Rebuilds the cross-products from the supplied design ``X`` and sums the
+    per-element restricted negative log-likelihoods (the ``engine='exact'`` case,
+    where the design is rebuilt per :math:`\rho`).  The per-element reduction goes
+    through :func:`~nitrix.stats._batching.blocked_vmap` so ``block`` bounds the
+    rho-search's peak memory (:math:`O(\mathrm{block} \cdot p^2)`) exactly as it
+    bounds the final fit -- for ``engine='exact'`` with ``rank=N`` the per-element
+    Hessian is ``(N, N)``, so an un-chunked search over all ``V`` is the OOM
+    cliff.
+
+    Parameters
+    ----------
+    Y
+        ``(V, N)`` responses (one row per element).
+    X
+        ``(N, p)`` design matrix at the current :math:`\rho`.
+    d
+        ``(p,)`` penalty diagonal :math:`d`.
+    log_pdet_pen
+        Scalar penalty log-pseudo-determinant contribution.
+    n
+        Number of observations :math:`n`.
+    m
+        Rank of the penalised (smooth) block.
+    n_fixed
+        Number of unpenalised fixed-effect columns.
+    n_outer
+        Number of Fellner-Schall iterations per element.
+    ridge
+        Small stabiliser on the penalised normal equations.
+    lam_floor, lam_ceil
+        Clamp on the smoothing parameter :math:`\lambda`.
+    block
+        Optional element-block size bounding peak memory.
+
+    Returns
+    -------
+    Float[Array, '']
+        The pooled :math:`-2 l_R` summed over elements.
+    """
     p = X.shape[1]
     xtx = X.T @ X
     c_all = Y @ X
@@ -532,8 +865,44 @@ def _final_fit_from_design(
     lam_ceil: float,
     block: Optional[int],
 ) -> Tuple[Array, Array, Array, Array, Array, Array]:
-    """Per-element final fit for a design ``X``: ``(beta, V, lambda, edf,
-    dispersion, log_mlik)`` via the shared penalised-REML core."""
+    r"""Per-element final fit for a fixed design.
+
+    Rebuilds the cross-products from the supplied design ``X`` and runs the
+    single-element fit (:func:`_gp_fit_one`) per element via
+    :func:`~nitrix.stats._batching.blocked_vmap`.
+
+    Parameters
+    ----------
+    Y
+        ``(V, N)`` responses (one row per element).
+    X
+        ``(N, p)`` design matrix at the selected :math:`\rho`.
+    d
+        ``(p,)`` penalty diagonal :math:`d`.
+    log_pdet_pen
+        Scalar penalty log-pseudo-determinant contribution.
+    n
+        Number of observations :math:`n`.
+    m
+        Rank of the penalised (smooth) block.
+    n_fixed
+        Number of unpenalised fixed-effect columns.
+    n_outer
+        Number of Fellner-Schall iterations per element.
+    ridge
+        Small stabiliser on the penalised normal equations.
+    lam_floor, lam_ceil
+        Clamp on the smoothing parameter :math:`\lambda`.
+    block
+        Optional element-block size bounding peak memory.
+
+    Returns
+    -------
+    tuple of Array
+        The per-element ``(beta, V, lambda, edf, dispersion, log_mlik)``, each
+        stacked over the ``V`` elements (see :func:`_gp_fit_one` for the
+        per-element shapes and meaning).
+    """
     p = X.shape[1]
     xtx = X.T @ X
     c_all = Y @ X
@@ -584,8 +953,41 @@ def _hsgp_design_pen(
     boundary: float,
     dtype: Any,
 ) -> Tuple[_DesignFn, _PenFn]:
-    """HSGP ``(design, penalty)`` closures: a fixed design, a ``rho``-dependent
-    diagonal penalty ``diag(1/s(rho))``."""
+    r"""Build the HSGP ``(design, penalty)`` closures.
+
+    Returns a pair of closures over :math:`\rho`: a *fixed* design (the
+    :math:`\rho`-independent Hilbert-space eigenbasis concatenated with the
+    unpenalised block ``T``) and a :math:`\rho`-dependent diagonal penalty
+    :math:`\operatorname{diag}(1/s(\rho))` from the spectral-density weights.
+
+    Parameters
+    ----------
+    x
+        ``(N,)`` covariate the smooth is built over.
+    T
+        ``(N, q0)`` unpenalised fixed-effect design (intercept + parametric).
+    kernel
+        Stationary kernel name.
+    m
+        Smooth-basis rank (number of eigenfunctions).
+    n_fixed
+        Number of unpenalised fixed-effect columns (the leading block that is
+        left unpenalised).
+    lo, hi
+        Data-range descriptors :math:`[\mathrm{lo}, \mathrm{hi}]`.
+    boundary
+        Domain-extension factor.
+    dtype
+        Array dtype for the eigenbasis and penalty.
+
+    Returns
+    -------
+    design : _DesignFn
+        A closure ``design(rho) -> (N, p)`` returning the (rho-independent) design.
+    pen : _PenFn
+        A closure ``pen(rho) -> (d, log_pdet)`` returning the penalty diagonal and
+        its log-pseudo-determinant contribution.
+    """
     c_mid, big_l = _hsgp_domain(lo, hi, boundary)
     sqrt_lambda, phase, inv_sqrt_L = _hsgp_eigen(m, c_mid, big_l, dtype)
     X = jnp.concatenate(
@@ -611,8 +1013,38 @@ def _exact_design_pen(
     n_fixed: int,
     dtype: Any,
 ) -> Tuple[_DesignFn, _PenFn]:
-    """Exact ``(design, penalty)`` closures: a ``rho``-dependent kernel-
-    eigenfeature design, a fixed identity penalty (unit spectral weights)."""
+    r"""Build the exact-engine ``(design, penalty)`` closures.
+
+    Returns a pair of closures: a :math:`\rho`-dependent kernel-eigenfeature design
+    (:func:`_exact_features_train` concatenated with the unpenalised block ``T``)
+    and a *fixed* identity penalty (unit spectral weights, zero log-pseudo-
+    determinant) -- the smooth columns already carry the amplitude, so the penalty
+    does not move with :math:`\rho`.
+
+    Parameters
+    ----------
+    x_np
+        ``(N,)`` covariate (host numpy); the kernel Gram is rebuilt on this grid
+        per :math:`\rho`.
+    T
+        ``(N, q0)`` unpenalised fixed-effect design (intercept + parametric).
+    kernel
+        Stationary kernel name.
+    m
+        Number of retained kernel eigenfeatures.
+    n_fixed
+        Number of unpenalised fixed-effect columns.
+    dtype
+        Array dtype for the design and penalty.
+
+    Returns
+    -------
+    design : _DesignFn
+        A closure ``design(rho) -> (N, p)`` returning the rho-dependent design.
+    pen : _PenFn
+        A closure ``pen(rho) -> (d, log_pdet)`` returning the fixed unit-weight
+        penalty diagonal and its (zero) log-pseudo-determinant contribution.
+    """
     d_unit = jnp.concatenate(
         [jnp.zeros((n_fixed,), dtype), jnp.ones((m,), dtype)]
     )
@@ -664,8 +1096,15 @@ def gp_fit(
     lam_ceil: float = 1e8,
     block: Optional[int] = None,
 ) -> GPResult:
-    """Fit a mass-univariate Gaussian-process regression with REML-estimated
-    lengthscale (Gaussian responses).
+    r"""Fit a mass-univariate Gaussian-process regression with REML-estimated
+    lengthscale.
+
+    Fits, independently per element (voxel / vertex / fixel), a Gaussian-process
+    smooth of the covariate ``x`` whose kernel lengthscale :math:`\rho` is
+    estimated by (profiled, pooled) REML rather than fixed in advance.  A single
+    :math:`\rho` is shared across elements; the amplitude and noise are per
+    element.  For a non-Gaussian ``family`` the lengthscale is estimated by
+    PQL-REML.
 
     Parameters
     ----------
@@ -675,7 +1114,8 @@ def gp_fit(
         ``(N,)`` covariate, or ``(N, D)`` for a **multi-dimensional** GP (a spatial
         smooth / smooth interaction; HSGP tensor-product engine).  This is a single
         covariate the GP smooths *over* -- **not** the full design matrix ``X`` of
-        ``glm_fit`` / ``gam_fit``; linear covariates go to ``parametric=``.
+        :func:`~nitrix.stats.glm.glm_fit` / :func:`~nitrix.stats.gam.gam_fit`;
+        linear covariates go to ``parametric=``.
     parametric
         Optional ``(N, q)`` unpenalised linear design (covariates entering
         linearly alongside the intercept).
@@ -688,7 +1128,8 @@ def gp_fit(
         ``N`` for ``'exact'`` (full-rank), and ``8`` **per axis** for a
         multi-dimensional fit.  An explicit ``rank < N`` with ``engine='exact'``
         gives the eigen-truncated Karhunen-Loeve / Nystrom approximation; for
-        multi-D, ``rank`` may be a per-axis sequence ``[m_1, ..., m_D]``.
+        multi-D, ``rank`` may be a per-axis sequence
+        :math:`[m_1, \ldots, m_D]`.
     ard
         Multi-D only: ``False`` (default) estimates one **isotropic** lengthscale
         (a radial kernel of ``||x - x'||``); ``True`` estimates a **per-axis**
@@ -700,11 +1141,12 @@ def gp_fit(
         ``(lo, hi)`` data-range override (defaults to the data min/max).
     engine
         Reduced-rank engine.  ``'hsgp'`` (default; Hilbert-space eigenfunctions, a
-        fixed design with an ``eigh``-free ``rho``-dependent diagonal penalty) or
-        ``'exact'`` (kernel eigenfeatures ``U Lambda^{1/2}`` -- the full-rank GP
-        when ``rank == N``; a one-off host ``eigh`` of the shared kernel Gram per
-        ``rho``, cuSOLVER-free, equivalent to ``lme.reml_fit`` by the
-        penalty<->variance-component identity).
+        fixed design with an eigendecomposition-free :math:`\rho`-dependent
+        diagonal penalty) or ``'exact'`` (kernel eigenfeatures
+        :math:`U \Lambda^{1/2}` -- the full-rank GP when ``rank == N``; a one-off
+        host ``eigh`` of the shared kernel Gram per :math:`\rho`, cuSOLVER-free,
+        equivalent to a variance-component REML fit by the
+        penalty-to-variance-component identity).
     select
         Lengthscale-selection mode.  ``'shared-rho'`` (the only mode, and the
         default) shares a single ``rho`` across all elements with per-element
@@ -716,18 +1158,19 @@ def gp_fit(
     n_rho
         Number of log-spaced grid points for the ``rho`` search.
     map_rho
-        Optional callable ``rho -> -log p(rho)`` adding a lengthscale prior to the
-        pooled objective (a MAP / prior-regularised ``rho``); ``None`` is pure
-        REML.  Use a builder from :mod:`nitrix.stats.priors`
-        (``halfnormal_prior`` / ``invgamma_prior`` / ``lognormal_prior``) or any
-        pure-JAX callable.
+        Optional callable :math:`\rho \mapsto -\log p(\rho)` adding a lengthscale
+        prior to the pooled objective (a MAP / prior-regularised :math:`\rho`);
+        ``None`` is pure REML.  Use a builder from :mod:`nitrix.stats.priors`
+        (:func:`~nitrix.stats.priors.halfnormal_prior` /
+        :func:`~nitrix.stats.priors.invgamma_prior` /
+        :func:`~nitrix.stats.priors.lognormal_prior`) or any pure-JAX callable.
     corr
         Within-group residual-correlation structure: ``'ar1'`` (discrete AR(1)),
         ``'car1'`` (continuous-time AR(1); pass ``time``), ``'cs'`` (compound
         symmetry), or a ``lme.CorrSpec``.  ``None`` (default) is the i.i.d.
         residual.  When set, ``group`` is required; the residual is
-        ``sigma_e^2 R(rho_c)`` block-diagonal across ``group``, with ``rho_c``
-        estimated jointly with the lengthscale.
+        :math:`\sigma_e^2 R(\rho_c)` block-diagonal across ``group``, with
+        :math:`\rho_c` estimated jointly with the lengthscale.
     group
         ``(N,)`` integer grouping factor for ``corr`` (the residual is correlated
         *within* groups, independent across them).  Required when ``corr`` is set.
@@ -737,27 +1180,44 @@ def gp_fit(
     n_corr
         Number of grid points for the residual-correlation parameter search.
     corr_raw_bounds
-        ``(lo, hi)`` range of the structure's *unconstrained* grid parameter
-        (MC5).  ``ar1`` maps it by ``tanh`` -- the default ``(-4, 4)`` spans
-        ``rho_c in (-0.999, 0.999)``.  ``car1`` / ``cs`` map it by ``sigmoid``,
-        a **one-sided** window ``rho_c in (0.018, 0.982)`` (``cs`` is positive by
-        construction, the common exchangeable regime; ``car1`` is a positive
-        decay).  The raw grid is not parabolically refined, so widen the bounds /
-        raise ``n_corr`` for a finer estimate; an estimate at the grid edge warns.
+        ``(lo, hi)`` range of the structure's *unconstrained* grid parameter.
+        ``ar1`` maps it by ``tanh`` -- the default ``(-4, 4)`` spans
+        :math:`\rho_c \in (-0.999, 0.999)`.  ``car1`` / ``cs`` map it by
+        ``sigmoid``, a **one-sided** window :math:`\rho_c \in (0.018, 0.982)`
+        (``cs`` is positive by construction, the common exchangeable regime;
+        ``car1`` is a positive decay).  The raw grid is not parabolically refined,
+        so widen the bounds / raise ``n_corr`` for a finer estimate; an estimate at
+        the grid edge warns.
+    family
+        Response family: ``'gaussian'`` (default; exact REML), or ``'binomial'`` /
+        ``'poisson'`` for a non-Gaussian GP whose lengthscale is estimated by
+        PQL-REML (``engine='hsgp'``, 1-D, no ``corr=``, only).  Accepts a family
+        name or a resolved :class:`~nitrix.stats._family.Family`.
+    prior_weights
+        Optional ``(N,)`` per-observation prior weights for a non-Gaussian family
+        (the IRLS ``a_i`` weights; e.g. binomial trial counts).  Ignored for the
+        Gaussian family.
+    n_pql
+        Number of PQL outer relinearisation iterations for a non-Gaussian family
+        (ignored for the Gaussian family).
     n_outer, n_search
-        Fellner-Schall iterations for the final fit and for each ``rho``-search
-        evaluation, respectively.
+        Fellner-Schall iterations for the final fit and for each
+        :math:`\rho`-search evaluation, respectively.
     ridge
         Small stabiliser on the penalised normal equations.
     lam_floor, lam_ceil
-        Clamp on the smoothing parameter ``lambda = sigma_e^2 / sigma_f^2``.
+        Clamp on the smoothing parameter
+        :math:`\lambda = \sigma_e^2 / \sigma_f^2`.
     block
         Optional element-block size bounding peak memory on brain-scale ``V``.
 
     Returns
     -------
-    ``GPResult`` (coefficients, Bayesian covariance, per-element ``[log sigma_f^2,
-    log sigma_e^2, log rho]``, REML log marginal likelihood, EDF, dispersion).
+    GPResult
+        The per-element fit: coefficients, Bayesian covariance, per-element
+        hyperparameters :math:`[\log \sigma_f^2, \log \sigma_e^2, \log \rho]`, the
+        REML log marginal likelihood, the effective degrees of freedom and the
+        dispersion (see :class:`GPResult`).
     """
     if engine not in ('hsgp', 'exact'):
         raise NotImplementedError(
@@ -1109,9 +1569,57 @@ def _assemble_gp_result(
     nd_meta: Optional[Any] = None,
     family: str = 'gaussian',
 ) -> GPResult:
-    """Pack the per-element fit arrays into a :class:`GPResult` (shared by both
-    engines): ``theta = [log sigma_f^2, log sigma_e^2, log rho]`` with
-    ``sigma_f^2 = sigma_e^2 / lambda`` and the shared ``rho`` broadcast."""
+    r"""Pack the per-element fit arrays into a :class:`GPResult`.
+
+    Shared by every engine / mode.  Recovers the hyperparameter columns
+    :math:`\theta = [\log \sigma_f^2, \log \sigma_e^2, \log \rho]` with
+    :math:`\sigma_e^2` the dispersion, :math:`\sigma_f^2 = \sigma_e^2 / \lambda`,
+    and the shared :math:`\rho` broadcast across elements.
+
+    Parameters
+    ----------
+    beta
+        ``(V, p)`` per-element coefficients.
+    v
+        ``(V, p, p)`` per-element Bayesian covariance.
+    lam
+        ``(V,)`` per-element smoothing parameter :math:`\lambda`.
+    edf
+        ``(V,)`` per-element effective degrees of freedom.
+    phi
+        ``(V,)`` per-element dispersion :math:`\sigma_e^2`.
+    log_mlik
+        ``(V,)`` per-element REML log marginal likelihood.
+    rho_hat
+        The shared selected lengthscale :math:`\rho` (a Python float on the eager
+        paths, or a traced scalar on the traceable HSGP path).
+    kernel
+        Stationary kernel name.
+    engine
+        Reduced-rank engine name (``'hsgp'`` / ``'exact'``).
+    n
+        Number of observations :math:`N`.
+    m
+        Smooth-basis rank.
+    n_fixed
+        Number of unpenalised fixed-effect columns.
+    lo, hi, boundary
+        Domain descriptors recorded for HSGP re-evaluation.
+    corr_name
+        Residual-correlation structure name (``'iid'`` when none).
+    corr_rho
+        Optional ``(V,)`` natural residual-correlation parameter; ``None`` fills
+        zeros.
+    nd_meta
+        Optional multi-dimensional metadata tuple (``None`` for a 1-D fit).
+    family
+        Response family name.
+
+    Returns
+    -------
+    GPResult
+        The packed per-element fit.
+    """
     sigma_e2 = phi
     sigma_f2 = phi / jnp.clip(lam, 1e-30, None)
     # jnp (not np) log so a traced rho_hat (the traceable HSGP path) flows
@@ -1171,23 +1679,67 @@ def _gp_fit_glm_hsgp(
     boundary: float,
     prior_weights: Optional[Float[Array, ' N']],
 ) -> GPResult:
-    """Non-Gaussian GP (HSGP engine) by PQL-REML lengthscale estimation (CV2).
+    r"""Fit a non-Gaussian GP (HSGP engine) by PQL-REML lengthscale estimation.
 
     Each PQL iteration relinearises the GLM to a per-element *weighted* Gaussian
-    working problem ``(z_v, W_v)`` (the IRLS working response / weights), then
-    profiles the shared ``rho`` and selects ``lambda`` with the **same** pooled-REML
-    core as the Gaussian path -- only the cross-products become ``X^T W_v X`` /
-    ``X^T W_v z_v``, computed per element *inside* ``blocked_vmap`` so ``block``
-    bounds peak memory (no full ``(V, p, p)`` working Gram).  The working weights
-    are held fixed within each inner ``rho`` search (their Jacobian is constant in
-    ``rho``), so the search is exactly the Gaussian profile REML; the outer loop
-    relinearises until the linear predictor settles.
+    working problem :math:`(z_v, W_v)` (the IRLS working response / weights), then
+    profiles the shared :math:`\rho` and selects :math:`\lambda` with the same
+    pooled-REML core as the Gaussian path -- only the cross-products become
+    :math:`X^{\top} W_v X` / :math:`X^{\top} W_v z_v`, computed per element inside
+    :func:`~nitrix.stats._batching.blocked_vmap` so ``block`` bounds peak memory
+    (no full ``(V, p, p)`` working Gram).  The working weights are held fixed
+    within each inner :math:`\rho` search (their Jacobian is constant in
+    :math:`\rho`), so the search is exactly the Gaussian profile REML; the outer
+    loop relinearises until the linear predictor settles.
 
-    This is **PQL** (Breslow-Clayton): biased for binary / low-count data -- the
-    documented Phase-1 caveat (cf. ``glmm_fit``); the proper Laplace REML / LAML is
-    the Phase-2 upgrade.  ``coef`` is on the link scale; the reported ``dispersion``
-    is the working quasi-likelihood scale (``~1`` for a calibrated binomial /
-    poisson fit)."""
+    This is PQL (Breslow-Clayton): biased for binary / low-count data -- the
+    documented caveat shared with :func:`~nitrix.stats.glmm.glmm_fit`; a proper
+    Laplace REML / LAML is the intended upgrade.  ``coef`` is on the link scale;
+    the reported ``dispersion`` is the working quasi-likelihood scale (about ``1``
+    for a calibrated binomial / poisson fit).
+
+    Parameters
+    ----------
+    Y
+        ``(V, N)`` responses (one row per element).
+    x
+        ``(N,)`` covariate the smooth is built over.
+    T
+        ``(N, q0)`` unpenalised fixed-effect design (intercept + parametric).
+    n_fixed
+        Number of unpenalised fixed-effect columns.
+    family
+        Resolved response family (binomial / poisson).
+    kernel
+        Stationary kernel name.
+    m
+        Smooth-basis rank.
+    log_rho_grid_np
+        Log-spaced :math:`\log \rho` search grid (host numpy).
+    map_rho
+        Optional lengthscale prior added to the pooled objective, or ``None``.
+    n_pql
+        Number of PQL outer relinearisation iterations.
+    n_outer, n_search
+        Fellner-Schall iterations for the final fit and each :math:`\rho`-search
+        evaluation.
+    ridge
+        Small stabiliser on the penalised normal equations.
+    lam_floor, lam_ceil
+        Clamp on the smoothing parameter :math:`\lambda`.
+    block
+        Optional element-block size bounding peak memory.
+    lo, hi, boundary
+        Domain descriptors for the HSGP eigenbasis.
+    prior_weights
+        Optional ``(N,)`` per-observation prior weights, or ``None`` for unit
+        weights.
+
+    Returns
+    -------
+    GPResult
+        The per-element non-Gaussian GP fit (``coef`` on the link scale).
+    """
     dtype = Y.dtype
     n = Y.shape[-1]
     c_mid, big_l = _hsgp_domain(lo, hi, boundary)
@@ -1204,8 +1756,9 @@ def _gp_fit_glm_hsgp(
     def _working_xprod(
         eta_v: Float[Array, ' N'], y_v: Float[Array, ' N']
     ) -> Tuple[Array, Array, Array]:
-        """One element's working cross-products ``(X^T W X, X^T W z, z^T W z)``
-        (IRLS working weights ``W`` / response ``z``, as in ``_irls._working``)."""
+        r"""One element's working cross-products
+        :math:`(X^{\top} W X, X^{\top} W z, z^{\top} W z)` (IRLS working weights
+        :math:`W` / response :math:`z`, as in ``_irls._working``)."""
         eta_c = family.clip_eta(eta_v)
         mu = family.linkinv(eta_c)
         dmu = family.mu_eta(eta_c)
@@ -1327,17 +1880,56 @@ def _gp_fit_exact(
     hi: float,
     boundary: float,
 ) -> GPResult:
-    """``engine='exact'``: full-rank (or KL-truncated) GP via the kernel
-    eigenfeature design ``Phi(rho) = U Lambda^{1/2}``.
+    r"""Fit the exact-engine GP via the kernel-eigenfeature design.
 
-    The kernel Gram eigendecomposition is data-independent of ``Y``, so it is done
-    on the host (numpy ``eigh``) once per grid ``rho`` -- cuSOLVER-free, shared
-    across all elements.  ``Phi(rho)`` *moves* with ``rho`` (unlike HSGP's fixed
-    eigenbasis), so the penalty is the plain identity (unit spectral weights) and
-    the cross-products are rebuilt per ``rho``.  Everything else (the
-    Fellner-Schall ``lambda``, the REML criterion, the pooled ``rho`` search) is
-    the shared PR2 penalised-REML core -- equivalent to ``lme.reml_fit`` on
-    ``Z = chol(K_rho)`` by the penalty<->variance-component identity."""
+    The full-rank (or KL-truncated) GP with the kernel eigenfeature design
+    :math:`\Phi(\rho) = U \Lambda^{1/2}`.  The kernel Gram eigendecomposition is
+    independent of ``Y``, so it is done on the host (numpy ``eigh``) once per grid
+    :math:`\rho` -- cuSOLVER-free, shared across all elements.  :math:`\Phi(\rho)`
+    *moves* with :math:`\rho` (unlike HSGP's fixed eigenbasis), so the penalty is
+    the plain identity (unit spectral weights) and the cross-products are rebuilt
+    per :math:`\rho`.  Everything else (the Fellner-Schall :math:`\lambda`, the
+    REML criterion, the pooled :math:`\rho` search) is the shared penalised-REML
+    core -- equivalent to a variance-component REML fit on
+    :math:`Z = \operatorname{chol}(K_\rho)` by the penalty-to-variance-component
+    identity.
+
+    Parameters
+    ----------
+    Y
+        ``(V, N)`` responses (one row per element).
+    x_np
+        ``(N,)`` covariate (host numpy); the kernel Gram is rebuilt on this grid.
+    T
+        ``(N, q0)`` unpenalised fixed-effect design (intercept + parametric).
+    n_fixed
+        Number of unpenalised fixed-effect columns.
+    kernel
+        Stationary kernel name.
+    m
+        Number of retained kernel eigenfeatures.
+    log_rho_grid_np
+        Log-spaced :math:`\log \rho` search grid (host numpy).
+    map_rho
+        Optional lengthscale prior added to the pooled objective, or ``None``.
+    n_outer, n_search
+        Fellner-Schall iterations for the final fit and each :math:`\rho`-search
+        evaluation.
+    ridge
+        Small stabiliser on the penalised normal equations.
+    lam_floor, lam_ceil
+        Clamp on the smoothing parameter :math:`\lambda`.
+    block
+        Optional element-block size bounding peak memory.
+    lo, hi, boundary
+        Domain descriptors recorded on the result (unused by the exact engine's
+        own solve).
+
+    Returns
+    -------
+    GPResult
+        The per-element exact-engine GP fit.
+    """
     dtype = Y.dtype
     n = Y.shape[-1]
     # DS2: shared exact (design, penalty) closures (also used by the corr path) --
@@ -1429,10 +2021,56 @@ def _gp_fit_nd(
     lam_ceil: float,
     block: Optional[int],
 ) -> GPResult:
-    """Multi-dimensional HSGP fit (tensor-product eigenbasis).  Isotropic (one
-    shared ``rho``, a 1-D grid) or ARD (per-axis ``rho``, coordinate descent over
-    the axes); the eigenbasis is ``rho``-independent so the pooled-REML core is
-    reused with the diagonal penalty as the only moving part."""
+    r"""Fit a multi-dimensional HSGP (tensor-product eigenbasis).
+
+    Handles the isotropic case (one shared :math:`\rho`, a 1-D grid search) and the
+    ARD case (a per-axis :math:`\rho` by coordinate descent over the axes).  The
+    tensor-product eigenbasis is :math:`\rho`-independent, so the pooled-REML core
+    is reused with the diagonal penalty as the only moving part; the reported
+    lengthscale is the geometric mean of the per-axis lengthscales under ARD.
+
+    Parameters
+    ----------
+    Y
+        ``(V, N)`` responses (one row per element).
+    x_np
+        ``(N, D)`` multi-dimensional covariate (host numpy).
+    T
+        ``(N, q0)`` unpenalised fixed-effect design (intercept + parametric).
+    n_fixed
+        Number of unpenalised fixed-effect columns.
+    kernel
+        Stationary kernel name.
+    m_per
+        Per-axis smooth-basis ranks (length ``D``).
+    boundary
+        Domain-extension factor.
+    ard
+        If ``True``, estimate a per-axis lengthscale (ARD); if ``False``, a single
+        shared isotropic lengthscale.
+    rho_bounds
+        Optional ``(rho_lo, rho_hi)`` search range, or ``None`` for a data-derived
+        default.
+    n_rho
+        Number of log-spaced grid points per axis / for the shared search.
+    map_rho
+        Optional lengthscale prior added to the pooled objective, or ``None``.
+    n_outer, n_search
+        Fellner-Schall iterations for the final fit and each :math:`\rho`-search
+        evaluation.
+    ridge
+        Small stabiliser on the penalised normal equations.
+    lam_floor, lam_ceil
+        Clamp on the smoothing parameter :math:`\lambda`.
+    block
+        Optional element-block size bounding peak memory.
+
+    Returns
+    -------
+    GPResult
+        The per-element multi-dimensional GP fit (``nd_meta`` records the per-axis
+        ranks, bounds and, for ARD, the per-axis lengthscales).
+    """
     dtype = Y.dtype
     d_in = x_np.shape[1]
     n = Y.shape[-1]
@@ -1594,16 +2232,69 @@ def _gp_fit_corr(
     hi: float,
     boundary: float,
 ) -> GPResult:
-    """GP smooth + a structured within-group residual ``Cov(eps) = sigma_e^2
-    R(rho_c)`` (the ``corr=`` composition).
+    r"""Fit a GP smooth with a structured within-group residual.
 
-    Whitening by ``R(rho_c)`` (``W R W^T = I`` per group; reused verbatim from
-    ``lme._corr``) turns the model into the PR2 penalised regression on whitened
-    data, so the criterion is the shared profiled REML **plus** the whitening
-    Jacobian ``log|R(rho_c)|``.  ``rho_c`` joins the lengthscale in a joint
-    ``(rho_GP, raw_c)`` grid (``raw_c`` the structure's unconstrained parameter);
-    the final fit's posterior is in whitened space, so ``gp_predict`` (the latent
-    GP mean/variance) is unchanged."""
+    Composes the GP smooth with a within-group residual covariance
+    :math:`\operatorname{Cov}(\epsilon) = \sigma_e^2 R(\rho_c)` (the ``corr=``
+    path).  Whitening by :math:`R(\rho_c)` (:math:`W R W^{\top} = I` per group;
+    reused verbatim from ``lme._corr``) turns the model into the penalised
+    regression on whitened data, so the criterion is the shared profiled REML plus
+    the whitening Jacobian :math:`\log|R(\rho_c)|`.  The correlation parameter
+    :math:`\rho_c` joins the lengthscale in a joint ``(rho_GP, raw_c)`` grid
+    (``raw_c`` the structure's unconstrained parameter); the final fit's posterior
+    is in whitened space, so :func:`gp_predict` (the latent GP mean / variance) is
+    unchanged.
+
+    Parameters
+    ----------
+    Y
+        ``(V, N)`` responses (one row per element).
+    design_fn
+        Closure ``rho -> (N, p)`` building the design (HSGP or exact).
+    pen_fn
+        Closure ``rho -> (d, log_pdet)`` building the penalty diagonal and its
+        log-pseudo-determinant contribution.
+    group
+        ``(N,)`` integer grouping factor; the residual is correlated within groups
+        and independent across them.
+    time
+        Optional ``(N,)`` observation times (for ``car1`` / to order ``ar1``).
+    corr_spec
+        Resolved correlation structure providing the whitener and parameter map.
+    n
+        Number of observations :math:`N`.
+    m
+        Smooth-basis rank.
+    n_fixed
+        Number of unpenalised fixed-effect columns.
+    log_rho_grid_np
+        Log-spaced :math:`\log \rho` search grid (host numpy).
+    raw_grid_np
+        Grid over the structure's unconstrained correlation parameter (host numpy).
+    map_rho
+        Optional lengthscale prior added to the pooled objective, or ``None``.
+    kernel
+        Stationary kernel name.
+    engine
+        Reduced-rank engine name (``'hsgp'`` / ``'exact'``).
+    n_outer, n_search
+        Fellner-Schall iterations for the final fit and each :math:`\rho`-search
+        evaluation.
+    ridge
+        Small stabiliser on the penalised normal equations.
+    lam_floor, lam_ceil
+        Clamp on the smoothing parameter :math:`\lambda`.
+    block
+        Optional element-block size bounding peak memory.
+    lo, hi, boundary
+        Domain descriptors recorded on the result.
+
+    Returns
+    -------
+    GPResult
+        The per-element fit; ``corr_rho`` carries the estimated natural
+        correlation parameter and ``corr`` its structure name.
+    """
     from .lme._corrfit import build_group_layout
 
     dtype = Y.dtype
@@ -1749,9 +2440,25 @@ def _gp_fit_corr(
 
 
 def _parabolic_argmin(log_rho: np.ndarray, nll: np.ndarray) -> float:
-    """Sub-grid minimiser of ``nll(log_rho)`` by a 3-point parabolic fit around
-    the grid argmin (clamped to the bracketing interval); returns the grid point
-    itself at a boundary minimum."""
+    r"""Sub-grid minimiser by a 3-point parabolic fit (host).
+
+    Refines the grid argmin of ``nll`` as a function of ``log_rho`` by fitting a
+    parabola through the argmin and its two neighbours and taking the vertex,
+    clamped to the bracketing interval.  Returns the grid point itself at a
+    boundary minimum, a degenerate bracket, or a non-convex parabola.
+
+    Parameters
+    ----------
+    log_rho
+        ``(r,)`` grid of :math:`\log \rho` values (host numpy).
+    nll
+        ``(r,)`` objective evaluated on the grid (host numpy).
+
+    Returns
+    -------
+    float
+        The refined :math:`\log \rho` at the sub-grid minimum.
+    """
     i = int(np.argmin(nll))
     if i == 0 or i == len(nll) - 1:
         return float(log_rho[i])
@@ -1773,7 +2480,7 @@ def _parabolic_argmin(log_rho: np.ndarray, nll: np.ndarray) -> float:
 def _parabolic_argmin_jax(
     log_rho: Float[Array, ' r'], nll: Float[Array, ' r']
 ) -> Float[Array, '']:
-    """Traceable twin of :func:`_parabolic_argmin` (``jit`` / ``vmap``-safe).
+    r"""Traceable twin of :func:`_parabolic_argmin` (``jit`` / ``vmap``-safe).
 
     The same 3-point parabolic sub-grid refinement around the grid argmin, but
     written branchlessly (``jnp.where`` for the boundary / degenerate-bracket /
@@ -1781,6 +2488,18 @@ def _parabolic_argmin_jax(
     letting the rho-search epilogue run inside ``jax.jit`` / ``jax.vmap`` (with
     the covariate domain closed over).  fp-faithful to the eager helper: the
     vertex arithmetic is identical, only the host control flow is lifted.
+
+    Parameters
+    ----------
+    log_rho
+        ``(r,)`` grid of :math:`\log \rho` values.
+    nll
+        ``(r,)`` objective evaluated on the grid.
+
+    Returns
+    -------
+    Float[Array, '']
+        The refined :math:`\log \rho` at the sub-grid minimum (a traced scalar).
     """
     n = nll.shape[0]
     i = jnp.argmin(nll)
@@ -1811,16 +2530,17 @@ def gp_predict(
     x_train: Optional[Float[Array, ' N']] = None,
     type: Literal['link', 'response'] = 'link',
 ) -> Tuple[Float[Array, 'V g'], Float[Array, 'V g']]:
-    """Per-element posterior mean and standard deviation of the GP at ``x_new``.
+    r"""Per-element posterior mean and standard deviation of the GP at ``x_new``.
 
-    Evaluates ``mean = X_new beta`` and the predictive variance
-    ``sigma_e^2 diag(X_new V X_new^T)``, where the smooth columns of ``X_new`` are
-    the basis re-evaluated at ``x_new``: for ``engine='hsgp'`` the (``rho``-
-    independent) eigenfunctions, reconstructed from the recorded domain
-    ``(lo, hi, boundary)`` and ``rank`` (self-contained); for ``engine='exact'``
-    the Nystrom kernel features ``K(x_new, x_train) U Lambda^{-1/2}``, which need
-    the original ``x_train`` (the result does not store the shared training grid
-    among its per-element fields).
+    Evaluates the mean :math:`X_{\mathrm{new}} \beta` and the predictive variance
+    :math:`\sigma_e^2 \operatorname{diag}(X_{\mathrm{new}} V X_{\mathrm{new}}^{\top})`,
+    where the smooth columns of :math:`X_{\mathrm{new}}` are the basis re-evaluated
+    at ``x_new``: for ``engine='hsgp'`` the (:math:`\rho`-independent)
+    eigenfunctions, reconstructed from the recorded domain ``(lo, hi, boundary)``
+    and ``rank`` (self-contained); for ``engine='exact'`` the Nystrom kernel
+    features :math:`K(x_{\mathrm{new}}, x_{\mathrm{train}})\, U \Lambda^{-1/2}`,
+    which need the original ``x_train`` (the result does not store the shared
+    training grid among its per-element fields).
 
     Parameters
     ----------
@@ -1924,8 +2644,12 @@ def gp_predict(
 
 
 class _ICResult(Protocol):
-    """The fields ``gp_aic`` / ``gp_bic`` read -- :class:`GPResult` and
-    ``HGPResult`` both conform structurally."""
+    """Structural protocol of the fields the information criteria read.
+
+    The minimal field set :func:`gp_aic` / :func:`gp_bic` consume; both
+    :class:`GPResult` and :class:`~nitrix.stats.hgp.HGPResult` conform to it
+    structurally.
+    """
 
     log_mlik: Float[Array, 'V']
     edf: Any
@@ -1936,9 +2660,20 @@ class _ICResult(Protocol):
 def _total_edf(result: _ICResult) -> Float[Array, 'V']:
     """Total effective degrees of freedom (the AIC/BIC complexity ``k``).
 
-    ``GPResult.edf`` is already the total (fixed effects + smooth); the
-    hierarchical ``HGPResult.edf`` is ``(V, 2)`` over the smooth blocks only, so
-    the unpenalised ``n_fixed`` is added back."""
+    :attr:`GPResult.edf` is already the total (fixed effects + smooth); the
+    hierarchical :attr:`~nitrix.stats.hgp.HGPResult.edf` is ``(V, 2)`` over the
+    smooth blocks only, so the unpenalised ``n_fixed`` is added back.
+
+    Parameters
+    ----------
+    result
+        A GP / HGP fit conforming to :class:`_ICResult`.
+
+    Returns
+    -------
+    Float[Array, 'V']
+        The per-element total effective degrees of freedom.
+    """
     edf = jnp.asarray(result.edf)
     if edf.ndim == 1:
         return edf
@@ -1946,23 +2681,47 @@ def _total_edf(result: _ICResult) -> Float[Array, 'V']:
 
 
 def gp_aic(result: _ICResult) -> Float[Array, 'V']:
-    """Per-element Akaike information criterion ``-2 l_R + 2 k`` for a GP / HGP
-    fit (lower is better).
+    """Per-element Akaike information criterion for a GP / HGP fit.
 
-    Uses the **REML log marginal likelihood** ``log_mlik`` (so it is comparable
-    across kernels / ranks / amplitudes on the same data) and the effective
-    degrees of freedom ``k`` (:func:`_total_edf`) as the model complexity -- the
-    mgcv-style marginal AIC.  Like any REML criterion it is valid for models with
-    the **same fixed-effect structure** (a different ``parametric`` design changes
-    the restriction); within that, it is immediate for GP-vs-GP and GP-vs-spline
-    (an ``hsgp_basis`` / kernel choice) selection.
+    The marginal AIC :math:`-2 l_R + 2 k` (lower is better).  Uses the REML log
+    marginal likelihood ``log_mlik`` (so it is comparable across kernels / ranks /
+    amplitudes on the same data) and the effective degrees of freedom :math:`k`
+    (:func:`_total_edf`) as the model complexity -- the mgcv-style marginal AIC.
+    Like any REML criterion it is valid for models with the same fixed-effect
+    structure (a different ``parametric`` design changes the restriction); within
+    that, it is immediate for GP-vs-GP and GP-vs-spline (an
+    :func:`~nitrix.stats.basis.hsgp_basis` / kernel choice) selection.
+
+    Parameters
+    ----------
+    result
+        A GP / HGP fit conforming to :class:`_ICResult`.
+
+    Returns
+    -------
+    Float[Array, 'V']
+        The per-element AIC.
     """
     return -2.0 * result.log_mlik + 2.0 * _total_edf(result)
 
 
 def gp_bic(result: _ICResult) -> Float[Array, 'V']:
-    """Per-element Bayesian information criterion ``-2 l_R + k log N`` for a GP /
-    HGP fit (lower is better); see :func:`gp_aic` for the comparability caveat."""
+    r"""Per-element Bayesian information criterion for a GP / HGP fit.
+
+    The marginal BIC :math:`-2 l_R + k \log N` (lower is better), with :math:`k`
+    the effective degrees of freedom (:func:`_total_edf`) and :math:`N` the number
+    of observations; see :func:`gp_aic` for the comparability caveat.
+
+    Parameters
+    ----------
+    result
+        A GP / HGP fit conforming to :class:`_ICResult`.
+
+    Returns
+    -------
+    Float[Array, 'V']
+        The per-element BIC.
+    """
     k = _total_edf(result)
     return -2.0 * result.log_mlik + k * jnp.log(
         jnp.asarray(float(result.n_obs))

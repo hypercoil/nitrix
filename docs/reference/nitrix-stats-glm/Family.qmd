@@ -1,0 +1,86 @@
+---
+title: "Family"
+generated: true
+description: "An exponential family together with a link, as a record of pure functions."
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+*Re-exported here; defined in `nitrix.stats._family`.*
+
+<!-- nitrix:gen sig:Family -->
+```python
+class Family
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:Family -->
+An exponential family together with a link, as a record of pure functions.
+
+Frozen and hashable so it rides as a static configuration argument (and a
+future `custom_vjp` non-differentiable argument).  The fields are the
+GLM/IRLS primitives:
+
+- `link` / `linkinv` -- the link $g(\mu)$ and inverse link
+  $g^{-1}(\eta)$.
+- `mu_eta` -- the derivative $\mathrm{d}\mu / \mathrm{d}\eta$ as
+  a function of $\eta$ (an IRLS weight).
+- `variance` -- the variance function $V(\mu)$.
+- `unit_deviance` -- the per-observation deviance contribution
+  $d(y, \mu)$.
+- `init_mu` -- a fitted-mean initialiser from $y$ (the IRLS start).
+- `loglik` -- the per-observation log-likelihood
+  $\ell(y, \mu, \phi)$ (the dispersion argument $\phi$ is
+  ignored by the fixed-dispersion families).
+- `has_fixed_dispersion` -- `True` when the dispersion is 1 (binomial /
+  Poisson; negative-binomial with a *known* `alpha`); `False` when it is
+  estimated (Gaussian, Gamma).
+- `eta_bound` -- the IRLS clamp on the linear predictor
+  ($\infty$ for the bounded identity / logit links; `_ETA_MAX` for
+  the unbounded exponential links, where it stabilises the working
+  response).  The IRLS core clamps $\eta$ to
+  $\pm$ `eta_bound`.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:Family.clip_eta -->
+```python
+clip_eta(eta: Array) -> Array
+```
+<!-- nitrix:/gen -->
+
+Clamp the linear predictor to the family's numerically-sane range.
+
+Clamps $\eta$ to $\pm$ `eta_bound` -- $\infty$
+for the bounded identity / logit links (a no-op), `_ETA_MAX` for the
+unbounded exponential links (where an un-clamped $\eta$ blows up
+$\exp(\eta)$ and the IRLS weights).  This is the single source
+of truth for the clamp across the IRLS, PQL, and Laplace
+working-response sites.
+
+<!-- nitrix:gen sig:Family.with_link -->
+```python
+with_link(link: Union[str, 'Link']) -> 'Family'
+```
+<!-- nitrix:/gen -->
+
+A copy of this family with a **non-canonical** link substituted.
+
+Only the link triple (`link` / `linkinv` / `mu_eta`) and the IRLS
+`eta_bound` change; the distribution -- `variance` / `unit_deviance`
+/ `loglik` / `init_mu` (all functions of $\mu$, not
+$\eta$) -- is untouched, so e.g. `BINOMIAL.with_link('probit')`
+is the probit model and `POISSON.with_link('sqrt')` the
+square-root-link Poisson, exactly as in `statsmodels`'
+`Family(link=...)` or `mgcv`.  The shared IRLS core is Fisher scoring
+(weight $w = (\mathrm{d}\mu/\mathrm{d}\eta)^2 / V$ and working
+response $z = \eta + (y - \mu) / (\mathrm{d}\mu/\mathrm{d}\eta)$),
+so any link composes without a solver change.
+
+<!-- nitrix:gen sig:Family.__init__ -->
+```python
+__init__(name: str, has_fixed_dispersion: bool, link: Callable[[Array], Array], linkinv: Callable[[Array], Array], mu_eta: Callable[[Array], Array], variance: Callable[[Array], Array], unit_deviance: Callable[[Array, Array], Array], init_mu: Callable[[Array], Array], loglik: Callable[[Array, Array, Array], Array], eta_bound: float = float('inf')) -> None
+```
+<!-- nitrix:/gen -->
+

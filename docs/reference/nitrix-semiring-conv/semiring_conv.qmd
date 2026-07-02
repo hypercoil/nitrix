@@ -1,0 +1,70 @@
+---
+title: "semiring_conv"
+generated: true
+description: "Semiring-generalised convolution."
+---
+
+[‹ back to `nitrix.semiring.conv`](../nitrix-semiring-conv.qmd)
+
+<!-- nitrix:gen sig:semiring_conv -->
+```python
+semiring_conv(x: Num[Array, '... *spatial c_in'], k: Num[Array, '*kspatial c_in c_out'], *, semiring: Semiring[Any] = REAL, stride: Union[int, Sequence[int]] = 1, padding: Union[str, Sequence[tuple[int, int]]] = 'SAME', dilation: Union[int, Sequence[int]] = 1, backend: Backend = 'auto') -> Num[Array, '... *spatial_out c_out']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:semiring_conv -->
+Semiring-generalised convolution.
+
+Channel-last layout: `x: (..., *spatial, c_in)`,
+`k: (*kspatial, c_in, c_out)`.  Leading batch dims are
+arbitrary; the convolution slides `k` over `x` along the
+spatial dims and reduces via the supplied `semiring`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:semiring_conv -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Num` | `...` × `*spatial` × `c_in` | — | Input array, `(..., *spatial, c_in)`. |
+| `k` | `Num` | `*kspatial` × `c_in` × `c_out` | — | Kernel, `(*kspatial, c_in, c_out)`. The number of trailing spatial dims of `x` is inferred from `k.ndim - 2`. |
+| `semiring` | `Semiring[Any]` | — | `REAL` | Algebra to reduce under. Defaults to [`REAL`](../nitrix-semiring.qmd) (i.e., standard linear convolution). |
+| `stride` | `Union[int, Sequence[int]]` | — | `1` | Per-spatial-dim stride. Either an `int` (applied to every spatial dim) or a per-dim sequence. |
+| `padding` | `Union[str, Sequence[tuple[int, int]]]` | — | `'SAME'` | `"SAME"`, `"VALID"`, or an explicit per-spatial-dim sequence of `(lo, hi)` pairs. |
+| `dilation` | `Union[int, Sequence[int]]` | — | `1` | Per-spatial-dim kernel dilation (rhs_dilation in lax terms). |
+| `backend` | `Backend` | — | `'auto'` | `"auto"`, `"pallas-cuda"`, or `"jax"`. At first GA there is no native Pallas conv kernel; `"pallas-cuda"` is accepted (so callers don't have to special-case conv) but always falls back to the JAX patches path with a warning. |
+
+**Returns** `Num` — shape `...` × `*spatial_out` × `c_out`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:semiring_conv -->
+::: {.callout-note}
+The forward path reuses [`semiring_matmul`](../nitrix-semiring.qmd)
+over reshaped patches, so:
+
+- `backend` is honoured for the inner reduction: `pallas-cuda`
+  uses the native Pallas matmul kernel for the per-output-position
+  reduction.
+- The backward composes through
+  [`semiring_matmul`](../nitrix-semiring.qmd)'s registered VJP
+  automatically; no per-algebra `conv_vjp` is required.
+
+For [`REAL`](../nitrix-semiring.qmd), this produces the same answer as
+`lax.conv_general_dilated` modulo TF32 vs strict-fp32 precision
+(see [`semiring_matmul`](../nitrix-semiring.qmd)'s docstring).
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:semiring_conv -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `c_in` | *(undocumented — add to `_dimensions.yml`)* |
+| `*kspatial` | a variadic group of axes (`kspatial`) |
+| `c_out` | *(undocumented — add to `_dimensions.yml`)* |
+| `*spatial_out` | a variadic group of axes (`spatial_out`) |
+<!-- nitrix:/gen -->

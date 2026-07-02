@@ -1,0 +1,49 @@
+---
+title: "nitrix.geometry.pyramid"
+generated: true
+signature-hash: ced0b72d17c67488
+description: "Multi-resolution Gaussian pyramid."
+listing:
+  id: nitrix-geometry-pyramid-symbols
+  contents: "nitrix-geometry-pyramid/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.geometry.pyramid`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Multi-resolution Gaussian pyramid.
+
+Coarse-to-fine registration warm-starts each resolution from the
+solution of the coarser one above it.  [`gaussian_pyramid`](nitrix-geometry-pyramid/gaussian_pyramid.qmd) builds the
+image stack; [`downsample`](nitrix-geometry-pyramid/downsample.qmd) and [`upsample`](nitrix-geometry-pyramid/upsample.qmd) are the single-step
+anti-aliased resize and the (interpolating) prolongation.
+
+Composition only -- no new kernel: [`downsample`](nitrix-geometry-pyramid/downsample.qmd) is
+`gaussian` (anti-alias) followed by [`resample`](nitrix-geometry-grid/resample.qmd)
+(align-corners resize); [`upsample`](nitrix-geometry-pyramid/upsample.qmd) is [`resample`](nitrix-geometry-grid/resample.qmd) to a
+larger shape.  Channel-last image layout `(*spatial, c)` matches
+[`resample`](nitrix-geometry-grid/resample.qmd) and [`spatial_transform`](nitrix-geometry-grid/spatial_transform.qmd).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `c` | feature channels (channels-last) |
+| `*target` | the target grid's spatial axes (variadic) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-geometry-pyramid-symbols}
+:::

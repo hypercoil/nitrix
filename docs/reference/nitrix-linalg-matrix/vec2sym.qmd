@@ -1,0 +1,49 @@
+---
+title: "vec2sym"
+generated: true
+description: "Symmetric matrix from the vec of its upper triangle."
+---
+
+[‹ back to `nitrix.linalg.matrix`](../nitrix-linalg-matrix.qmd)
+
+*decorated:* `@partial(jax.custom_vjp, nondiff_argnums=(1,))`
+
+<!-- nitrix:gen sig:vec2sym -->
+```python
+vec2sym(vec: Num[Array, '... n'], offset: int = 1) -> Num[Array, '... i i']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:vec2sym -->
+Symmetric matrix from the vec of its upper triangle.
+
+The inverse of [`sym2vec`](../nitrix-linalg-matrix/sym2vec.qmd).  The matrix side length is recovered
+from `n` in closed form as
+$\lfloor (\sqrt{8 n + 1} + 1) / 2 \rfloor + (\text{offset} - 1)$,
+then the vector is written into the upper triangle at the named
+offset and reflected across it: entries off the named diagonal are
+duplicated into the lower triangle, while entries on it are left
+unduplicated.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:vec2sym -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `vec` | `Num` | `...` × `n` | — | Vectorised upper triangle, with arbitrary leading batch axes and a trailing axis of length `n`. |
+| `offset` | `int` | — | `1` | Diagonal offset at which `vec` was extracted. Default `1` (the strict upper triangle, excluding the main diagonal). Use `offset=0` if `vec` includes the main diagonal. |
+
+**Returns** `Num` — shape `...` × `i` × `i`. The reconstructed symmetric matrix block, carrying the leading batch axes of `vec`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:vec2sym -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `i` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

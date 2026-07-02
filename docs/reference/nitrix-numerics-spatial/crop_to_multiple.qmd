@@ -1,0 +1,43 @@
+---
+title: "crop_to_multiple"
+generated: true
+description: "Crop the leading `spatial_rank` axes down to a multiple."
+---
+
+[‹ back to `nitrix.numerics.spatial`](../nitrix-numerics-spatial.qmd)
+
+<!-- nitrix:gen sig:crop_to_multiple -->
+```python
+crop_to_multiple(x: Num[Array, '...'], multiple: _IntArg, *, spatial_rank: int) -> Tuple[Num[Array, '...'], Tuple[Tuple[int, int], ...]]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:crop_to_multiple -->
+Crop the leading `spatial_rank` axes down to a multiple.
+
+Each spatial axis is symmetrically trimmed to the largest multiple of
+`multiple` not exceeding its length. When the excess is odd, the
+extra element is removed from the high side of the axis. Trailing
+axes (e.g. channels) are left untouched.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:crop_to_multiple -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Num` | `...` | — | Input array whose first `spatial_rank` axes are spatial. |
+| `multiple` | `_IntArg` | — | — | Target multiple for each spatial axis. A single integer is broadcast to every spatial axis; a sequence must have length `spatial_rank`. |
+| `spatial_rank` | `int` | — | — | Number of leading axes treated as spatial. |
+
+**Returns** `Tuple[Num[Array, '...'], Tuple[Tuple[int, int], ...]]`. The cropped array. The per-spatial-axis `(lo, hi)` amounts removed from each spatial axis.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:crop_to_multiple -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

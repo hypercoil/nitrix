@@ -1,169 +1,65 @@
 ---
 title: "nitrix.stats.covariance"
 generated: true
-signature-hash: c7b8840fc1989337
+signature-hash: 6b4a06c803c28ff9
+description: "Empirical covariance / correlation / partial / conditional measures."
+listing:
+  id: nitrix-stats-covariance-symbols
+  contents: "nitrix-stats-covariance/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
-Auto-generated scaffold for `nitrix.stats.covariance` (signatures only). Replace the
-skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
-`check_reference_staleness.py` flags this page if the underlying
-signatures drift from this stub.
+Auto-generated scaffold for `nitrix.stats.covariance`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
 
-## `cov` {#cov}
-
-```python
-cov(X: Num[Array, '... c obs'], *, rowvar: bool=True, bias: bool=False, ddof: Optional[int]=None, weights: Optional[Num[Array, '... obs']]=None, weight_matrix: Optional[Num[Array, '... obs obs']]=None, l2: float=0.0) -> Num[Array, '... c c']
-```
-
-Empirical covariance of variables in a tensor batch.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `corr` {#corr}
-
-```python
-corr(X: Num[Array, '... c obs'], **kwargs: Any) -> Num[Array, '... c c']
-```
-
-Pearson correlation of variables in a tensor batch.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `pairedcov` {#pairedcov}
-
-```python
-pairedcov(X: Num[Array, '... c obs'], Y: Num[Array, '... d obs'], *, rowvar: bool=True, bias: bool=False, ddof: Optional[int]=None, weights: Optional[Num[Array, '... obs']]=None, weight_matrix: Optional[Num[Array, '... obs obs']]=None, l2: float=0.0) -> Num[Array, '... c d']
-```
-
-Cross-covariance between two sets of variables.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `pairedcorr` {#pairedcorr}
-
-```python
-pairedcorr(X: Num[Array, '... c obs'], Y: Num[Array, '... d obs'], **kwargs: Any) -> Num[Array, '... c d']
-```
-
-Cross-correlation between two sets of variables.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `partialcov` {#partialcov}
-
-```python
-partialcov(X: Num[Array, '... c obs'], *, require_nonsingular: bool=True, **kwargs: Any) -> Num[Array, '... c c']
-```
-
-Partial covariance: conditioning each pair on all others.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `partialcorr` {#partialcorr}
-
-```python
-partialcorr(X: Num[Array, '... c obs'], *, require_nonsingular: bool=True, **kwargs: Any) -> Num[Array, '... c c']
-```
-
-Partial correlation: normalised partial covariance.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `conditionalcov` {#conditionalcov}
-
-```python
-conditionalcov(X: Num[Array, '... c obs'], Y: Num[Array, '... d obs'], *, rowvar: bool=True, bias: bool=False, ddof: Optional[int]=None, weights: Optional[Num[Array, '... obs']]=None, weight_matrix: Optional[Num[Array, '... obs obs']]=None, l2: float=0.0, residualise_l2: float=0.0) -> Num[Array, '... c c']
-```
-
-Covariance of ``X`` conditioned on the variables in ``Y``.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `conditionalcorr` {#conditionalcorr}
-
-```python
-conditionalcorr(X: Num[Array, '... c obs'], Y: Num[Array, '... d obs'], **kwargs: Any) -> Num[Array, '... c c']
-```
-
-Correlation of ``X`` conditioned on the variables in ``Y``.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `precision` {#precision}
-
-```python
-precision(X: Num[Array, '... c obs'], *, require_nonsingular: bool=True, **kwargs: Any) -> Num[Array, '... c c']
-```
-
-Inverse covariance (precision) matrix.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `ccov` {#ccov}
-
-```python
-ccov(*args: Any, **kwargs: Any) -> Num[Array, '... c c']
-```
-
-Alias for ``conditionalcov``.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `ccorr` {#ccorr}
-
-```python
-ccorr(*args: Any, **kwargs: Any) -> Num[Array, '... c c']
-```
-
-Alias for ``conditionalcorr``.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `pcorr` {#pcorr}
-
-```python
-pcorr(*args: Any, **kwargs: Any) -> Num[Array, '... c c']
-```
-
-Alias for ``partialcorr``.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `corrcoef` {#corrcoef}
-
-```python
-corrcoef(*args: Any, **kwargs: Any) -> Num[Array, '... c c']
-```
-
-Alias for ``corr`` (numpy convention).
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
+<!-- nitrix:gen overview:__module__ -->
+Empirical covariance / correlation / partial / conditional measures.
+
+Differentiable, batched (n-D leading batch), JIT-safe.  Supports:
+
+- Unweighted, scalar bias / unbias.
+- **Vector weights** (per-observation; the diagonal of $W$).
+- **Matrix weights** (full `(obs, obs)` coupling; useful for
+  inter-temporal weighting, lagged covariance, etc.).
+- Ridge regularisation via the `l2` knob (adds $\lambda I$
+  to the estimated covariance).
+
+The weighted mean underlying the matrix-weight path computes
+$\mu_i = \sum_t m_t X_{it} / \sum_t m_t$, where the
+per-observation marginal weight $m_t$ is the row sum of the
+supplied weight matrix.
+
+Functions exposed:
+
+- [`cov`](nitrix-stats-covariance/cov.qmd) / [`corr`](nitrix-stats-covariance/corr.qmd) -- unary covariance / correlation.
+- [`pairedcov`](nitrix-stats-covariance/pairedcov.qmd) / [`pairedcorr`](nitrix-stats-covariance/pairedcorr.qmd) -- bivariate (X, Y).
+- [`partialcov`](nitrix-stats-covariance/partialcov.qmd) / [`partialcorr`](nitrix-stats-covariance/partialcorr.qmd) -- conditioned on all
+  other variables (inverse-covariance-derived).
+- [`conditionalcov`](nitrix-stats-covariance/conditionalcov.qmd) / [`conditionalcorr`](nitrix-stats-covariance/conditionalcorr.qmd) -- conditioned on
+  an external set of variables (residualise + cov).
+- [`precision`](nitrix-stats-covariance/precision.qmd) -- inverse covariance (matrix inverse or
+  Moore-Penrose pseudoinverse).
+- Aliases: [`ccov`](nitrix-stats-covariance/ccov.qmd), [`ccorr`](nitrix-stats-covariance/ccorr.qmd), [`pcorr`](nitrix-stats-covariance/pcorr.qmd), [`corrcoef`](nitrix-stats-covariance/corrcoef.qmd).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `c` | feature channels (channels-last) |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-stats-covariance-symbols}
+:::

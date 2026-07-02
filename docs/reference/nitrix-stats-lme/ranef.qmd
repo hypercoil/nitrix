@@ -1,0 +1,45 @@
+---
+title: "ranef"
+generated: true
+description: "Random-effect modes (BLUPs) of a fitted mixed model."
+---
+
+[‹ back to `nitrix.stats.lme`](../nitrix-stats-lme.qmd)
+
+*Re-exported here; defined in `nitrix.stats.lme._blup`.*
+
+<!-- nitrix:gen sig:ranef -->
+```python
+ranef(result: Any) -> Float[Array, 'V q r']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:ranef -->
+Random-effect modes (BLUPs) of a fitted mixed model.
+
+Returns the per-level modes $b_g$ stored on the result -- `(V, q)`
+for a scalar random intercept, `(V, q, r)` for a random slope.  Available
+on a [`GLMMResult`](../nitrix-stats.qmd) (always) and on an LME result fitted
+with [`lme_fit`](../nitrix-stats-lme-reml/lme_fit.qmd) under `retain_blups=True`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:ranef -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `result` | `Any` | — | — | A fitted mixed-model result carrying a `blups` attribute -- a [`GLMMResult`](../nitrix-stats.qmd), or an LME result fitted with `retain_blups=True`. |
+
+**Returns** `Float` — shape `V` × `q` × `r`. The per-element, per-group random-effect modes $b_g$ -- `(V, q)` for a scalar random intercept, `(V, q, r)` for a random slope.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:ranef -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `q` | random-effect columns |
+| `r` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

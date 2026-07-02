@@ -1,0 +1,77 @@
+---
+title: "SSD"
+generated: true
+description: "Squared-difference metric, SSD (within-modality; least-squares)."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._metric`.*
+
+<!-- nitrix:gen sig:SSD -->
+```python
+class SSD
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:SSD -->
+Squared-difference metric, SSD (within-modality; least-squares).
+
+The Gauss-Newton / Levenberg-Marquardt path's metric: the residual is
+the raw intensity difference, so the recipe is the `3dvolreg` /
+Lucas-Kanade lineage.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:SSD.cost -->
+```python
+cost(warped: Float[Array, '*spatial'], fixed: Float[Array, '*spatial'], *, mask: Optional[Float[Array, '*spatial']] = None) -> Float[Array, '']
+```
+<!-- nitrix:/gen -->
+
+Mean squared-difference cost between `warped` and `fixed`.
+
+<!-- nitrix:gen sig:SSD.residual -->
+```python
+residual(warped: Float[Array, '*spatial'], fixed: Float[Array, '*spatial'], *, mask: Optional[Float[Array, '*spatial']] = None) -> Float[Array, ' m']
+```
+<!-- nitrix:/gen -->
+
+Raw intensity-difference residual for the least-squares path.
+
+<!-- nitrix:gen sig:SSD.__init__ -->
+```python
+__init__() -> None
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:SSD -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **121.6 µs** (median, L4); up to **1841.57× faster** than `simpleitk.MeanSquares`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_SSD.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| ssd | jax-cuda12 | shape=[128, 128, 128] | `cupy.ssd` | ok | 71.6 µs / 75.6 µs | 61.05 ms | 16.78 MB (hbm) | ✓ 6.1e-05×tol | 0.60x vs nitrix-jax |
+| ssd | jax-cuda12 | shape=[128, 128, 128] | `nitrix-jax` | ok | 119.2 µs / 121.6 µs | 230.83 ms | 50.33 MB (hbm) | ✓ 7.1e-07×tol | 1.00x vs nitrix-jax |
+| ssd | jax-cuda12 | shape=[128, 128, 128] | `numpy.ssd` | ok | 19.33 ms / 19.79 ms | 19.44 ms | 16.78 MB (hbm) | ✓ 0×tol | 162.10x vs nitrix-jax |
+| ssd | jax-cuda12 | shape=[128, 128, 128] | `simpleitk.MeanSquares` | ok | 219.56 ms / 225.72 ms | 291.81 ms | 16.78 MB (hbm) | ✓ 2.1e-10×tol | 1841.57x vs nitrix-jax |
+| ssd | jax-cuda12 | shape=[64, 64, 64] | `cupy.ssd` | ok | 70.6 µs / 74.8 µs | 1.824 s | 2.10 MB (hbm) | ✓ 4.6e-06×tol | 0.67x vs nitrix-jax |
+| ssd | jax-cuda12 | shape=[64, 64, 64] | `nitrix-jax` | ok | 104.9 µs / 125.4 µs | 244.61 ms | 35.65 MB (hbm) | ✓ 4.6e-06×tol | 1.00x vs nitrix-jax |
+| ssd | jax-cuda12 | shape=[64, 64, 64] | `numpy.ssd` | ok | 1.94 ms / 1.95 ms | 2.08 ms | 2.10 MB (hbm) | ✓ 0×tol | 18.49x vs nitrix-jax |
+| ssd | jax-cuda12 | shape=[64, 64, 64] | `simpleitk.MeanSquares` | ok | 25.26 ms / 25.62 ms | 89.29 ms | 2.10 MB (hbm) | ✓ 4.9e-11×tol | 240.82x vs nitrix-jax |
+:::
+
+*source: bench `02d1a5d9` · nitrix `a0769766`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:SSD -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

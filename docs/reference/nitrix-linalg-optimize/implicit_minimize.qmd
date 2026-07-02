@@ -1,0 +1,85 @@
+---
+title: "implicit_minimize"
+generated: true
+description: "Differentiable argmin of a scalar objective by the implicit theorem."
+---
+
+[‹ back to `nitrix.linalg.optimize`](../nitrix-linalg-optimize.qmd)
+
+<!-- nitrix:gen sig:implicit_minimize -->
+```python
+implicit_minimize(objective_fn: ScalarObjectiveFn, data: Any, x0: Float[Array, ' p'], *, maxiter: int = 50, ridge: float = 0.0, cg_tol: float = 1e-06, cg_maxiter: Optional[int] = None) -> Float[Array, ' p']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:implicit_minimize -->
+Differentiable argmin of a scalar objective by the implicit theorem.
+
+Compute the argmin of a scalar objective $f(\mathrm{data}, x)$,
+differentiable with respect to `data` by the **implicit-function
+theorem**.
+
+The general-objective counterpart of [`implicit_least_squares`](../nitrix-linalg-optimize/implicit_least_squares.qmd): where
+that assumes a least-squares residual and uses the Gauss-Newton Hessian
+$J^{\top}J$, this differentiates the argmin of an *arbitrary* scalar
+$f$ through the **exact** Hessian $\nabla^2_x f$ -- so a
+registration whose cost is LNCC / MI / correlation-ratio (not a
+least-squares residual) becomes a differentiable layer too.
+
+The forward solve is BFGS (`jax.scipy.optimize.minimize`); the
+backward uses the stationarity
+$g(\mathrm{data}, x^*) = \nabla_x f = 0$, which by the
+implicit-function theorem gives
+$\partial x^* / \partial \mathrm{data} = -(\nabla^2_x f)^{-1}
+\partial_{\mathrm{data}} g$.  The adjoint
+$(\nabla^2_x f)\, w = \bar{x}$ is solved matrix-free with
+[`cg`](../nitrix-linalg-krylov/cg.qmd) (Hessian-vector products via `jax.linearize` of the gradient
+-- stays on-device), then $-w$ is pushed back through
+$\partial_{\mathrm{data}} g$.
+
+**Memory footprint.**  $O(1)$ in the BFGS iteration count -- nothing
+is unrolled.  The Hessian is never materialised: [`cg`](../nitrix-linalg-krylov/cg.qmd) applies it as a
+matrix-free Hessian-vector product, so the backward holds only the
+[`cg`](../nitrix-linalg-krylov/cg.qmd) iterates (a handful of `x`-shaped vectors, $O(P)$ in the
+parameter count) plus the `jax.linearize` cache of a *single*
+$\nabla_x f$ evaluation.  For an image-similarity objective the
+latter dominates and scales as the cost of one gradient -- $O(M)$ in
+the number of voxels -- *not* $O(P^2)$: the dense $P \times P$
+Hessian is never formed.  So peak backward memory is $O(M + P)$,
+independent of both the iteration count and $P^2$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:implicit_minimize -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `objective_fn` | `ScalarObjectiveFn` | — | — | Map `(data, x) -> scalar` (`data` the differentiable argument, an array or pytree; `x` the optimisation variable, `(P,)`, mapping to a scalar objective). |
+| `data` | `Any` | — | — | The differentiable parameters / inputs (an array or pytree). |
+| `x0` | `Float` | `p` | — | Initial guess for `x`, `(P,)`. |
+| `maxiter` | `int` | — | `50` | Forward BFGS iteration cap. |
+| `ridge` | `float` | — | `0.0` | Non-negative Tikhonov ridge added to the Hessian in the backward adjoint solve (default `0`); raise it if the Hessian at the optimum is near-singular (a minimum's Hessian is only positive semidefinite). |
+| `cg_tol` | `float` | — | `1e-06` | Backward adjoint-solve ([`cg`](../nitrix-linalg-krylov/cg.qmd)) controls. |
+| `cg_maxiter` | `Optional[int]` | — | `None` | Backward adjoint-solve ([`cg`](../nitrix-linalg-krylov/cg.qmd)) controls. |
+
+**Returns** `Float` — shape `p`. The minimiser $x^*$, `(P,)`. $\mathrm{d}x^* / \mathrm{d}x_0 = 0$ (the initial guess does not affect the gradient).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:implicit_minimize -->
+::: {.callout-note}
+The implicit gradient is exact only at a true stationary point (the
+backward assumes $\nabla_x f(\mathrm{data}, x^*) = 0$), so run the
+forward solve to convergence.  At a minimum $\nabla^2_x f$ is
+positive semidefinite, so the SPD [`cg`](../nitrix-linalg-krylov/cg.qmd) applies -- pass `ridge > 0`
+if it is only semidefinite.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:implicit_minimize -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

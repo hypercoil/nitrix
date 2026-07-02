@@ -1,0 +1,75 @@
+---
+title: "zscore_normalize"
+generated: true
+description: "Z-score normalisation: `(x - mean) / (std + eps)` along `axis`."
+---
+
+[‹ back to `nitrix.numerics.normalize`](../nitrix-numerics-normalize.qmd)
+
+<!-- nitrix:gen sig:zscore_normalize -->
+```python
+zscore_normalize(x: Num[Array, '...'], *, axis: _AxisArg = -1, weights: Optional[Num[Array, '...']] = None, eps: float = 1e-12, nonzero_mask: bool = False) -> Num[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:zscore_normalize -->
+Z-score normalisation: `(x - mean) / (std + eps)` along `axis`.
+
+Population standard deviation (no Bessel correction).
+Per-cell normalisation; output has zero mean and unit std
+along the named axis.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:zscore_normalize -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Num` | `...` | — | Input tensor. |
+| `axis` | `_AxisArg` | — | `-1` | Axis (or axes) over which the mean / std are computed. Default `-1` (the trailing observation axis). For a per-channel statistic on a channel-first multimodal volume `(C, *spatial)`, pass `axis` covering the spatial axes (e.g. `axis=(-3, -2, -1)`). |
+| `weights` | `Optional[Num[Array, '...']]` | — | `None` | Optional weights for the mean / std (see module docstring). |
+| `eps` | `float` | — | `1e-12` | Denominator stabiliser. |
+| `nonzero_mask` | `bool` | — | `False` | If `True`, compute the mean / std over the **nonzero** entries only (`mask = x != 0`) and leave the zero entries at exactly `0` in the output (rather than mapping them to `-mean / std`). This is the per-channel BraTS / nnUNet convention: the background outside the brain stays `0` while the foreground is z-scored against foreground statistics. Mutually exclusive with an explicit `weights` (the mask *is* the weight). |
+
+**Returns** `Num` — shape `...`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:zscore_normalize -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **157.6 µs** (median, L4); up to **301.4× faster** than `scipy.stats.zscore`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_ZSCORE_NORMALIZE.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| zscore_normalize | jax-cpu | n=2048 | `cupy.zscore_normalize` | skipped | — | — | — | — | — |
+| zscore_normalize | jax-cpu | n=2048 | `nitrix-jax` | ok | 2.79 ms / 2.89 ms | 147.82 ms | 1280 MB (rss) | ✓ 0.001×tol | 1.00x vs nitrix-jax |
+| zscore_normalize | jax-cpu | n=2048 | `scipy.stats.zscore` | ok | 14.57 ms / 17.29 ms | 53.83 ms | 1280 MB (rss) | ✓ 0.0011×tol | 5.21x vs nitrix-jax |
+| zscore_normalize | jax-cuda12 | n=2048 | `cupy.zscore_normalize` | ok | 304.0 µs / 308.8 µs | 166.55 ms | 16.78 MB (hbm) | ✓ 0.0011×tol | 2.05x vs nitrix-jax |
+| zscore_normalize | jax-cuda12 | n=2048 | `nitrix-jax` | ok | 148.3 µs / 157.6 µs | 228.03 ms | 50.33 MB (hbm) | ✓ 0.001×tol | 1.00x vs nitrix-jax |
+| zscore_normalize | jax-cuda12 | n=2048 | `scipy.stats.zscore` | ok | 17.49 ms / 18.35 ms | 41.39 ms | 16.78 MB (hbm) | ✓ 0.0011×tol | 117.89x vs nitrix-jax |
+| zscore_normalize | jax-cpu | n=4096 | `cupy.zscore_normalize` | skipped | — | — | — | — | — |
+| zscore_normalize | jax-cpu | n=4096 | `nitrix-jax` | ok | 27.57 ms / 28.12 ms | 150.56 ms | 1280 MB (rss) | ✓ 0.001×tol | 1.00x vs nitrix-jax |
+| zscore_normalize | jax-cpu | n=4096 | `scipy.stats.zscore` | ok | 219.03 ms / 254.39 ms | 209.70 ms | 1280 MB (rss) | ✓ 0.001×tol | 7.94x vs nitrix-jax |
+| zscore_normalize | jax-cuda12 | n=4096 | `cupy.zscore_normalize` | ok | 1.94 ms / 1.95 ms | 162.62 ms | 67.11 MB (hbm) | ✓ 0.0012×tol | 2.83x vs nitrix-jax |
+| zscore_normalize | jax-cuda12 | n=4096 | `nitrix-jax` | ok | 684.5 µs / 691.6 µs | 217.56 ms | 201.33 MB (hbm) | ✓ 0.00099×tol | 1.00x vs nitrix-jax |
+| zscore_normalize | jax-cuda12 | n=4096 | `scipy.stats.zscore` | ok | 206.32 ms / 207.45 ms | 204.10 ms | 67.11 MB (hbm) | ✓ 0.001×tol | 301.40x vs nitrix-jax |
+| zscore_normalize | jax-cpu | n=512 | `cupy.zscore_normalize` | skipped | — | — | — | — | — |
+| zscore_normalize | jax-cpu | n=512 | `nitrix-jax` | ok | 174.7 µs / 180.2 µs | 133.78 ms | 1280 MB (rss) | ✓ 0.0012×tol | 1.00x vs nitrix-jax |
+| zscore_normalize | jax-cpu | n=512 | `scipy.stats.zscore` | ok | 778.1 µs / 818.4 µs | 1.08 ms | 1280 MB (rss) | ✓ 0.001×tol | 4.45x vs nitrix-jax |
+| zscore_normalize | jax-cuda12 | n=512 | `cupy.zscore_normalize` | ok | 205.5 µs / 214.5 µs | 815.52 ms | 1.05 MB (hbm) | ✓ 0.001×tol | 2.16x vs nitrix-jax |
+| zscore_normalize | jax-cuda12 | n=512 | `nitrix-jax` | ok | 95.1 µs / 109.8 µs | 215.16 ms | 3.15 MB (hbm) | ✓ 0.00082×tol | 1.00x vs nitrix-jax |
+| zscore_normalize | jax-cuda12 | n=512 | `scipy.stats.zscore` | ok | 1.15 ms / 1.17 ms | 1.54 ms | 1.05 MB (hbm) | ✓ 0.001×tol | 12.14x vs nitrix-jax |
+:::
+
+*source: bench `3ebfa0ef` · nitrix `f42e7ff8`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:zscore_normalize -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

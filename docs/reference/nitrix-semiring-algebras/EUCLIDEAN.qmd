@@ -1,0 +1,26 @@
+---
+title: "EUCLIDEAN"
+generated: true
+description: "The Euclidean-distance algebra: sum-of-squared-differences with a final square root."
+---
+
+[‹ back to `nitrix.semiring.algebras`](../nitrix-semiring-algebras.qmd)
+
+<!-- nitrix:gen sig:EUCLIDEAN -->
+```python
+EUCLIDEAN: Semiring[Any] = Semiring(monoid=(_SumThenSqrtMonoid()), binary_op=(_SquaredDiffSemigroup()), identity=0.0, annihilator=None, name='euclidean', matmul_vjp=euclidean_matmul_vjp, ell_matmul_vjp=euclidean_ell_matmul_vjp)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:EUCLIDEAN -->
+The Euclidean-distance algebra: sum-of-squared-differences with a
+final square root.
+
+The binary operation is the squared difference $(a - b)^2$, the
+monoid sums those contributions (identity 0), and `finalize`
+applies a guarded square root. The squared-difference operation has no
+annihilator, so entries cannot be value-masked, and the trailing square
+root is a non-monoidal projection; this makes `EUCLIDEAN` a relaxed
+[`Semiring`](../nitrix-semiring/Semiring.qmd) rather than a [`StrictSemiring`](../nitrix-semiring/StrictSemiring.qmd).
+<!-- nitrix:/gen -->
+

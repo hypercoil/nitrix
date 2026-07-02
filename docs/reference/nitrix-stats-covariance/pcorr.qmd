@@ -1,0 +1,38 @@
+---
+title: "pcorr"
+generated: true
+description: "Alias for [`partialcorr`](../nitrix-stats-covariance/partialcorr.qmd)."
+---
+
+[‹ back to `nitrix.stats.covariance`](../nitrix-stats-covariance.qmd)
+
+<!-- nitrix:gen sig:pcorr -->
+```python
+pcorr(*args, **kwargs) -> Num[Array, '... c c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:pcorr -->
+Alias for [`partialcorr`](../nitrix-stats-covariance/partialcorr.qmd).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:pcorr -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `*args` | `Any` | — | `()` | — |
+| `**kwargs` | `Any` | — | `{}` | — |
+
+**Returns** `Num` — shape `...` × `c` × `c`. Partial correlation matrix, `(..., c, c)`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:pcorr -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `c` | feature channels (channels-last) |
+<!-- nitrix:/gen -->

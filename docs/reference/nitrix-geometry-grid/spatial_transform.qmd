@@ -1,0 +1,92 @@
+---
+title: "spatial_transform"
+generated: true
+description: "Warp an image by a per-pixel deformation field."
+---
+
+[‹ back to `nitrix.geometry.grid`](../nitrix-geometry-grid.qmd)
+
+<!-- nitrix:gen sig:spatial_transform -->
+```python
+spatial_transform(image: Float[Array, '*leading *spatial c'], deformation: Float[Array, '*leading *spatial ndim'], *, mode: BoundaryMode = 'constant', cval: float = 0.0, method: Interpolator = Linear()) -> Float[Array, '*leading *spatial c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:spatial_transform -->
+Warp an image by a per-pixel deformation field.
+
+For each output pixel at coordinate `p`, the result is
+`image` sampled at `deformation[p]` via the interpolation
+`method` ((multi-)linear by default).  `deformation` is
+therefore an *absolute* coordinate map, not a relative
+displacement.  To use a displacement field `delta`, add
+[`identity_grid`](../nitrix-geometry-grid/identity_grid.qmd) first:
+    warped = spatial_transform(image, identity_grid(spatial) + delta)
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:spatial_transform -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `image` | `Float` | `*leading` × `*spatial` × `c` | — | Channel-last image, `(*leading, *spatial, c)`. Leading batch dims are broadcast-compatible with `deformation`. |
+| `deformation` | `Float` | `*leading` × `*spatial` × `ndim` | — | Absolute sample coordinates, `(*leading, *spatial, ndim)` with `ndim` matching the spatial rank of `image`. The spatial shape need not match `image`'s spatial shape -- for resampling-like ops, `deformation` indexes anywhere in `image`. |
+| `mode` | `BoundaryMode` | — | `'constant'` | Out-of-bounds handling. Default `"constant"` (preserves the prior contract for image-sampling). Set `mode="nearest"` for edge-replicate (voxelmorph convention for flow-warp); see [`integrate_velocity_field`](../nitrix-geometry-grid/integrate_velocity_field.qmd) which defaults to `"nearest"` for the same reason. Other valid values: `"wrap"`, `"mirror"`, `"reflect"`. |
+| `cval` | `float` | — | `0.0` | Constant fill value when `mode="constant"`. Ignored otherwise. Default `0`. |
+| `method` | `Interpolator` | — | `Linear()` | Interpolation kernel -- an [`Interpolator`](../nitrix-geometry-grid/Interpolator.qmd) record. Default [`Linear`](../nitrix-geometry-grid/Linear.qmd) ((multi-)linear, the prior behaviour). [`NearestNeighbour`](../nitrix-geometry-grid/NearestNeighbour.qmd) is the label-preserving choice but is not differentiable with respect to the deformation (so it cannot drive a registration loss). |
+
+**Returns** `Float` — shape `*leading` × `*spatial` × `c`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:spatial_transform -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **98.5 µs** (median, L4); up to **20.66× faster** than `scipy.ndimage.map_coordinates`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_SPATIAL_TRANSFORM.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| spatial_transform | jax-cpu | shape=[256, 256] | `cupyx.scipy.ndimage.map_coordinates` | skipped | — | — | — | — | — |
+| spatial_transform | jax-cpu | shape=[256, 256] | `nitrix-jax` | ok | 376.7 µs / 447.3 µs | 137.27 ms | 493 MB (rss) | ✓ 0.00075×tol | 1.00x vs nitrix-jax |
+| spatial_transform | jax-cpu | shape=[256, 256] | `scipy.ndimage.map_coordinates` | ok | 1.86 ms / 1.87 ms | 3.54 ms | 453 MB (rss) | ✓ 5.5e-05×tol | 4.93x vs nitrix-jax |
+| spatial_transform | jax-cuda12 | shape=[256, 256] | `cupyx.scipy.ndimage.map_coordinates` | ok | 52.7 µs / 55.4 µs | 328.89 ms | 0.79 MB (hbm) | ✓ 0.00075×tol | 0.56x vs nitrix-jax |
+| spatial_transform | jax-cuda12 | shape=[256, 256] | `nitrix-jax` | ok | 94.5 µs / 98.5 µs | 180.28 ms | 1.31 MB (hbm) | ✓ 0.00098×tol | 1.00x vs nitrix-jax |
+| spatial_transform | jax-cuda12 | shape=[256, 256] | `scipy.ndimage.map_coordinates` | ok | 1.95 ms / 1.97 ms | 1.98 ms | 0.79 MB (hbm) | ✓ 5.5e-05×tol | 20.66x vs nitrix-jax |
+| spatial_transform | jax-cpu | shape=[64, 64] | `cupyx.scipy.ndimage.map_coordinates` | skipped | — | — | — | — | — |
+| spatial_transform | jax-cpu | shape=[64, 64] | `nitrix-jax` | ok | 62.6 µs / 69.9 µs | 131.48 ms | 493 MB (rss) | ✓ 0.00042×tol | 1.00x vs nitrix-jax |
+| spatial_transform | jax-cpu | shape=[64, 64] | `scipy.ndimage.map_coordinates` | ok | 120.6 µs / 122.3 µs | 142.7 µs | 453 MB (rss) | ✓ 5.2e-05×tol | 1.93x vs nitrix-jax |
+| spatial_transform | jax-cuda12 | shape=[64, 64] | `cupyx.scipy.ndimage.map_coordinates` | ok | 53.7 µs / 60.3 µs | 516.37 ms | 0.05 MB (hbm) | ✓ 0.00051×tol | 0.56x vs nitrix-jax |
+| spatial_transform | jax-cuda12 | shape=[64, 64] | `nitrix-jax` | ok | 96.4 µs / 99.0 µs | 181.00 ms | 0.08 MB (hbm) | ✓ 0.00043×tol | 1.00x vs nitrix-jax |
+| spatial_transform | jax-cuda12 | shape=[64, 64] | `scipy.ndimage.map_coordinates` | ok | 126.5 µs / 127.9 µs | 154.1 µs | 0.05 MB (hbm) | ✓ 5.2e-05×tol | 1.31x vs nitrix-jax |
+:::
+
+*source: bench `74c2a463` · nitrix `fcbe94d3`*
+::::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:spatial_transform -->
+::: {.callout-note}
+Leading batch dims are composed via `jax.vmap` internally;
+the per-sample core takes `(*spatial, c)` / `(*spatial,
+ndim)` and returns `(*spatial, c)`.  All leading axes that
+appear in both inputs must match exactly -- broadcast of
+leading axes is *not* attempted (the asymmetry between image
+and deformation shape semantics makes silent broadcast
+error-prone).  For a leading-batch convenience that broadcasts
+a shared image or deformation, see [`spatial_transform_batched`](../nitrix-geometry-grid/spatial_transform_batched.qmd).
+
+No cubic (`order=3`) B-spline path exists yet.  See
+[`resample`](../nitrix-geometry-grid/resample.qmd) Notes for the parity implication.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:spatial_transform -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*leading` | leading batch axes preceding the spatial grid (variadic) |
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `c` | feature channels (channels-last) |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->

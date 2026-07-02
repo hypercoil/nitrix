@@ -1,0 +1,63 @@
+---
+title: "segment_segment_sq_dist"
+generated: true
+description: "Clamped segment-to-segment squared distance (Ericson)."
+---
+
+[‹ back to `nitrix.geometry`](../nitrix-geometry.qmd)
+
+*Re-exported here; defined in `nitrix.geometry._mesh_distance`.*
+
+<!-- nitrix:gen sig:segment_segment_sq_dist -->
+```python
+segment_segment_sq_dist(p1: Float[Array, '*batch 3'], q1: Float[Array, '*batch 3'], p2: Float[Array, '*batch 3'], q2: Float[Array, '*batch 3']) -> Float[Array, '*batch']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:segment_segment_sq_dist -->
+Clamped segment-to-segment squared distance (Ericson).
+
+The squared Euclidean distance between the closest points of segment
+`[p1, q1]` and segment `[p2, q2]` -- the branchless, vectorised form
+of Ericson's `ClosestPtSegmentSegment` (*Real-Time Collision
+Detection*, section 5.1.9): minimise
+$\|(p_1 + s d_1) - (p_2 + t d_2)\|^2$ over
+$(s, t) \in [0, 1]^2$ with the parameters clamped to the unit
+square.
+
+The proximity core of an edge-edge mesh self-intersection penalty: two
+mesh edges intersect (or nearly so) iff this distance is ~0.  Inputs
+broadcast over any leading `*batch` (e.g. a set of candidate edge
+pairs), so the per-pair distance is one vectorised call.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:segment_segment_sq_dist -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `p1` | `Float` | `*batch` × `3` | — | Endpoints of the first segment, `(*batch, 3)`. |
+| `q1` | `Float` | `*batch` × `3` | — | Endpoints of the first segment, `(*batch, 3)`. |
+| `p2` | `Float` | `*batch` × `3` | — | Endpoints of the second segment, `(*batch, 3)`. |
+| `q2` | `Float` | `*batch` × `3` | — | Endpoints of the second segment, `(*batch, 3)`. |
+
+**Returns** `Float` — shape `*batch`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:segment_segment_sq_dist -->
+::: {.callout-note}
+Squared distance (no `sqrt`) -- it is the cheaper, smoother quantity a
+penalty thresholds, and the caller takes the root only if a true length
+is needed.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:segment_segment_sq_dist -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*batch` | leading batch axes (variadic) |
+| `3` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

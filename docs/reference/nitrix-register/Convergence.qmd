@@ -1,0 +1,47 @@
+---
+title: "Convergence"
+generated: true
+description: "Windowed cost-slope criterion for the `mode='early_exit'` iteration."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._converge`.*
+
+<!-- nitrix:gen sig:Convergence -->
+```python
+class Convergence
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:Convergence -->
+Windowed cost-slope criterion for the `mode='early_exit'` iteration.
+
+The threshold/window pair that parameterises the early-exit `lax.while_loop`
+(see [`ConvergenceMode`](../nitrix-register/ConvergenceMode.qmd)): per level, the loop runs until the cost has
+plateaued -- a least-squares-line fit over the last `window` per-iteration
+costs whose normalised slope falls below `threshold` -- or the level's
+iteration count (the hard cap) is reached.  It is **inert** under
+`mode='fixed'` (the fixed `lax.scan`); the mode and this criterion are
+orthogonal, so a spec always carries a concrete [`Convergence`](../nitrix-register/Convergence.qmd), used
+only when `mode='early_exit'`.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:Convergence.__init__ -->
+```python
+__init__(threshold: float = 1e-06, window: int = 10) -> None
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:Convergence -->
+::: {.callout-note}
+An early-exit forward is **not** reverse-differentiable (`lax.while_loop`
+has no reverse rule); for a differentiable registration layer use
+`mode='fixed'` (the `scan`) or the implicit-function path
+(`linalg.implicit_least_squares` / `implicit_minimize`), whose adjoint is
+solved at the optimum and is trajectory-independent.
+:::
+<!-- nitrix:/gen -->
+

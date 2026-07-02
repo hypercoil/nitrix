@@ -1,0 +1,78 @@
+---
+title: "nitrix.register.diffeomorphic"
+generated: true
+signature-hash: 52552ac320310c8b
+description: "Diffeomorphic registration recipe: log-domain Demons."
+listing:
+  id: nitrix-register-diffeomorphic-symbols
+  contents: "nitrix-register-diffeomorphic/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.register.diffeomorphic`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Diffeomorphic registration recipe: log-domain Demons.
+
+The representative diffeomorphic algorithm of Vercauteren, Pennec, Perchant
+and Ayache (2009), parametrised by a *stationary velocity field* $v$
+whose exponential $\varphi = \exp(v)$ (scaling-and-squaring, via
+[`integrate_velocity_field`](nitrix-geometry.qmd)) is a diffeomorphism by
+construction.  Each iteration is an operator splitting:
+
+1. **ESM demons force** -- a closed-form per-voxel velocity update
+   $u = (F - M \circ \varphi)\, J / (|J|^2 + \alpha^2 (F - M \circ \varphi)^2)$
+   with the symmetric gradient
+   $J = \tfrac{1}{2}(\nabla F + \nabla (M \circ \varphi))$
+   (efficient symmetric forces).  There is no inner solve -- this is what
+   makes the diffeomorphic recipe as GPU-clean as it is.
+2. **Fluid regularisation** -- Gaussian-smooth the update $u$.
+3. **Log update** -- $v \leftarrow v + u$ (additive; the
+   Baker-Campbell-Hausdorff term $+ \tfrac{1}{2}[v, u]$ is optional).
+4. **Diffusion regularisation** -- Gaussian-smooth the velocity $v$.
+
+The recipe proceeds coarse-to-fine over a Gaussian pyramid.  The Gaussian
+smoothings are the Green's functions of the fluid/diffusion regularisers;
+$\alpha$ normalises the force.  The recipe is a pure composition of the
+substrate (SVF exponential, warp, gradient, Gaussian, velocity algebra) -- the
+only metric-specific piece is the closed-form force.  An LNCC-driven
+(SyN-style) force and a symmetric forward-plus-inverse variant are the
+documented upgrade paths.
+
+The above is the *algebra* (log-domain SVF) representation -- the exact oracle.
+The default `representation='group'` ([`DemonsSpec`](nitrix-register-diffeomorphic/DemonsSpec.qmd)) instead carries the
+*displacement* and uses the greedy compositive update (warp directly, compose
+the regularised increment -- no per-iteration exponential, roughly two gathers
+per iteration versus seven), recovering the velocity once at finalisation via
+[`field_log`](nitrix-geometry.qmd).  The greedy update is not the SVF fixed
+point, so the two representations agree on synthetic recovery to tolerance, not
+field-wise.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### References
+
+Vercauteren, T., Pennec, X., Perchant, A., & Ayache, N. (2009). Diffeomorphic
+demons: efficient non-parametric image registration. NeuroImage, 45(1),
+S61-S72. https://doi.org/10.1016/j.neuroimage.2008.10.040
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-register-diffeomorphic-symbols}
+:::

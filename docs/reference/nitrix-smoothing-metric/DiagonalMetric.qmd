@@ -1,0 +1,62 @@
+---
+title: "DiagonalMetric"
+generated: true
+description: "Per-feature axis-aligned metric $M =  operatorname{diag}(1 /  sigma^2)$."
+---
+
+[‹ back to `nitrix.smoothing.metric`](../nitrix-smoothing-metric.qmd)
+
+<!-- nitrix:gen sig:DiagonalMetric -->
+```python
+class DiagonalMetric
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:DiagonalMetric -->
+Per-feature axis-aligned metric $M = \operatorname{diag}(1 / \sigma^2)$.
+
+The classic bilateral metric: each feature channel $d$ is
+divided by its own bandwidth $\sigma_d$ before the squared
+distance is accumulated.  A large $\sigma_d$ means channel
+$d$ contributes little to the weight (the filter is near-blind
+to that feature); in the limit $\sigma_d \to \infty$ the
+channel drops out entirely.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:DiagonalMetric.project -->
+```python
+project(deltas: Float[Array, '... d_f']) -> Float[Array, '... d_f']
+```
+<!-- nitrix:/gen -->
+
+Divide each feature difference by its per-channel bandwidth.
+
+<!-- nitrix:gen sig:DiagonalMetric.tree_flatten -->
+```python
+tree_flatten() -> Tuple[Tuple[Float[Array, 'd_f']], None]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sig:DiagonalMetric.tree_unflatten -->
+```python
+tree_unflatten(_aux: None, children: Tuple[Any, ...]) -> 'DiagonalMetric'
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sig:DiagonalMetric.__init__ -->
+```python
+__init__(sigma: Float[Array, 'd_f']) -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:DiagonalMetric -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `d_f` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

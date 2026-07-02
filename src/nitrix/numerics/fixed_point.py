@@ -4,37 +4,44 @@
 """
 Fixed-point solver with implicit differentiation.
 
-``fixed_point_solve(f, params, x0)`` returns ``x*`` with ``x* = f(params,
-x*)`` and -- via ``jax.custom_vjp`` -- differentiates through the
-*solution* by the implicit-function theorem rather than by unrolling the
-iteration.  At the fixed point, ``dx*/dparams`` satisfies
-``(I - ∂_x f) dx* = ∂_params f``, so the backward solves the adjoint
-system ``w = ḡ + (∂_x f)ᵀ w`` (itself a fixed point -- a contraction at a
-stable solution) and pushes ``w`` back through ``∂_params f``.  Memory is
-O(1) in the iteration count: the backward needs only ``x*``.
+:func:`fixed_point_solve` returns a solution :math:`x^\\ast` satisfying
+:math:`x^\\ast = f(\\mathrm{params}, x^\\ast)` and -- via
+``jax.custom_vjp`` -- differentiates through the *solution* by the
+implicit-function theorem rather than by unrolling the iteration.  At the
+fixed point, :math:`\\mathrm{d}x^\\ast / \\mathrm{d}\\,\\mathrm{params}`
+satisfies :math:`(I - \\partial_x f)\\,\\mathrm{d}x^\\ast =
+\\partial_{\\mathrm{params}} f`, so the backward pass solves the adjoint
+system :math:`w = \\bar{g} + (\\partial_x f)^{\\top} w` (itself a fixed
+point -- a contraction at a stable solution) and pushes :math:`w` back
+through :math:`\\partial_{\\mathrm{params}} f`.  Memory is :math:`O(1)` in
+the iteration count: the backward needs only :math:`x^\\ast`.
 
-**Two forward engines** (the backward is the same IFT adjoint either way):
+The two forward engines share the same implicit-function-theorem adjoint
+on the backward pass:
 
 - ``acceleration='picard'`` (default) -- plain Picard iteration
-  ``x ← f(params, x)``.  Converges geometrically with factor ``‖∂_x f‖``;
-  fine when that is comfortably below 1.
-- ``acceleration='anderson'`` -- windowed Anderson acceleration (Walker-
-  Ni), depth ``depth``.  A quasi-Newton secant mixing of the last
+  :math:`x \\leftarrow f(\\mathrm{params}, x)`.  Converges geometrically
+  with factor :math:`\\|\\partial_x f\\|`; fine when that is comfortably
+  below one.
+- ``acceleration='anderson'`` -- windowed Anderson acceleration (Walker
+  and Ni), of the given depth.  A quasi-Newton secant mixing of the last
   ``depth`` residuals; converges where Picard *genuinely* stalls
-  (``‖∂_x f‖ → 1``).  An opt-in escape hatch -- Picard is the better
-  choice whenever it converges comfortably (Anderson's least-squares over
-  a near-collinear residual history is marginally noisier there), which
-  includes the smoothed ``invert_displacement`` / ``field_log`` square
-  root (the ½-damping already makes the latter super-linear).  The tiny
-  ``depth×depth`` least-squares is solved by an inlined conjugate gradient
-  -- **no factorisation, no cuSolver** -- so it runs inside the traced
-  ``while_loop`` on every backend (incl. the wedged-cuSolver dev box).
+  (:math:`\\|\\partial_x f\\| \\to 1`).  An opt-in escape hatch -- Picard
+  is the better choice whenever it converges comfortably (Anderson's
+  least-squares over a near-collinear residual history is marginally
+  noisier there), which includes the smoothed
+  :func:`~nitrix.geometry.invert_displacement` /
+  :func:`~nitrix.geometry.field_log` square root (the half-damping
+  already makes the latter super-linear).  The tiny
+  :math:`\\mathrm{depth} \\times \\mathrm{depth}` least-squares is solved
+  by an inlined conjugate gradient -- no factorisation, no cuSolver -- so
+  it runs inside the traced ``while_loop`` on every backend.
 
-This is the §12.8 graduation (``numerics.fixed_point``); registration is
-the named consumer -- ``geometry.invert_displacement`` and
-``geometry.field_log`` are fixed points, and the same machinery underpins
-the differentiable-registration story.  Generalises the scaling-and-
-squaring special case in ``geometry.integrate_velocity_field``.
+The named consumers are :func:`~nitrix.geometry.invert_displacement` and
+:func:`~nitrix.geometry.field_log`, which are fixed points, and the same
+machinery underpins the differentiable-registration story.  It
+generalises the scaling-and-squaring special case in
+:func:`~nitrix.geometry.integrate_velocity_field`.
 """
 
 from __future__ import annotations
@@ -65,7 +72,11 @@ def fixed_point_solve(
     beta: float = 1.0,
     reg: float = 1e-8,
 ) -> Float[Array, '...']:
-    """Solve ``x = f(params, x)`` for ``x``, differentiably.
+    """Solve :math:`x = f(\\mathrm{params}, x)` for :math:`x`, differentiably.
+
+    Iterates the update map ``f`` to a fixed point and differentiates
+    through the solution by the implicit-function theorem, so gradients
+    with respect to ``params`` flow without unrolling the iteration.
 
     Parameters
     ----------
@@ -80,19 +91,22 @@ def fixed_point_solve(
         Initial guess (same structure as the solution; its value does
         not affect the gradient -- ``dx*/dx0 = 0``).
     tol
-        Relative convergence tolerance on the residual ``‖f(x) - x‖``.
+        Relative convergence tolerance on the residual
+        :math:`\\|f(x) - x\\|`.
     max_iter
         Iteration cap (forward and adjoint).
     acceleration
-        ``'picard'`` (default) -- plain ``x ← f(x)``.  ``'anderson'`` --
-        windowed Anderson acceleration of depth ``depth``, for the stiff
-        ``‖∂_x f‖ → 1`` regime (a solve-free quasi-Newton mixing; runs in
-        the traced loop on every backend).
+        ``'picard'`` (default) -- plain :math:`x \\leftarrow f(x)`.
+        ``'anderson'`` -- windowed Anderson acceleration of the given
+        depth, for the stiff :math:`\\|\\partial_x f\\| \\to 1` regime (a
+        solve-free quasi-Newton mixing; runs in the traced loop on every
+        backend).
     depth
         Anderson window (number of past residuals mixed).  Larger
-        converges in fewer steps but holds ``~2·depth`` extra
-        iterate-shaped buffers -- lower it for a brain-scale field where
-        memory is tight.  Ignored for ``'picard'``.
+        converges in fewer steps but holds roughly :math:`2 \\cdot
+        \\mathrm{depth}` extra iterate-shaped buffers -- lower it for a
+        brain-scale field where memory is tight.  Ignored for
+        ``'picard'``.
     beta
         Anderson mixing (relaxation) factor; ``1.0`` is the standard
         choice.  Ignored for ``'picard'``.
@@ -103,7 +117,8 @@ def fixed_point_solve(
 
     Returns
     -------
-    The fixed point ``x*``.
+    Float[Array, '...']
+        The fixed point :math:`x^\\ast`, with the same shape as ``x0``.
     """
     d = 0 if acceleration == 'picard' else int(depth)
     return _fixed_point(
@@ -130,7 +145,33 @@ def _fixed_point(
 def _residual_converged(
     r: Array, x: Array, i: Array, tol: float, max_iter: int
 ) -> Array:
-    """Shared stopping rule: relative residual ``‖r‖ ≤ tol·‖x‖`` or cap."""
+    """Shared stopping rule for the fixed-point iterations.
+
+    Reports whether the iteration should continue: it stops once the
+    relative residual has converged (:math:`\\|r\\| \\le \\mathrm{tol}
+    \\cdot \\|x\\|`) or the iteration cap has been reached.
+
+    Parameters
+    ----------
+    r
+        Current residual (the difference between successive iterates for
+        Picard, or the fixed-point residual for Anderson).
+    x
+        Current iterate, used to scale the tolerance relatively.
+    i
+        Current iteration count.
+    tol
+        Relative convergence tolerance on the residual norm.
+    max_iter
+        Iteration cap.
+
+    Returns
+    -------
+    Array
+        A scalar boolean array that is ``True`` while the iteration
+        should continue and ``False`` once it has converged or reached
+        ``max_iter``.
+    """
     moved = jnp.sqrt(jnp.vdot(r, r).real)
     scale = jnp.sqrt(jnp.vdot(x, x).real)
     return (i < max_iter) & (moved > tol * (scale + 1e-12))
@@ -161,9 +202,26 @@ def _picard(
 def _small_spd_solve(a: Array, b: Array, iters: int) -> Array:
     """Solve the tiny SPD system ``a x = b`` by conjugate gradient.
 
-    ``a`` is the ``(depth, depth)`` Anderson normal matrix (SPD after the
-    ridge); CG is exact in ``≤ depth`` steps and uses only matvecs, so it
-    avoids cuSolver and runs inside the traced ``while_loop``.
+    Here ``a`` is the ``(depth, depth)`` Anderson normal matrix
+    (symmetric positive definite after the ridge); conjugate gradient is
+    exact in at most ``depth`` steps and uses only matrix-vector
+    products, so it avoids cuSolver and runs inside the traced
+    ``while_loop``.
+
+    Parameters
+    ----------
+    a
+        The ``(depth, depth)`` symmetric positive-definite normal matrix.
+    b
+        The ``(depth,)`` right-hand side.
+    iters
+        Number of conjugate-gradient steps to run (fixed for the traced
+        scan; ``depth`` steps suffice for an exact solve).
+
+    Returns
+    -------
+    Array
+        The ``(depth,)`` solution ``x`` of ``a x = b``.
     """
     x = jnp.zeros_like(b)
     r = b - a @ x

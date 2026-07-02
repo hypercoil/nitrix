@@ -4,22 +4,28 @@
 """
 Pure-JAX reference for the Mamba / S6 selective state-space scan.
 
-The discretised selective recurrence (per channel ``d`` and state ``n``):
+The discretised selective recurrence (per channel :math:`d` and state
+:math:`n`) is a state update followed by a readout:
 
-    h_t = exp(Δ_t · A) ⊙ h_{t-1} + (Δ_t · B_t) ⊙ x_t      # state update
-    y_t = Σ_n C_{t,n} · h_{t,d,n}  (+ D_d ⊙ x_t)           # readout
+.. math::
 
-This is a first-order linear recurrence ``h_t = a_t ⊙ h_{t-1} + b_t`` with
-``a_t = exp(Δ_t A)`` and ``b_t = Δ_t B_t x_t``, so it admits both a sequential
-``lax.scan`` form (the bit-exact oracle) and a parallel
-``lax.associative_scan`` form (combinator
-``(a₁,b₁)∘(a₂,b₂) = (a₁a₂, a₂b₁+b₂)``).  ``driver='auto'`` picks the parallel
-prefix scan on GPU (``O(log L)`` depth) and the sequential scan on CPU -- the
-same platform-dependent choice as ``signal._iir`` -- so the GPU gets the
-work-parallel speedup before any fused kernel exists.
+    h_t = \\exp(\\Delta_t \\cdot A) \\odot h_{t-1}
+          + (\\Delta_t \\cdot B_t) \\odot x_t
 
-Differentiated by ordinary XLA autodiff (no hand-written VJP -- that lives on
-the fused path).  See ``docs/feature-requests/nn-forward-kernels-suite.md`` §7.2.
+    y_t = \\sum_n C_{t,n} \\cdot h_{t,d,n} \\; (+ D_d \\odot x_t)
+
+This is a first-order linear recurrence
+:math:`h_t = a_t \\odot h_{t-1} + b_t` with
+:math:`a_t = \\exp(\\Delta_t A)` and :math:`b_t = \\Delta_t B_t x_t`, so it
+admits both a sequential :func:`jax.lax.scan` form (the bit-exact oracle) and
+a parallel :func:`jax.lax.associative_scan` form with combinator
+:math:`(a_1, b_1) \\circ (a_2, b_2) = (a_1 a_2, \\; a_2 b_1 + b_2)`.
+``driver='auto'`` picks the parallel prefix scan on GPU (:math:`O(\\log L)`
+depth) and the sequential scan on CPU, so the GPU gets the work-parallel
+speed-up before any fused kernel exists.
+
+Differentiated by ordinary XLA autodiff (no hand-written VJP; that lives on
+the fused path).
 """
 
 from __future__ import annotations
@@ -113,12 +119,43 @@ def _scan_chunked(
     D: Optional[Float[Array, 'd']],
     chunk: int,
 ) -> Float[Array, '... l d']:
-    """Memory-sparing pure-XLA scan: chunked ``lax.scan`` (carry = (d, n) state),
-    parallel ``associative_scan`` within each chunk, ``n`` collapsed into ``y``
-    inside the body so the ``(l, d, n)`` trajectory is never materialised; the
-    body is rematerialised (``jax.checkpoint``) so the backward stores only the
-    per-chunk carry.  Same math as the other methods (XLA-stable scan, no fp32
-    range limit)."""
+    """Memory-sparing pure-XLA selective scan.
+
+    The sequence is split into chunks and processed by an outer
+    :func:`jax.lax.scan` whose carry is the ``(d, n)`` state at the chunk
+    boundary.  Within each chunk the recurrence is run as a parallel
+    :func:`jax.lax.associative_scan`, then the state axis :math:`n` is collapsed
+    into the output inside the scan body so the full ``(l, d, n)`` trajectory is
+    never materialised.  The body is rematerialised with :func:`jax.checkpoint`,
+    so the backward pass stores only the per-chunk carry.  The mathematics is
+    identical to the sequential and associative variants (an XLA-stable scan with
+    no within-chunk float32 range limit).
+
+    Parameters
+    ----------
+    x : Float[Array, '... l d']
+        Input sequence of length ``l`` with ``d`` channels.
+    delta : Float[Array, '... l d']
+        Per-step, per-channel step size :math:`\\Delta` (already post-softplus),
+        same shape as ``x``.
+    A : Float[Array, 'd n']
+        Diagonal-plus state matrix, one ``n``-vector of state coefficients per
+        channel.
+    B : Float[Array, '... l n']
+        Selective input projection onto the ``n`` state dimensions.
+    C : Float[Array, '... l n']
+        Selective output projection from the ``n`` state dimensions.
+    D : Float[Array, 'd'] or None
+        Optional per-channel skip / residual connection; omitted when ``None``.
+    chunk : int
+        Chunk length along the sequence axis; must divide ``l``.  Trades peak
+        memory and parallel depth against per-chunk work.
+
+    Returns
+    -------
+    Float[Array, '... l d']
+        Output sequence with the same batch, length and channel shape as ``x``.
+    """
     *batch, length, d = x.shape
     n = A.shape[1]
     nc = length // chunk
@@ -168,44 +205,46 @@ def reference_selective_scan(
 
     Parameters
     ----------
-    x, delta
-        Input sequence and per-step / per-channel ``Δ`` (already post-softplus),
-        both ``(..., l, d)``.
-    A
+    x, delta : Float[Array, '... l d']
+        Input sequence and per-step, per-channel step size :math:`\\Delta`
+        (already post-softplus), both ``(..., l, d)``.
+    A : Float[Array, 'd n']
         State matrix in diagonal-plus form, ``(d, n)`` (typically negative for a
         contractive recurrence).
-    B, C
-        Selective input / output projections, ``(..., l, n)``.
-    D
-        Optional per-channel skip / residual, ``(d,)``.
-    driver
-        Numerical variant (the ``driver`` axis).  ``'sequential'`` (the
-        bit-exact ``lax.scan`` oracle -- the canonical variant), ``'associative'``
-        (parallel prefix, materialises the ``(l, d, n)`` trajectory),
-        ``'chunked'`` (pure-XLA memory-sparing: chunked scan that never
-        materialises ``(l, d, n)`` -- the Pallas-free analogue of the fused
-        kernel), or ``'auto'`` (parallel on GPU, sequential on CPU).
-        ``nitrix.reproducible()`` forces the canonical ``'sequential'``; the
-        variants agree only to a documented tolerance
-        (``nitrix.divergent_ops()``), not bit-for-bit.
-    chunk_size
-        Chunk length for ``method='chunked'`` (must divide ``l``); the
+    B, C : Float[Array, '... l n']
+        Selective input and output projections, both ``(..., l, n)``.
+    D : Float[Array, 'd'] or None, optional
+        Optional per-channel skip / residual, ``(d,)``.  Omitted when ``None``.
+    driver : {'auto', 'sequential', 'associative', 'chunked'}, optional
+        Numerical variant. ``'sequential'`` is the bit-exact
+        :func:`jax.lax.scan` oracle and the canonical variant; ``'associative'``
+        is the parallel prefix scan, which materialises the ``(l, d, n)``
+        trajectory; ``'chunked'`` is a pure-XLA memory-sparing chunked scan that
+        never materialises ``(l, d, n)`` (the Pallas-free analogue of the fused
+        kernel); and ``'auto'`` selects the parallel scan on GPU and the
+        sequential scan on CPU.  ``nitrix.reproducible()`` forces the canonical
+        ``'sequential'``; the variants agree only to a documented tolerance (see
+        ``nitrix.divergent_ops()``), not bit-for-bit.
+    chunk_size : int, optional
+        Chunk length used when ``driver='chunked'`` (must divide ``l``); the
         memory / parallel-depth trade-off knob.  Size-based dispatch is left to
-        the perf suite.
+        the performance suite.
 
     Returns
     -------
-    Output sequence ``(..., l, d)``.
+    Float[Array, '... l d']
+        Output sequence ``(..., l, d)``.
 
     Notes
     -----
-    All methods agree up to floating-point reassociation.  ``'chunked'`` keeps
-    peak memory at ``O(chunk·d·n + l·d)`` instead of ``O(l·d·n)`` and, being
-    XLA-stable, has none of the fused kernel's fp32 within-chunk range limit.
-    Degenerate ``A -> 0`` (``dA -> 1``) reduces the update to a cumulative sum of
-    ``Δ_t B_t x_t``.  A float16/bfloat16 input is upcast to float32 for the
-    recurrence and readout and cast back at the end (the fp32-accumulation
-    invariant, SPEC §2 tenet 11); float32 / float64 inputs are unchanged.
+    All variants agree up to floating-point reassociation.  ``'chunked'`` keeps
+    peak memory at :math:`O(\\mathrm{chunk} \\cdot d \\cdot n + l \\cdot d)`
+    instead of :math:`O(l \\cdot d \\cdot n)` and, being XLA-stable, has none of
+    the fused kernel's float32 within-chunk range limit.  A degenerate
+    :math:`A \\to 0` (so :math:`\\mathrm{dA} \\to 1`) reduces the update to a
+    cumulative sum of :math:`\\Delta_t B_t x_t`.  A float16 / bfloat16 input is
+    upcast to float32 for the recurrence and readout and cast back at the end
+    (the float32-accumulation invariant); float32 / float64 inputs are unchanged.
     """
     resolved = resolve_driver(
         driver,

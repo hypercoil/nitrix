@@ -1,315 +1,79 @@
 ---
 title: "nitrix.stats.glm"
 generated: true
-signature-hash: cdea06d7b5bb266c
+signature-hash: e689ed8e04122f98
+description: "Mass-univariate generalised linear models."
+listing:
+  id: nitrix-stats-glm-symbols
+  contents: "nitrix-stats-glm/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
-Auto-generated scaffold for `nitrix.stats.glm` (signatures only). Replace the
-skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
-`check_reference_staleness.py` flags this page if the underlying
-signatures drift from this stub.
+Auto-generated scaffold for `nitrix.stats.glm`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
 
-## `Family` {#Family}
+<!-- nitrix:gen overview:__module__ -->
+Mass-univariate generalised linear models.
 
-::: {.callout-warning title="TODO — could not introspect"}
-This name is an alias / re-export / dynamically-built object; its
-signature can't be read from source. Document it by hand.
+[`glm_fit`](nitrix-stats-glm/glm_fit.qmd) fits the same design `X` (`N, p`) to every element (voxel /
+vertex / fixel) of a response tensor `Y` (`V, N`) -- the mass-univariate
+"one model per element, shared design" workload behind ModelArray's `lm` and
+the parametric backbone of GAM (`gam.py`) and the permutation engine
+(`inference/randomise`).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### Two paths, one surface
+
+The fit is **IRLS-shaped**: a weighted-least-squares solve
+$(X^{\top} W X + S) \beta = X^{\top} W z$ over a working response `z` and
+working weights `W`.  OLS, WLS, and the full exponential family are then the
+same machinery at different `(W, z)`:
+
+- **Gaussian identity, no penalty** -- the dominant `lm` case -- takes a
+  vectorised fast path: $X^{\top} X$ is *shared* across elements, so a single
+  `(p, p)` inverse and a couple of matmuls fit all `V` elements at once
+  (no per-element factorisation).
+- **Any other family** runs Penalised IRLS per element (`vmap`), reusing the
+  same cuSOLVER-free `(p, p)` solve.  `gam.py` calls the same inner solve
+  with a non-zero penalty `S`; here `S = 0`.
+
+Every `(p, p)` solve goes through `linalg._smalllinalg.small_inv_logdet`
+(closed-form for `p <= 2`, hand-Cholesky + `trsm` for `p > 2`) -- no
+cuSOLVER custom-call, so the fit runs on the broken-cuSOLVER GPU.
+
+### Inference
+
+[`t_contrast`](nitrix-stats-glm/t_contrast.qmd) / [`f_contrast`](nitrix-stats-glm/f_contrast.qmd) return the per-element effect, standard
+error, t / F statistic, and the (Student-t / F) p-value -- the ModelArray `lm`
+output columns.  p-values use the regularised incomplete beta
+(`jax.scipy.special.betainc`), so they are exact and cuSOLVER-free.
+[`r_squared`](nitrix-stats-glm/r_squared.qmd) / [`deviance_explained`](nitrix-stats-glm/deviance_explained.qmd) use the stored null-model deviance.
+
+The exponential family is a frozen [`Family`](nitrix-stats-glm/Family.qmd) value (a small record of pure
+link / variance / deviance functions); [`GAUSSIAN`](nitrix-stats-glm/GAUSSIAN.qmd) / [`BINOMIAL`](nitrix-stats-glm/BINOMIAL.qmd) /
+[`POISSON`](nitrix-stats-glm/POISSON.qmd) ship, and a custom family is just another `Family(...)`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `...` | anonymous leading (batch) axes |
+| `N` | observations — time points, subjects, or sampled points |
+| `m` | rows of a multi-row contrast |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-stats-glm-symbols}
 :::
-
-## `Link` {#Link}
-
-::: {.callout-warning title="TODO — could not introspect"}
-This name is an alias / re-export / dynamically-built object; its
-signature can't be read from source. Document it by hand.
-:::
-
-## `IDENTITY_LINK` {#IDENTITY_LINK}
-
-::: {.callout-warning title="TODO — could not introspect"}
-This name is an alias / re-export / dynamically-built object; its
-signature can't be read from source. Document it by hand.
-:::
-
-## `LOG_LINK` {#LOG_LINK}
-
-::: {.callout-warning title="TODO — could not introspect"}
-This name is an alias / re-export / dynamically-built object; its
-signature can't be read from source. Document it by hand.
-:::
-
-## `LOGIT_LINK` {#LOGIT_LINK}
-
-::: {.callout-warning title="TODO — could not introspect"}
-This name is an alias / re-export / dynamically-built object; its
-signature can't be read from source. Document it by hand.
-:::
-
-## `PROBIT_LINK` {#PROBIT_LINK}
-
-::: {.callout-warning title="TODO — could not introspect"}
-This name is an alias / re-export / dynamically-built object; its
-signature can't be read from source. Document it by hand.
-:::
-
-## `CLOGLOG_LINK` {#CLOGLOG_LINK}
-
-::: {.callout-warning title="TODO — could not introspect"}
-This name is an alias / re-export / dynamically-built object; its
-signature can't be read from source. Document it by hand.
-:::
-
-## `SQRT_LINK` {#SQRT_LINK}
-
-::: {.callout-warning title="TODO — could not introspect"}
-This name is an alias / re-export / dynamically-built object; its
-signature can't be read from source. Document it by hand.
-:::
-
-## `INVERSE_LINK` {#INVERSE_LINK}
-
-::: {.callout-warning title="TODO — could not introspect"}
-This name is an alias / re-export / dynamically-built object; its
-signature can't be read from source. Document it by hand.
-:::
-
-## `resolve_family` {#resolve_family}
-
-::: {.callout-warning title="TODO — could not introspect"}
-This name is an alias / re-export / dynamically-built object; its
-signature can't be read from source. Document it by hand.
-:::
-
-## `resolve_link` {#resolve_link}
-
-::: {.callout-warning title="TODO — could not introspect"}
-This name is an alias / re-export / dynamically-built object; its
-signature can't be read from source. Document it by hand.
-:::
-
-## `GAUSSIAN` {#GAUSSIAN}
-
-::: {.callout-warning title="TODO — could not introspect"}
-This name is an alias / re-export / dynamically-built object; its
-signature can't be read from source. Document it by hand.
-:::
-
-## `BINOMIAL` {#BINOMIAL}
-
-::: {.callout-warning title="TODO — could not introspect"}
-This name is an alias / re-export / dynamically-built object; its
-signature can't be read from source. Document it by hand.
-:::
-
-## `POISSON` {#POISSON}
-
-::: {.callout-warning title="TODO — could not introspect"}
-This name is an alias / re-export / dynamically-built object; its
-signature can't be read from source. Document it by hand.
-:::
-
-## `GAMMA` {#GAMMA}
-
-::: {.callout-warning title="TODO — could not introspect"}
-This name is an alias / re-export / dynamically-built object; its
-signature can't be read from source. Document it by hand.
-:::
-
-## `NEGBINOMIAL` {#NEGBINOMIAL}
-
-::: {.callout-warning title="TODO — could not introspect"}
-This name is an alias / re-export / dynamically-built object; its
-signature can't be read from source. Document it by hand.
-:::
-
-## `TWEEDIE` {#TWEEDIE}
-
-::: {.callout-warning title="TODO — could not introspect"}
-This name is an alias / re-export / dynamically-built object; its
-signature can't be read from source. Document it by hand.
-:::
-
-## `negbinomial` {#negbinomial}
-
-::: {.callout-warning title="TODO — could not introspect"}
-This name is an alias / re-export / dynamically-built object; its
-signature can't be read from source. Document it by hand.
-:::
-
-## `tweedie` {#tweedie}
-
-::: {.callout-warning title="TODO — could not introspect"}
-This name is an alias / re-export / dynamically-built object; its
-signature can't be read from source. Document it by hand.
-:::
-
-## `GLMResult` {#GLMResult}
-
-*decorated:* `@register_result(children=('coef', 'cov_unscaled', 'dispersion', 'deviance', 'null_deviance', 'log_lik'), aux=('family', 'n_obs', 'rank'))`, `@dataclass(frozen=True)`
-
-```python
-class GLMResult
-```
-
-Per-element GLM fit output.
-
-*TODO: class overview.*
-
-
-### Methods
-
-```python
-dof_resid(self) -> float
-```
-
-```python
-n_params(self) -> int
-```
-
-Number of estimated parameters (coefficients + a dispersion).
-
-## `glm_fit` {#glm_fit}
-
-```python
-glm_fit(Y: Float[Array, 'V N'], X: Float[Array, 'N p'], *, family: Union[str, Family]=GAUSSIAN, weights: Optional[Float[Array, 'N']]=None, n_iter: int=25, ridge: float=0.0, block: Optional[int]=None) -> GLMResult
-```
-
-Fit a mass-univariate GLM: shared design ``X``, per-element responses.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `predict` {#predict}
-
-```python
-predict(result: GLMResult, X: Float[Array, 'N p'], *, type: PredictType='response') -> Float[Array, 'V N']
-```
-
-Per-element prediction on a (new) design ``X``.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `t_contrast` {#t_contrast}
-
-```python
-t_contrast(result: GLMResult, contrast: Float[Array, 'p'], *, cov: Optional[Float[Array, '... p p']]=None) -> Tuple[Float[Array, 'V'], Float[Array, 'V'], Float[Array, 'V'], Float[Array, 'V']]
-```
-
-Per-element t-test of a linear contrast ``c^T beta``.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `f_contrast` {#f_contrast}
-
-```python
-f_contrast(result: GLMResult, contrast: Float[Array, 'm p'], *, cov: Optional[Float[Array, '... p p']]=None) -> Tuple[Float[Array, 'V'], Float[Array, 'V'], float, float]
-```
-
-Per-element F-test of a multi-row contrast ``C beta = 0``.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `sandwich_cov` {#sandwich_cov}
-
-```python
-sandwich_cov(result: GLMResult, Y: Float[Array, 'V N'], X: Float[Array, 'N p'], *, kind: HCKind='HC3', groups: Optional[Int[Array, 'N']]=None, weights: Optional[Float[Array, 'N']]=None) -> Float[Array, 'V p p']
-```
-
-Robust (sandwich) coefficient covariance for a fitted GLM.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `r_squared` {#r_squared}
-
-```python
-r_squared(result: GLMResult) -> Float[Array, 'V']
-```
-
-Per-element ``R^2`` (Gaussian) / deviance explained (general).
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `adj_r_squared` {#adj_r_squared}
-
-```python
-adj_r_squared(result: GLMResult) -> Float[Array, 'V']
-```
-
-Per-element adjusted ``R^2`` (Gaussian).
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `deviance_explained` {#deviance_explained}
-
-```python
-deviance_explained(result: GLMResult) -> Float[Array, 'V']
-```
-
-Per-element fraction of null deviance explained: ``1 - dev / null_dev``.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `log_likelihood` {#log_likelihood}
-
-```python
-log_likelihood(result: GLMResult) -> Float[Array, 'V']
-```
-
-Per-element maximised log-likelihood.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `aic` {#aic}
-
-```python
-aic(result: GLMResult) -> Float[Array, 'V']
-```
-
-Per-element Akaike information criterion ``-2 ll + 2 k``.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `bic` {#bic}
-
-```python
-bic(result: GLMResult) -> Float[Array, 'V']
-```
-
-Per-element Bayesian information criterion ``-2 ll + k log N``.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `compare_models` {#compare_models}
-
-```python
-compare_models(full: GLMResult, reduced: GLMResult, *, test: CompareTest='auto') -> Tuple[Float[Array, 'V'], Float[Array, 'V']]
-```
-
-Per-element nested-model comparison (ModelArray ``full vs. reduced``).
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-

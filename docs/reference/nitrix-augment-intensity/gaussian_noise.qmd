@@ -1,0 +1,42 @@
+---
+title: "gaussian_noise"
+generated: true
+description: "Add i.i.d. Gaussian noise per element."
+---
+
+[‹ back to `nitrix.augment.intensity`](../nitrix-augment-intensity.qmd)
+
+<!-- nitrix:gen sig:gaussian_noise -->
+```python
+gaussian_noise(x: Float[Array, '...'], key: Array, *, sigma: Float[Array, '...']) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:gaussian_noise -->
+Add i.i.d. Gaussian noise per element.
+
+Draws independent zero-mean Gaussian noise with standard deviation
+`sigma` for every element of `x` and adds it to the input, so each
+perturbation is distributed as $\mathcal{N}(0, \sigma^2)$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:gaussian_noise -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Float` | `...` | — | Intensity tensor. |
+| `key` | `Array` | — | — | PRNG key. |
+| `sigma` | `Float` | `...` | — | Standard deviation of the additive noise (scalar or broadcastable to `x`). Drawing it randomly is the caller's concern. |
+
+**Returns** `Float` — shape `...`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:gaussian_noise -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

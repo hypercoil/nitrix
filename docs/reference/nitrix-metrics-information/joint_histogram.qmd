@@ -1,0 +1,58 @@
+---
+title: "joint_histogram"
+generated: true
+description: "Differentiable joint intensity histogram (Parzen soft-binning)."
+---
+
+[‹ back to `nitrix.metrics.information`](../nitrix-metrics-information.qmd)
+
+<!-- nitrix:gen sig:joint_histogram -->
+```python
+joint_histogram(moving: Float[Array, '...'], fixed: Float[Array, '...'], *, bins: int = 32, range_moving: Optional[tuple[float, float]] = None, range_fixed: Optional[tuple[float, float]] = None, mask: Optional[Float[Array, '...']] = None) -> Float[Array, 'bins bins']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:joint_histogram -->
+Differentiable joint intensity histogram (Parzen soft-binning).
+
+Each voxel contributes its bilinear soft weight to the four
+surrounding `(moving, fixed)` bin pairs; the result is normalised
+to a joint probability `P` summing to 1.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:joint_histogram -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `moving` | `Float` | `...` | — | Images of identical shape. |
+| `fixed` | `Float` | `...` | — | Images of identical shape. |
+| `bins` | `int` | — | `32` | Number of bins per axis (default 32). |
+| `range_moving` | `Optional[tuple[float, float]]` | — | `None` | Optional `(lo, hi)` intensity range per image. `None` (default) uses the per-image data min / max -- convenient, but the bounds are then piecewise-constant in the inputs; pin an explicit range for a binning that is stable across optimisation steps. |
+| `range_fixed` | `Optional[tuple[float, float]]` | — | `None` | Optional `(lo, hi)` intensity range per image. `None` (default) uses the per-image data min / max -- convenient, but the bounds are then piecewise-constant in the inputs; pin an explicit range for a binning that is stable across optimisation steps. |
+| `mask` | `Optional[Float[Array, '...']]` | — | `None` | Optional non-negative per-voxel weight (same shape as the images) gating the scatter: an out-of-mask voxel contributes nothing to the joint distribution, so a downstream MI / CR ignores it. |
+
+**Returns** `Float` — shape `bins` × `bins`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:joint_histogram -->
+::: {.callout-note}
+The soft weight is **linear** (order-1 B-spline / triangular
+Parzen, support fixed at two bins): there is no temperature /
+bandwidth knob, so it does **not** reduce to hard (nearest-bin)
+binning at a fixed `bins` under any parameter limit.  It
+coincides with hard binning only when every sample lands on a bin
+centre; as `bins` grows both converge to the same continuous
+distribution.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:joint_histogram -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `bins` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

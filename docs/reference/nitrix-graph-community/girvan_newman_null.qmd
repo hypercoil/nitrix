@@ -1,0 +1,88 @@
+---
+title: "girvan_newman_null"
+generated: true
+description: "Rank-1 Girvan-Newman null model $k_{ mathrm{in}} k_{ mathrm{out}}^{ top} / (2m)$."
+---
+
+[‹ back to `nitrix.graph.community`](../nitrix-graph-community.qmd)
+
+<!-- nitrix:gen sig:girvan_newman_null -->
+```python
+girvan_newman_null(A: Num[Array, '... n n']) -> Num[Array, '... n n']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:girvan_newman_null -->
+Rank-1 Girvan-Newman null model $k_{\mathrm{in}} k_{\mathrm{out}}^{\top} / (2m)$.
+
+The expected weight between two nodes under a random rewiring that
+preserves the (weighted) degree sequence.  For an undirected graph
+(symmetric `A`) this reduces to $k k^{\top} / 2m$, with the
+degree vector $k = A\mathbf{1}$ (the row sums of `A`) and
+$2m$ the total edge weight.  This is the standard modularity
+null model of Newman.
+
+Note that the result is a dense $n \times n$ matrix even from a
+sparse input, because the null model is rank-1 and its outer product
+is dense.  For modularity-style use it is never materialised:
+[`relaxed_modularity`](../nitrix-graph-community/relaxed_modularity.qmd) factorises around the rank-1 structure so
+the dense matrix is not needed.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:girvan_newman_null -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `A` | `Num` | `...` × `n` × `n` | — | Dense (weighted) adjacency matrix, batched over leading axes. |
+
+**Returns** `Num` — shape `...` × `n` × `n`. Dense rank-1 null-model matrix $k_{\mathrm{in}} k_{\mathrm{out}}^{\top} / (2m)$, one per batch element.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:girvan_newman_null -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **103.6 µs** (median, L4); up to **2.14× faster** than `numpy.gn_null`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_GIRVAN_NEWMAN_NULL.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| girvan_newman_null | jax-cpu | n=128 | `cupy.gn_null` | skipped | — | — | — | — | — |
+| girvan_newman_null | jax-cpu | n=128 | `nitrix-jax` | ok | 30.2 µs / 35.1 µs | 109.09 ms | 705 MB (rss) | ✓ 0.00014×tol | 1.00x vs nitrix-jax |
+| girvan_newman_null | jax-cpu | n=128 | `numpy.gn_null` | ok | 22.1 µs / 22.6 µs | 56.7 µs | 705 MB (rss) | ✓ 0.00013×tol | 0.73x vs nitrix-jax |
+| girvan_newman_null | jax-cuda12 | n=128 | `cupy.gn_null` | ok | 115.0 µs / 121.4 µs | 286.27 ms | 0.07 MB (hbm) | ✓ 0.00011×tol | 1.14x vs nitrix-jax |
+| girvan_newman_null | jax-cuda12 | n=128 | `nitrix-jax` | ok | 100.5 µs / 103.6 µs | 348.03 ms | 33.62 MB (hbm) | ✓ 0.00013×tol | 1.00x vs nitrix-jax |
+| girvan_newman_null | jax-cuda12 | n=128 | `numpy.gn_null` | ok | 32.2 µs / 32.9 µs | 73.7 µs | 0.07 MB (hbm) | ✓ 0.00013×tol | 0.32x vs nitrix-jax |
+| girvan_newman_null | jax-cpu | n=256 | `cupy.gn_null` | skipped | — | — | — | — | — |
+| girvan_newman_null | jax-cpu | n=256 | `nitrix-jax` | ok | 52.9 µs / 63.2 µs | 79.72 ms | 705 MB (rss) | ✓ 0.00019×tol | 1.00x vs nitrix-jax |
+| girvan_newman_null | jax-cpu | n=256 | `numpy.gn_null` | ok | 67.3 µs / 68.5 µs | 96.5 µs | 705 MB (rss) | ✓ 0.00017×tol | 1.27x vs nitrix-jax |
+| girvan_newman_null | jax-cuda12 | n=256 | `cupy.gn_null` | ok | 116.0 µs / 118.8 µs | 157.03 ms | 0.26 MB (hbm) | ✓ 0.00018×tol | 1.16x vs nitrix-jax |
+| girvan_newman_null | jax-cuda12 | n=256 | `nitrix-jax` | ok | 99.8 µs / 101.6 µs | 366.58 ms | 33.82 MB (hbm) | ✓ 0.00012×tol | 1.00x vs nitrix-jax |
+| girvan_newman_null | jax-cuda12 | n=256 | `numpy.gn_null` | ok | 65.1 µs / 66.9 µs | 95.0 µs | 0.26 MB (hbm) | ✓ 0.00017×tol | 0.65x vs nitrix-jax |
+| girvan_newman_null | jax-cpu | n=512 | `cupy.gn_null` | skipped | — | — | — | — | — |
+| girvan_newman_null | jax-cpu | n=512 | `nitrix-jax` | ok | 141.1 µs / 159.7 µs | 86.76 ms | 705 MB (rss) | ✓ 0.00017×tol | 1.00x vs nitrix-jax |
+| girvan_newman_null | jax-cpu | n=512 | `numpy.gn_null` | ok | 223.9 µs / 243.1 µs | 333.8 µs | 705 MB (rss) | ✓ 0.00013×tol | 1.59x vs nitrix-jax |
+| girvan_newman_null | jax-cuda12 | n=512 | `cupy.gn_null` | ok | 116.1 µs / 119.9 µs | 166.68 ms | 1.05 MB (hbm) | ✓ 0.00015×tol | 1.15x vs nitrix-jax |
+| girvan_newman_null | jax-cuda12 | n=512 | `nitrix-jax` | ok | 100.9 µs / 105.5 µs | 336.23 ms | 34.61 MB (hbm) | ✓ 0.00013×tol | 1.00x vs nitrix-jax |
+| girvan_newman_null | jax-cuda12 | n=512 | `numpy.gn_null` | ok | 216.4 µs / 220.2 µs | 242.3 µs | 1.05 MB (hbm) | ✓ 0.00013×tol | 2.14x vs nitrix-jax |
+:::
+
+*source: bench `f174a26b` · nitrix `88a23053`*
+::::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:girvan_newman_null -->
+### References
+
+Newman MEJ (2006). Modularity and community structure in networks.
+*PNAS* 103(23), 8577-8582. https://doi.org/10.1073/pnas.0601602103
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:girvan_newman_null -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

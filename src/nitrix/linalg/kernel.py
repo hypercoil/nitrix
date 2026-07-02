@@ -1,53 +1,52 @@
 # -*- coding: utf-8 -*-
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
-"""
+r"""
 Pairwise kernel and distance functions.
 
 The bread-and-butter primitives for kernel methods: linear,
-polynomial, sigmoid, RBF / Gaussian, cosine; plus the
-underlying squared-L2 ``linear_distance``.
+polynomial, sigmoid, RBF / Gaussian, cosine; plus the underlying
+squared-L2 distance :func:`linear_distance`.
 
-All accept a ``theta`` argument for parameterised (Mahalanobis-
-style) inner products:
+All accept a ``theta`` argument for parameterised (Mahalanobis-style)
+inner products:
 
 - ``theta is None`` -- the standard inner product / distance.
-- ``theta`` is **vector** ``(..., d)`` -- diagonal Mahalanobis;
-  the kernel acts as ``sum_d theta_d x_d y_d``.
-- ``theta`` is **matrix** ``(..., d, d)`` -- full Mahalanobis;
-  the kernel acts as ``x^T theta y``.
+- ``theta`` a **vector** :math:`(\dots, d)` -- diagonal Mahalanobis;
+  the kernel acts as :math:`\sum_d \theta_d x_d y_d`.
+- ``theta`` a **matrix** :math:`(\dots, d, d)` -- full Mahalanobis;
+  the kernel acts as :math:`x^{\top} \theta y`.
 
-Performance: the legacy ``hypercoil.functional.kernel.linear_distance``
-materialised an ``(..., n, m, d)`` intermediate to compute the
-pairwise difference, costing ``O(n m d)`` memory.  The green-field
-rewrite uses the identity ``|x - y|^2 = |x|^2 + |y|^2 - 2 x·y``,
-which needs only ``(..., n, m)`` memory -- a ``d``-fold reduction.
-For ``d`` in the thousands (covariance vectors, voxelwise features)
-this is the difference between OOM and fitting in HBM.
+The squared-distance path uses the identity
+:math:`\|x - y\|^2 = \|x\|^2 + \|y\|^2 - 2\, x \cdot y`, which needs
+only :math:`(\dots, n, m)` memory rather than materialising an
+:math:`(\dots, n, m, d)` pairwise-difference intermediate -- a
+:math:`d`-fold reduction.  For :math:`d` in the thousands (covariance
+vectors, voxelwise features) this is the difference between OOM and
+fitting in device memory.
 
 What we ship:
 
-- ``linear_kernel`` -- ``X0 @ X1.T``, optionally Mahalanobis-weighted.
-- ``linear_distance`` -- squared L2 distance (or Mahalanobis-
+- :func:`linear_kernel` -- :math:`X_0 X_1^{\top}`, optionally
+  Mahalanobis-weighted.
+- :func:`linear_distance` -- squared L2 distance (or Mahalanobis-
   weighted squared distance), computed via the BLAS-friendly
   identity.
-- ``parameterised_norm`` -- per-row norm, optionally Mahalanobis-
+- :func:`parameterised_norm` -- per-row norm, optionally Mahalanobis-
   weighted.
-- ``rbf_kernel`` / ``gaussian_kernel`` -- ``exp(-gamma * dist^2)``;
-  the two are aliases up to the ``gamma = sigma^-2`` substitution.
-- ``polynomial_kernel`` -- ``(gamma * linear_kernel + r)^order``.
-- ``sigmoid_kernel`` -- ``tanh(gamma * linear_kernel + r)``.
-- ``cosine_kernel`` -- ``linear_kernel`` on row-normalised inputs.
+- :func:`rbf_kernel` / :func:`gaussian_kernel` --
+  :math:`\exp(-\gamma \|x - y\|^2)`; the two are aliases up to the
+  :math:`\gamma = \sigma^{-2}` substitution.
+- :func:`polynomial_kernel` -- :math:`(\gamma\, x^{\top} y + r)^{\mathrm{order}}`.
+- :func:`sigmoid_kernel` -- :math:`\tanh(\gamma\, x^{\top} y + r)`.
+- :func:`cosine_kernel` -- linear kernel on row-normalised inputs.
 
-What the legacy had that we drop:
-
-- ``cov_kernel`` / ``corr_kernel`` -- thin wrappers around
-  ``nitrix.stats.pairedcov`` / ``pairedcorr``.  Use those directly.
-- The ``singledispatch`` sparse-tensor overloads (BCOO / TopK).
-  ELL / SectionedELL are the project's sparse formats; if you
-  need a sparse kernel matrix, build it via ``semiring_ell_matmul``
-  with the ``EUCLIDEAN`` semiring on a pre-thresholded
-  adjacency.
+For covariance / correlation kernels, use
+:func:`nitrix.stats.pairedcov` and :func:`nitrix.stats.pairedcorr`
+directly.  There are no sparse-tensor overloads here; ELL and
+SectionedELL are the project's sparse formats, so build a sparse
+kernel matrix via :func:`nitrix.semiring.semiring_ell_matmul` with the
+``EUCLIDEAN`` semiring on a pre-thresholded adjacency.
 """
 
 from __future__ import annotations
@@ -80,7 +79,25 @@ __all__ = [
 
 
 def _theta_kind(theta: Optional[Array]) -> str:
-    """Classify ``theta`` as one of ``'none'``, ``'vector'``, ``'matrix'``."""
+    r"""Classify a ``theta`` metric argument by its rank.
+
+    Determines how a metric tensor should be interpreted: absent, a
+    diagonal (vector) Mahalanobis weighting, or a full (matrix)
+    Mahalanobis weighting.  A ``theta`` is treated as a vector when it
+    is one-dimensional or its trailing two axes are non-square.
+
+    Parameters
+    ----------
+    theta
+        Optional metric tensor.  ``None``; a diagonal weight vector
+        :math:`(\dots, d)`; or a full weight matrix :math:`(\dots, d, d)`.
+
+    Returns
+    -------
+    str
+        One of ``'none'`` (``theta is None``), ``'vector'`` (diagonal
+        Mahalanobis), or ``'matrix'`` (full Mahalanobis).
+    """
     if theta is None:
         return 'none'
     if theta.ndim == 1 or theta.shape[-1] != theta.shape[-2]:
@@ -136,29 +153,36 @@ def linear_distance(
     *,
     theta: Optional[Num[Array, '... d']] = None,
 ) -> Float[Array, '... n m']:
-    """Squared L2 (or Mahalanobis) distance ``|x - y|^2``.
+    r"""Pairwise squared L2 (or Mahalanobis) distance :math:`\|x - y\|^2`.
 
-    Computed via ``|x|^2 + |y|^2 - 2 x.y`` -- avoiding the
-    ``(n, m, d)`` intermediate that a naive subtract-then-square
-    would materialise.  At ``d = 1000`` this is a ``1000x``
+    Computed via the identity
+    :math:`\|x\|^2 + \|y\|^2 - 2\, x \cdot y`, avoiding the
+    :math:`(n, m, d)` intermediate that a naive subtract-then-square
+    would materialise.  At :math:`d = 1000` this is a thousand-fold
     memory reduction.
 
     Parameters
     ----------
     X0, X1
-        Sample tensors ``(..., n, d)`` and ``(..., m, d)``.
-        Defaults ``X1 = X0`` (self-distance).
+        Sample tensors of shape :math:`(\dots, n, d)` and
+        :math:`(\dots, m, d)`.  If ``X1 is None``, uses ``X0`` (self-
+        distance; the result is :math:`(\dots, n, n)`).
     theta
-        Optional metric tensor.  ``None`` -> standard squared L2;
-        vector -> diagonal Mahalanobis ``sum_d theta_d (x_d - y_d)^2``;
-        matrix -> full Mahalanobis ``(x - y)^T theta (x - y)``.  The matrix form
-        is exact only for a **symmetric** ``theta`` (the identity-form expansion
-        uses one cross term ``2 x^T theta y``); pass ``0.5 (theta + theta.T)``
-        for an asymmetric input.
+        Optional metric tensor.  ``None`` gives the standard squared
+        L2 distance; a vector :math:`(\dots, d)` gives the diagonal
+        Mahalanobis distance :math:`\sum_d \theta_d (x_d - y_d)^2`; a
+        matrix :math:`(\dots, d, d)` gives the full Mahalanobis
+        distance :math:`(x - y)^{\top} \theta (x - y)`.  The matrix
+        form is exact only for a **symmetric** ``theta`` (the
+        identity-form expansion uses one cross term
+        :math:`2\, x^{\top} \theta y`); pass
+        :math:`\tfrac{1}{2}(\theta + \theta^{\top})` for an asymmetric
+        input.
 
     Returns
     -------
-    Squared-distance matrix ``(..., n, m)``.
+    Float[Array, '... n m']
+        Squared-distance matrix of shape :math:`(\dots, n, m)`.
 
     Notes
     -----
@@ -198,22 +222,23 @@ def parameterised_norm(
     theta: Optional[Num[Array, '... d']] = None,
     squared: bool = False,
 ) -> Float[Array, '... n d']:
-    """Per-row Mahalanobis-style normalisation.
+    r"""Per-row Mahalanobis-style normalisation.
 
-    Returns ``X / norm`` (or ``X / norm^2`` with ``squared=True``)
-    where ``norm`` is the per-row Mahalanobis norm under ``theta``.
-    For ``theta = None`` this is L2-normalisation along the last
-    axis.
+    Returns :math:`X / \mathrm{norm}` (or :math:`X / \mathrm{norm}^2`
+    with ``squared=True``), where :math:`\mathrm{norm}` is the per-row
+    Mahalanobis norm under ``theta``.  For ``theta = None`` this is L2
+    normalisation along the last axis.
 
     Parameters
     ----------
     X
-        Sample tensor ``(..., n, d)``.
+        Sample tensor of shape :math:`(\dots, n, d)`.
     theta
-        Optional metric.  Same shape conventions as
-        ``linear_kernel``'s ``theta``.
+        Optional metric tensor.  Same shape conventions as the
+        ``theta`` argument of :func:`linear_kernel`.
     squared
-        If ``True``, divide by ``norm^2`` instead of ``norm``.
+        If ``True``, divide by :math:`\mathrm{norm}^2` instead of
+        :math:`\mathrm{norm}`.
 
     Returns
     -------
@@ -245,7 +270,26 @@ def parameterised_norm(
 
 
 def _default_gamma(X: Array, gamma: Optional[float]) -> float:
-    """scikit-learn convention: default ``gamma = 1 / n_features``."""
+    r"""Resolve a kernel bandwidth, defaulting to the inverse feature count.
+
+    If ``gamma`` is given it is returned unchanged; otherwise the
+    scikit-learn convention :math:`\gamma = 1 / d` is used, where
+    :math:`d` is the trailing (feature) dimension of ``X``.
+
+    Parameters
+    ----------
+    X
+        Sample tensor whose trailing axis length is the feature count
+        :math:`d`.
+    gamma
+        Optional explicit bandwidth.  ``None`` requests the default.
+
+    Returns
+    -------
+    float
+        The resolved bandwidth: ``gamma`` if provided, else
+        :math:`1 / d`.
+    """
     if gamma is not None:
         return gamma
     return 1.0 / X.shape[-1]
@@ -258,9 +302,28 @@ def rbf_kernel(
     theta: Optional[Num[Array, '... d']] = None,
     gamma: Optional[float] = None,
 ) -> Float[Array, '... n m']:
-    """RBF (Gaussian) kernel: ``exp(-gamma * |x - y|^2)``.
+    r"""RBF (Gaussian) kernel :math:`\exp(-\gamma \|x - y\|^2)`.
 
-    Default ``gamma = 1 / d`` matches scikit-learn.
+    The squared distance is the (optionally Mahalanobis-weighted)
+    squared L2 distance from :func:`linear_distance`.  The default
+    bandwidth :math:`\gamma = 1 / d` matches scikit-learn.
+
+    Parameters
+    ----------
+    X0, X1
+        Sample tensors of shape :math:`(\dots, n, d)` and
+        :math:`(\dots, m, d)`.  If ``X1 is None``, uses ``X0`` (self-
+        kernel; the result is :math:`(\dots, n, n)`).
+    theta
+        Optional metric tensor for the distance.  Same shape
+        conventions as the ``theta`` argument of :func:`linear_kernel`.
+    gamma
+        Optional bandwidth.  ``None`` uses :math:`\gamma = 1 / d`.
+
+    Returns
+    -------
+    Float[Array, '... n m']
+        Kernel matrix of shape :math:`(\dots, n, m)`.
     """
     g = _default_gamma(X0, gamma)
     return jnp.exp(-g * linear_distance(X0, X1, theta=theta))
@@ -273,11 +336,31 @@ def gaussian_kernel(
     theta: Optional[Num[Array, '... d']] = None,
     sigma: Optional[float] = None,
 ) -> Float[Array, '... n m']:
-    """Gaussian kernel: ``exp(-|x - y|^2 / (2 sigma^2))``.
+    r"""Gaussian kernel :math:`\exp(-\|x - y\|^2 / (2 \sigma^2))`.
 
-    Same as ``rbf_kernel`` with ``gamma = 1 / (2 sigma^2)``;
-    provided for the ``sigma`` parameterisation common in
-    classical Gaussian-process literature.
+    Identical to :func:`rbf_kernel` with
+    :math:`\gamma = 1 / (2 \sigma^2)`; provided for the :math:`\sigma`
+    parameterisation common in the classical Gaussian-process
+    literature.
+
+    Parameters
+    ----------
+    X0, X1
+        Sample tensors of shape :math:`(\dots, n, d)` and
+        :math:`(\dots, m, d)`.  If ``X1 is None``, uses ``X0`` (self-
+        kernel; the result is :math:`(\dots, n, n)`).
+    theta
+        Optional metric tensor for the distance.  Same shape
+        conventions as the ``theta`` argument of :func:`linear_kernel`.
+    sigma
+        Optional length scale.  ``None`` defers to the default
+        bandwidth of :func:`rbf_kernel` (:math:`\gamma = 1 / d`);
+        otherwise :math:`\gamma = 1 / (2 \sigma^2)`.
+
+    Returns
+    -------
+    Float[Array, '... n m']
+        Kernel matrix of shape :math:`(\dots, n, m)`.
     """
     gamma = None if sigma is None else 1.0 / (2.0 * sigma * sigma)
     return rbf_kernel(X0, X1, theta=theta, gamma=gamma)
@@ -292,7 +375,33 @@ def polynomial_kernel(
     order: int = 3,
     r: float = 0.0,
 ) -> Float[Array, '... n m']:
-    """Polynomial kernel: ``(gamma * <x, y> + r)^order``."""
+    r"""Polynomial kernel :math:`(\gamma \langle x, y \rangle + r)^{\mathrm{order}}`.
+
+    The inner product :math:`\langle x, y \rangle` is the (optionally
+    Mahalanobis-weighted) linear kernel from :func:`linear_kernel`.
+
+    Parameters
+    ----------
+    X0, X1
+        Sample tensors of shape :math:`(\dots, n, d)` and
+        :math:`(\dots, m, d)`.  If ``X1 is None``, uses ``X0`` (self-
+        kernel; the result is :math:`(\dots, n, n)`).
+    theta
+        Optional metric tensor for the inner product.  Same shape
+        conventions as the ``theta`` argument of :func:`linear_kernel`.
+    gamma
+        Optional scaling of the inner product.  ``None`` uses
+        :math:`\gamma = 1 / d`.
+    order
+        Polynomial degree (the exponent).
+    r
+        Additive offset (independent term) inside the power.
+
+    Returns
+    -------
+    Float[Array, '... n m']
+        Kernel matrix of shape :math:`(\dots, n, m)`.
+    """
     g = _default_gamma(X0, gamma)
     K = linear_kernel(X0, X1, theta=theta)
     return (g * K + r) ** order
@@ -306,10 +415,36 @@ def sigmoid_kernel(
     gamma: Optional[float] = None,
     r: float = 0.0,
 ) -> Float[Array, '... n m']:
-    """Sigmoid (hyperbolic tangent) kernel: ``tanh(gamma * <x, y> + r)``.
+    r"""Sigmoid (hyperbolic tangent) kernel :math:`\tanh(\gamma \langle x, y \rangle + r)`.
 
-    Note: not positive semidefinite for arbitrary gamma / r --
-    use cautiously in kernel-method pipelines.
+    The inner product :math:`\langle x, y \rangle` is the (optionally
+    Mahalanobis-weighted) linear kernel from :func:`linear_kernel`.
+
+    Parameters
+    ----------
+    X0, X1
+        Sample tensors of shape :math:`(\dots, n, d)` and
+        :math:`(\dots, m, d)`.  If ``X1 is None``, uses ``X0`` (self-
+        kernel; the result is :math:`(\dots, n, n)`).
+    theta
+        Optional metric tensor for the inner product.  Same shape
+        conventions as the ``theta`` argument of :func:`linear_kernel`.
+    gamma
+        Optional scaling of the inner product.  ``None`` uses
+        :math:`\gamma = 1 / d`.
+    r
+        Additive offset (independent term) inside the tanh.
+
+    Returns
+    -------
+    Float[Array, '... n m']
+        Kernel matrix of shape :math:`(\dots, n, m)`.
+
+    Notes
+    -----
+    This kernel is not positive semidefinite for arbitrary
+    :math:`\gamma` and :math:`r`; use it cautiously in kernel-method
+    pipelines.
     """
     g = _default_gamma(X0, gamma)
     K = linear_kernel(X0, X1, theta=theta)
@@ -322,10 +457,28 @@ def cosine_kernel(
     *,
     theta: Optional[Num[Array, '... d']] = None,
 ) -> Float[Array, '... n m']:
-    """Cosine kernel: row-normalised linear kernel.
+    r"""Cosine kernel: the linear kernel on row-normalised inputs.
 
-    Equivalent to ``linear_kernel(unit(X0), unit(X1), theta=theta)``
-    where ``unit(X) = X / |X|``.
+    Equivalent to ``linear_kernel(unit(X0), unit(X1), theta=theta)``,
+    where each row of ``X`` is normalised to unit (optionally
+    Mahalanobis) norm via :func:`parameterised_norm` before the linear
+    kernel of :func:`linear_kernel` is applied.
+
+    Parameters
+    ----------
+    X0, X1
+        Sample tensors of shape :math:`(\dots, n, d)` and
+        :math:`(\dots, m, d)`.  If ``X1 is None``, uses the normalised
+        ``X0`` (self-kernel; the result is :math:`(\dots, n, n)`).
+    theta
+        Optional metric tensor for both the normalisation and the
+        linear kernel.  Same shape conventions as the ``theta``
+        argument of :func:`linear_kernel`.
+
+    Returns
+    -------
+    Float[Array, '... n m']
+        Kernel matrix of shape :math:`(\dots, n, m)`.
     """
     X0_n = parameterised_norm(X0, theta=theta)
     X1_n = X0_n if X1 is None else parameterised_norm(X1, theta=theta)
@@ -356,13 +509,35 @@ def se_spectral_density(
     amplitude: float = 1.0,
     dim: int = 1,
 ) -> Float[Array, '...']:
-    """Squared-exponential (RBF) spectral density in ``dim`` dimensions.
+    r"""Squared-exponential (RBF) spectral density in ``dim`` dimensions.
 
-    ``S(w) = amplitude**2 * (2 pi)**(D/2) * rho**D * exp(-rho**2 ||w||**2 / 2)`` --
-    the ``D``-dimensional FT of ``k(r) = amplitude**2 exp(-r**2 / (2 rho**2))``
-    (scikit-learn ``RBF(length_scale=rho)`` scaled by ``amplitude**2``).  ``omega``
-    is the frequency magnitude ``||w||``; ``dim=1`` is the 1-D case
-    ``amp**2 sqrt(2 pi) rho exp(...)``.
+    Evaluates the power spectral density
+    :math:`S(w) = a^2 (2\pi)^{D/2} \rho^{D} \exp(-\rho^2 \|w\|^2 / 2)`
+    (with amplitude :math:`a` and input dimension :math:`D`) -- the
+    :math:`D`-dimensional Fourier transform of
+    :math:`k(r) = a^2 \exp(-r^2 / (2 \rho^2))`, i.e. scikit-learn's
+    ``RBF(length_scale=rho)`` scaled by :math:`a^2`.  At ``dim=1`` this
+    reduces to :math:`a^2 \sqrt{2\pi}\, \rho \exp(-\rho^2 w^2 / 2)`.
+
+    Parameters
+    ----------
+    omega
+        Frequency magnitude :math:`\|w\|`, of arbitrary shape.
+        Integer inputs are promoted to the default float dtype before
+        the density is formed (an integer ``omega`` would otherwise
+        truncate ``rho`` to zero).
+    rho
+        Length scale :math:`\rho` (scalar or scalar array).
+    amplitude
+        Kernel amplitude :math:`a`; the density scales as :math:`a^2`.
+    dim
+        Input dimension :math:`D` (``1`` for the one-dimensional case).
+
+    Returns
+    -------
+    Float[Array, '...']
+        Spectral density evaluated elementwise at ``omega``, matching
+        its (float-promoted) shape and dtype.
     """
     omega = jnp.asarray(omega)
     # Promote an integer omega to the default float (f64 under x64, else f32)
@@ -386,16 +561,44 @@ def matern_spectral_density(
     amplitude: float = 1.0,
     dim: int = 1,
 ) -> Float[Array, '...']:
-    """Matern spectral density in ``dim`` dimensions for ``nu in {0.5, 1.5, 2.5}``.
+    r"""Matern spectral density in ``dim`` dimensions for ``nu`` in ``{0.5, 1.5, 2.5}``.
 
-    ``S(w) = amp**2 * C * (lam**2 + ||w||**2)**(-(nu + D/2))`` with the Matern rate
-    ``lam = sqrt(2 nu) / rho`` and ``C = 2**D pi**(D/2) Gamma(nu + D/2) (2 nu)**nu /
-    (Gamma(nu) rho**(2 nu))`` -- the ``D``-dimensional FT of scikit-learn
-    ``Matern(length_scale=rho, nu=nu)`` scaled by ``amplitude**2``.  ``omega`` is
-    the frequency magnitude ``||w||``.  At ``dim=1`` this reduces to the closed
-    forms ``2 lam/(lam^2+w^2)``, ``4 lam^3/(lam^2+w^2)^2``,
-    ``16/3 lam^5/(lam^2+w^2)^3`` (used directly to keep the well-tested 1-D path
-    byte-identical).
+    Evaluates the power spectral density
+    :math:`S(w) = a^2 C (\lambda^2 + \|w\|^2)^{-(\nu + D/2)}` with the
+    Matern rate :math:`\lambda = \sqrt{2\nu} / \rho`, normaliser
+    :math:`C = 2^{D} \pi^{D/2} \Gamma(\nu + D/2) (2\nu)^{\nu} /
+    (\Gamma(\nu) \rho^{2\nu})`, amplitude :math:`a`, and input
+    dimension :math:`D` -- the :math:`D`-dimensional Fourier transform
+    of scikit-learn's ``Matern(length_scale=rho, nu=nu)`` scaled by
+    :math:`a^2`.  At ``dim=1`` this reduces to the closed forms
+    :math:`2\lambda / (\lambda^2 + w^2)`,
+    :math:`4\lambda^3 / (\lambda^2 + w^2)^2`, and
+    :math:`\tfrac{16}{3}\lambda^5 / (\lambda^2 + w^2)^3` for
+    :math:`\nu = 1/2, 3/2, 5/2` respectively, evaluated directly to
+    keep the well-tested one-dimensional path byte-identical.
+
+    Parameters
+    ----------
+    omega
+        Frequency magnitude :math:`\|w\|`, of arbitrary shape.
+        Integer inputs are promoted to the default float dtype before
+        the density is formed (an integer ``omega`` would otherwise
+        truncate ``rho`` and yield ``NaN``).
+    rho
+        Length scale :math:`\rho` (scalar or scalar array).
+    nu
+        Matern smoothness :math:`\nu`; must be ``0.5``, ``1.5``, or
+        ``2.5`` (raises :class:`ValueError` otherwise).
+    amplitude
+        Kernel amplitude :math:`a`; the density scales as :math:`a^2`.
+    dim
+        Input dimension :math:`D` (``1`` for the one-dimensional case).
+
+    Returns
+    -------
+    Float[Array, '...']
+        Spectral density evaluated elementwise at ``omega``, matching
+        its (float-promoted) shape and dtype.
     """
     if nu not in _MATERN_NU:
         raise ValueError(
@@ -453,15 +656,42 @@ def spectral_density(
     amplitude: float = 1.0,
     dim: int = 1,
 ) -> Float[Array, '...']:
-    """Dispatch a stationary-kernel spectral density (in ``dim`` dimensions).
+    r"""Dispatch a stationary-kernel spectral density (in ``dim`` dimensions).
 
-    ``kernel`` in ``{'rbf'/'se', 'matern12'/'exp', 'matern32', 'matern52'}``;
-    ``omega`` is the frequency magnitude ``||w||`` and ``dim`` the input
-    dimension (``1`` by default -- the 1-D case).
+    Selects and evaluates a spectral density by name, routing to
+    :func:`se_spectral_density` for the squared-exponential family and
+    to :func:`matern_spectral_density` for the Matern families.  The
+    ``kernel`` string is matched case-insensitively after stripping
+    ``/``, ``-``, and ``_``.
+
+    Parameters
+    ----------
+    omega
+        Frequency magnitude :math:`\|w\|`, of arbitrary shape.
+    kernel
+        Kernel name.  Squared-exponential: ``'rbf'``, ``'se'``,
+        ``'sqexp'``, ``'squaredexponential'``, ``'gaussian'``.  Matern:
+        ``'matern12'`` / ``'exp'`` / ``'exponential'`` (:math:`\nu = 1/2`),
+        ``'matern32'`` (:math:`\nu = 3/2`), ``'matern52'``
+        (:math:`\nu = 5/2`).  An unknown name raises
+        :class:`ValueError`.
+    rho
+        Length scale :math:`\rho` (scalar or scalar array).
+    amplitude
+        Kernel amplitude :math:`a`; the density scales as :math:`a^2`.
+    dim
+        Input dimension :math:`D` (``1`` for the one-dimensional case).
+
+    Returns
+    -------
+    Float[Array, '...']
+        Spectral density evaluated elementwise at ``omega``.
     """
     k = kernel.lower().replace('/', '').replace('-', '').replace('_', '')
     if k in ('rbf', 'se', 'sqexp', 'squaredexponential', 'gaussian'):
-        return se_spectral_density(omega, rho=rho, amplitude=amplitude, dim=dim)
+        return se_spectral_density(
+            omega, rho=rho, amplitude=amplitude, dim=dim
+        )
     if k in _KERNEL_NU:
         return matern_spectral_density(
             omega, rho=rho, nu=_KERNEL_NU[k], amplitude=amplitude, dim=dim

@@ -1,0 +1,74 @@
+---
+title: "nitrix.sparse.grid"
+generated: true
+signature-hash: c1457301a1c96221
+description: "Regular-grid stencil specialisation of the ELL sparse format."
+listing:
+  id: nitrix-sparse-grid-symbols
+  contents: "nitrix-sparse-grid/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.sparse.grid`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Regular-grid stencil specialisation of the ELL sparse format.
+
+When every voxel of a regular n-D grid uses the same neighbour offset pattern
+(the "stencil"), the resulting linear operator has a special structure: row
+$i$ indexes neighbours at fixed offsets from row $i$'s spatial
+coordinate. This is stored as a plain [`ELL`](nitrix-sparse.qmd) with:
+
+- `n_rows = prod(grid_shape)` (one row per voxel).
+- `k_max = len(offsets)` (one column per stencil tap).
+- `indices[v, k]` is the linearised index of the `k`-th neighbour of
+  voxel `v`.
+- `values[v, k]` is the stencil weight at offset `k`.
+
+This is the substrate equivalent of the regular finite-difference operators
+(the 5-point Laplacian, Sobel filters, and so on). Once constructed, the
+machinery of [`semiring_ell_matmul`](nitrix-semiring.qmd),
+`laplacian_eigenmap`, and related routines flows naturally.
+
+The public surface consists of [`regular_grid_stencil`](nitrix-sparse-grid/regular_grid_stencil.qmd) (the general n-D
+stencil constructor with replicate / periodic / reflect boundary modes),
+[`grid_laplacian`](nitrix-sparse-grid/grid_laplacian.qmd) (a convenience for the (2n+1)-point n-D Laplacian on a
+regular grid), and [`grid_identity`](nitrix-sparse-grid/grid_identity.qmd) (the identity operator, trivial but
+composable with [`grid_laplacian`](nitrix-sparse-grid/grid_laplacian.qmd) to form $I - L$ smoothers).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### Boundary handling
+
+- `'replicate'`: at the grid edge, the out-of-bounds neighbour index is
+  clamped to the edge cell. This effectively duplicates the boundary value
+  when applied via matmul, matching scipy `mode='nearest'`.
+- `'periodic'`: wrap around (toroidal topology), matching scipy
+  `mode='wrap'`.
+- `'reflect'`: mirror at the edge with the edge cell repeated, matching
+  scipy `mode='reflect'` (numpy `mode='symmetric'`).
+
+For more exotic topologies (e.g., a parameterised sphere with pole flip),
+pre-pad the spatial axes via the routines in [`nitrix.geometry.sphere_grid`](nitrix-geometry-sphere_grid.qmd)
+and construct the stencil on the padded grid.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_offsets` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-sparse-grid-symbols}
+:::

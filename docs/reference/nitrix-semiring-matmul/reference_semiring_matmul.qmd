@@ -1,0 +1,58 @@
+---
+title: "reference_semiring_matmul"
+generated: true
+description: "Pure-JAX reference for [`semiring_matmul`](../nitrix-semiring-matmul/semiring_matmul.qmd)."
+---
+
+[‹ back to `nitrix.semiring.matmul`](../nitrix-semiring-matmul.qmd)
+
+*Re-exported here; defined in `nitrix.semiring._reference`.*
+
+<!-- nitrix:gen sig:reference_semiring_matmul -->
+```python
+reference_semiring_matmul(A: Num[Array, 'm k'], B: Num[Array, 'k n'], *, semiring: Semiring[S]) -> Num[Array, 'm n']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:reference_semiring_matmul -->
+Pure-JAX reference for [`semiring_matmul`](../nitrix-semiring-matmul/semiring_matmul.qmd).
+
+Computes the dense semiring matrix product
+$C_{ij} = \bigoplus_k \left( A_{ik} \otimes B_{kj} \right)$,
+where $\oplus$ is the monoid reduction and $\otimes$ the
+per-element combine of the supplied algebra.  The contraction axis is
+walked with `jax.lax.fori_loop`, folding each rank-one outer
+product into the accumulator via `semiring.monoid.update`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:reference_semiring_matmul -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `A` | `Num` | `m` × `k` | — | Left operand, shape `(m, k)`. |
+| `B` | `Num` | `k` × `n` | — | Right operand, shape `(k, n)`. Its leading axis is the contraction dimension shared with `A`. |
+| `semiring` | `Semiring[S]` | — | — | The algebra to reduce under. Either a relaxed [`Semiring`](../nitrix-semiring/Semiring.qmd) or a [`StrictSemiring`](../nitrix-semiring/StrictSemiring.qmd); this function fixes the reduction order, so the relaxed type is sufficient. |
+
+**Returns** `Num` — shape `m` × `n`. The product `C`, shape `(m, n)`, with the same dtype as `A`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:reference_semiring_matmul -->
+::: {.callout-note}
+There are no batching dimensions here.  The public
+[`semiring_matmul`](../nitrix-semiring-matmul/semiring_matmul.qmd) handles broadcast over leading batch
+dimensions by `vmap`-ing over this reference.  Keeping the reference
+two-dimensional simplifies the Pallas parity contract.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:reference_semiring_matmul -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `m` | rows of a multi-row contrast |
+| `k` | kernel or basis components |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

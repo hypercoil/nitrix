@@ -1,0 +1,60 @@
+---
+title: "Semiring"
+generated: true
+description: "The relaxed semiring: a frozen bundle of the algebraic operations."
+---
+
+[‹ back to `nitrix.semiring`](../nitrix-semiring.qmd)
+
+*Re-exported here; defined in `nitrix.semiring._types`.*
+
+<!-- nitrix:gen sig:Semiring -->
+```python
+class Semiring(Generic[S])
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:Semiring -->
+The relaxed semiring: a frozen bundle of the algebraic operations.
+
+A semiring pairs a [`Monoid`](../nitrix-semiring/Monoid.qmd) (the additive reduction `(+)`)
+with a [`Semigroup`](../nitrix-semiring/Semigroup.qmd) (the multiplicative combine `(*)`), plus
+the identity/annihilator scalars and the optional differentiation
+rules needed by the streaming kernels. The relaxed variant makes no
+associativity promise on `binary_op`.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:Semiring.as_strict -->
+```python
+as_strict() -> 'StrictSemiring[S]'
+```
+<!-- nitrix:/gen -->
+
+Re-tag this semiring as a [`StrictSemiring`](../nitrix-semiring/StrictSemiring.qmd).
+
+The caller is asserting that `binary_op` is associative and
+distributes over `monoid.merge` for the dtypes in use. No check
+is performed; the type system carries the obligation.
+
+<!-- nitrix:gen sig:Semiring.__init__ -->
+```python
+__init__(monoid: Monoid[S], binary_op: Semigroup, identity: Any = None, annihilator: Any = None, name: str = 'semiring', matmul_vjp: Optional[SemiringMatmulVJP] = None, ell_matmul_vjp: Optional[SemiringELLMatmulVJP] = None) -> None
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:Semiring -->
+::: {.callout-note}
+Construct via `Semiring(...)` for the relaxed variant or
+`StrictSemiring(...)` directly for the strict variant.
+`Semiring.as_strict` and `StrictSemiring.as_relaxed`
+convert between them; the conversion is a re-tagging, not a check.
+
+User-defined algebras may subclass this dataclass only to attach
+extra metadata (e.g., a custom gradient hint); the kernel surface
+relies on the `monoid` / `binary_op` / `identity` / `name`
+fields.
+:::
+<!-- nitrix:/gen -->
+

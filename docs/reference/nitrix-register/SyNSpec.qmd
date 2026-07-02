@@ -1,0 +1,38 @@
+---
+title: "SyNSpec"
+generated: true
+description: "Static configuration for the greedy-SyN recipe (jit-static)."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._syn`.*
+
+<!-- nitrix:gen sig:SyNSpec -->
+```python
+class SyNSpec(SVFSpec)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:SyNSpec -->
+Static configuration for the greedy-SyN recipe (jit-static).
+
+Embeds `._svf.SVFSpec` for the shared schedule / regularisation /
+convergence fields (`levels`, `iterations`, `sigma_fluid` /
+`sigma_diffusion`, `spacing`, `pyramid_factor` / `pyramid_sigma`,
+`boundary_mode`, `representation`, `mode` / `convergence`,
+`compute_velocity`); SyN is *symmetric*, so it carries a pair of
+displacements / velocities -- `representation` / `compute_velocity`
+recover both `forward_velocity` and `inverse_velocity`, and `spacing`
+additionally makes the LNCC window physically isotropic.  The SyN-specific
+force / step knobs:
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:SyNSpec.__init__ -->
+```python
+__init__(levels: int = 3, iterations: Union[int, tuple[int, ...]] = 80, sigma_fluid: float = 1.0, sigma_diffusion: float = 1.5, spacing: Optional[Union[float, tuple[float, ...]]] = None, pyramid_factor: float = 2.0, pyramid_sigma: Optional[float] = None, boundary_mode: BoundaryMode = 'nearest', representation: Literal['group', 'algebra'] = 'group', mode: ConvergenceMode = 'fixed', convergence: Convergence = Convergence(), compute_velocity: bool = False, radius: int = 2, step: float = 0.25, step_mode: Literal['clamp', 'normalize'] = 'clamp', n_steps: int = 5) -> None
+```
+<!-- nitrix:/gen -->
+

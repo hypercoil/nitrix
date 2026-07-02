@@ -1,0 +1,44 @@
+---
+title: "odeint"
+generated: true
+description: "Integrate $dy/dt = f(t, y)$ with the chosen `method`."
+---
+
+[‹ back to `nitrix.numerics.ode`](../nitrix-numerics-ode.qmd)
+
+<!-- nitrix:gen sig:odeint -->
+```python
+odeint(f: VectorField, y0: Float[Array, '...'], t: Float[Array, 't'], *, method: Method = 'rk4') -> Float[Array, 't ...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:odeint -->
+Integrate $dy/dt = f(t, y)$ with the chosen `method`.
+
+Dispatches to the fixed-step stepper named by `method`.  The adaptive
+methods (`dopri5` / `dopri8` / `tsit5`) are not part of this set;
+passing one raises with a pointer to that gap.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:odeint -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `f` | `VectorField` | — | — | Vector field `f(t, y) -> dy/dt` (`t` scalar, `y` the state). |
+| `y0` | `Float` | `...` | — | Initial state at `t[0]`. For `"local_linearization"` this must be a flat 1-D state of shape `(n,)`. |
+| `t` | `Float` | `t` | — | Strictly monotone time points of shape `(t,)`; one step is taken per interval. |
+| `method` | `Method` | — | `'rk4'` | Which fixed-step stepper to use: `"rk4"` (default, dispatching to [`rk4`](../nitrix-numerics-ode/rk4.qmd)), `"midpoint"` ([`midpoint`](../nitrix-numerics-ode/midpoint.qmd)), `"euler"` ([`euler`](../nitrix-numerics-ode/euler.qmd)), or `"local_linearization"` ([`local_linearization`](../nitrix-numerics-ode/local_linearization.qmd), the A-stable exponential integrator for stiff systems; requires a flat 1-D state). |
+
+**Returns** `Float` — shape `t` × `...`. States at each time point, shape `(len(t), *y0.shape)` (`ys[0]` is `y0`).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:odeint -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `t` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

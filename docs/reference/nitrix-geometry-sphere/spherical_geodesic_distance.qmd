@@ -1,0 +1,72 @@
+---
+title: "spherical_geodesic_distance"
+generated: true
+description: "All-pairs great-circle distance between Cartesian points on a sphere."
+---
+
+[‹ back to `nitrix.geometry.sphere`](../nitrix-geometry-sphere.qmd)
+
+<!-- nitrix:gen sig:spherical_geodesic_distance -->
+```python
+spherical_geodesic_distance(X: Float[Array, '... n 3'], Y: Optional[Float[Array, '... m 3']] = None, r: float = 1.0) -> Float[Array, '... n m']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:spherical_geodesic_distance -->
+All-pairs great-circle distance between Cartesian points on a sphere.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:spherical_geodesic_distance -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X` | `Float` | `...` × `n` × `3` | — | First set of points on the sphere, Cartesian, `(..., n, 3)`. |
+| `Y` | `Optional[Float[Array, '... m 3']]` | — | `None` | Second set; if `None`, computes pairwise distance within `X`. Shape `(..., m, 3)`. |
+| `r` | `float` | — | `1.0` | Sphere radius. The returned distance is `r * angle`. |
+
+**Returns** `Float` — shape `...` × `n` × `m`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:spherical_geodesic_distance -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **111.5 µs** (median, L4); up to **303.96× faster** than `sklearn.haversine`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_SPHERICAL_GEODESIC_DISTANCE.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| spherical_geodesic_distance | jax-cpu | n=1024 | `cupy.spherical_geodesic_distance` | skipped | — | — | — | — | — |
+| spherical_geodesic_distance | jax-cpu | n=1024 | `nitrix-jax` | ok | 10.82 ms / 13.66 ms | 94.86 ms | 768 MB (rss) | ✓ 0.00024×tol | 1.00x vs nitrix-jax |
+| spherical_geodesic_distance | jax-cpu | n=1024 | `sklearn.haversine` | ok | 33.24 ms / 36.11 ms | 33.66 ms | 768 MB (rss) | ✓ 0.0013×tol | 3.07x vs nitrix-jax |
+| spherical_geodesic_distance | jax-cuda12 | n=1024 | `cupy.spherical_geodesic_distance` | ok | 3.68 ms / 3.74 ms | 134.18 ms | 0.01 MB (hbm) | ✓ 0.00026×tol | 34.01x vs nitrix-jax |
+| spherical_geodesic_distance | jax-cuda12 | n=1024 | `nitrix-jax` | ok | 108.3 µs / 111.5 µs | 309.45 ms | 41.96 MB (hbm) | ✓ 0.00026×tol | 1.00x vs nitrix-jax |
+| spherical_geodesic_distance | jax-cuda12 | n=1024 | `sklearn.haversine` | ok | 32.91 ms / 32.97 ms | 33.38 ms | 0.01 MB (hbm) | ✓ 0.0013×tol | 303.96x vs nitrix-jax |
+| spherical_geodesic_distance | jax-cpu | n=256 | `cupy.spherical_geodesic_distance` | skipped | — | — | — | — | — |
+| spherical_geodesic_distance | jax-cpu | n=256 | `nitrix-jax` | ok | 924.3 µs / 982.0 µs | 85.77 ms | 768 MB (rss) | ✓ 0.00021×tol | 1.00x vs nitrix-jax |
+| spherical_geodesic_distance | jax-cpu | n=256 | `sklearn.haversine` | ok | 2.42 ms / 2.53 ms | 2.69 ms | 768 MB (rss) | ✓ 0.0011×tol | 2.62x vs nitrix-jax |
+| spherical_geodesic_distance | jax-cuda12 | n=256 | `cupy.spherical_geodesic_distance` | ok | 400.3 µs / 406.3 µs | 1.199 s | 0.00 MB (hbm) | ✓ 0.0002×tol | 4.29x vs nitrix-jax |
+| spherical_geodesic_distance | jax-cuda12 | n=256 | `nitrix-jax` | ok | 93.4 µs / 95.4 µs | 279.61 ms | 34.08 MB (hbm) | ✓ 0.0002×tol | 1.00x vs nitrix-jax |
+| spherical_geodesic_distance | jax-cuda12 | n=256 | `sklearn.haversine` | ok | 2.18 ms / 2.24 ms | 2.69 ms | 0.00 MB (hbm) | ✓ 0.0011×tol | 23.35x vs nitrix-jax |
+| spherical_geodesic_distance | jax-cpu | n=512 | `cupy.spherical_geodesic_distance` | skipped | — | — | — | — | — |
+| spherical_geodesic_distance | jax-cpu | n=512 | `nitrix-jax` | ok | 3.06 ms / 3.79 ms | 90.20 ms | 768 MB (rss) | ✓ 0.00024×tol | 1.00x vs nitrix-jax |
+| spherical_geodesic_distance | jax-cpu | n=512 | `sklearn.haversine` | ok | 8.56 ms / 9.10 ms | 10.05 ms | 768 MB (rss) | ✓ 0.0013×tol | 2.79x vs nitrix-jax |
+| spherical_geodesic_distance | jax-cuda12 | n=512 | `cupy.spherical_geodesic_distance` | ok | 1.05 ms / 1.06 ms | 146.06 ms | 0.01 MB (hbm) | ✓ 0.00021×tol | 11.44x vs nitrix-jax |
+| spherical_geodesic_distance | jax-cuda12 | n=512 | `nitrix-jax` | ok | 91.9 µs / 92.6 µs | 319.56 ms | 36.70 MB (hbm) | ✓ 0.00025×tol | 1.00x vs nitrix-jax |
+| spherical_geodesic_distance | jax-cuda12 | n=512 | `sklearn.haversine` | ok | 9.35 ms / 11.19 ms | 9.04 ms | 0.01 MB (hbm) | ✓ 0.0013×tol | 101.69x vs nitrix-jax |
+:::
+
+*source: bench `8171f3fa` · nitrix `f42e7ff8`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:spherical_geodesic_distance -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `3` | *(undocumented — add to `_dimensions.yml`)* |
+| `m` | rows of a multi-row contrast |
+<!-- nitrix:/gen -->

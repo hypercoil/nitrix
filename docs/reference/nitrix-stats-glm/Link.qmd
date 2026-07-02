@@ -1,0 +1,34 @@
+---
+title: "Link"
+generated: true
+description: "A link function as a record of its three IRLS primitives."
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+*Re-exported here; defined in `nitrix.stats._family`.*
+
+<!-- nitrix:gen sig:Link -->
+```python
+class Link
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:Link -->
+A link function as a record of its three IRLS primitives.
+
+Here `link` is $g(\mu)$, `linkinv` is $g^{-1}(\eta)$, and
+`mu_eta` is $\mathrm{d}\mu / \mathrm{d}\eta$ (as a function of
+$\eta$); `eta_bound` is the IRLS linear-predictor clamp
+($\infty$ unless the inverse link can overflow).  Compose onto a
+distribution with `Family.with_link`.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:Link.__init__ -->
+```python
+__init__(name: str, link: Callable[[Array], Array], linkinv: Callable[[Array], Array], mu_eta: Callable[[Array], Array], eta_bound: float = float('inf')) -> None
+```
+<!-- nitrix:/gen -->
+

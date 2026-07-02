@@ -1,36 +1,40 @@
 # -*- coding: utf-8 -*-
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
-"""
-Within-group residual-correlation structures (v3 §1.4).
+r"""
+Within-group residual-correlation structures.
 
-A structured residual replaces the ``sigma_e^2 I`` error model with
-``sigma_e^2 R(rho)``, where ``R`` is a within-group correlation matrix carrying
-one (or few) correlation parameters: ``ar1`` (discrete AR(1)), ``car1``
-(continuous-time AR(1), unequally-spaced times), and ``cs`` (compound symmetry).
-This is the ``nlme`` ``correlation=corAR1 / corCAR1 / corCompSymm`` surface.
+A structured residual replaces the :math:`\sigma_e^2 I` error model with
+:math:`\sigma_e^2 R(\rho)`, where :math:`R` is a within-group correlation matrix
+carrying one (or few) correlation parameters: :func:`ar1` (discrete AR(1)),
+:func:`car1` (continuous-time AR(1), unequally-spaced times), and :func:`cs`
+(compound symmetry).  This is the ``nlme`` ``correlation=corAR1 / corCAR1 /
+corCompSymm`` surface.
 
 The unifying device is **whitening**.  Each structure supplies, per group, a
-closed-form transform ``W_i`` with ``W_i R_i W_i^T = I`` -- so on whitened data
-(``W_i y_i``, ``W_i X_i``, ``W_i Z_i``) the residual is i.i.d. and the rest of
-the LME machinery (GLS / block-Woodbury) applies unchanged, with a single extra
-``0.5 * log|R_i|`` per group added to the REML objective (the whitening
-Jacobian).  Every transform is **closed-form and cuSOLVER-free**:
+closed-form transform :math:`W_i` with :math:`W_i R_i W_i^{\top} = I` -- so on
+whitened data (:math:`W_i y_i`, :math:`W_i X_i`, :math:`W_i Z_i`) the residual is
+i.i.d. and the rest of the LME machinery (GLS / block-Woodbury) applies
+unchanged, with a single extra :math:`0.5 \log|R_i|` per group added to the REML
+objective (the whitening Jacobian).  Every transform is **closed-form and
+cuSOLVER-free**:
 
-- ``ar1`` / ``car1`` -- the innovations form ``w_t = (z_t - phi_t z_{t-1}) /
-  sqrt(1 - phi_t^2)`` (``w_0 = z_0``), a one-shift elementwise recurrence (no
-  matrix inverse, no scan).  ``phi_t = rho`` (AR1) or ``rho^{Delta t_t}`` (CAR1).
-  ``log|R_i| = sum_{t>=1} log(1 - phi_t^2)``.
-- ``cs`` -- the rank-one whitener ``w = a z + (b - a) mean(z) 1`` with
-  ``a = (1-rho)^{-1/2}``, ``b = (1 + (n_i-1) rho)^{-1/2}``; ``log|R_i| =
-  (n_i-1) log(1-rho) + log(1 + (n_i-1) rho)``.
+- :func:`ar1` / :func:`car1` -- the innovations form
+  :math:`w_t = (z_t - \phi_t z_{t-1}) / \sqrt{1 - \phi_t^2}`
+  (:math:`w_0 = z_0`), a one-shift elementwise recurrence (no matrix inverse, no
+  scan).  :math:`\phi_t = \rho` (AR1) or :math:`\rho^{\Delta t_t}` (CAR1).
+  :math:`\log|R_i| = \sum_{t \geq 1} \log(1 - \phi_t^2)`.
+- :func:`cs` -- the rank-one whitener
+  :math:`w = a z + (b - a)\, \operatorname{mean}(z)\, 1` with
+  :math:`a = (1 - \rho)^{-1/2}`, :math:`b = (1 + (n_i - 1)\rho)^{-1/2}`;
+  :math:`\log|R_i| = (n_i - 1)\log(1 - \rho) + \log(1 + (n_i - 1)\rho)`.
 
 Groups are stored **left-packed and time-sorted** in a ``(G, T)`` padded layout
 (``T`` = max group size) with a boolean ``mask``; padded positions are zeroed and
 excluded from every reduction, so ragged group sizes are handled without dynamic
 shapes.  The correlation parameter is carried **unconstrained** (the fit
-optimises a real ``raw``; ``rho`` is recovered by a bounded transform) so Newton
-stays unconstrained.
+optimises a real ``raw``; :math:`\rho` is recovered by a bounded transform) so
+Newton stays unconstrained.
 
 References
 ----------
@@ -60,29 +64,31 @@ _EPS = 1e-6
 
 @dataclass(frozen=True)
 class CorrSpec:
-    """A within-group correlation structure, as a record of pure functions.
+    r"""A within-group correlation structure, as a record of pure functions.
 
     Frozen and hashable so it rides as a static config (a ``vmap`` /
-    ``custom_vjp`` nondiff argument), like ``Family`` / ``VarCompSpec``.
+    ``custom_vjp`` nondiff argument), like :class:`~nitrix.stats.Family` /
+    :class:`~nitrix.stats.lme.VarCompSpec`.
 
     Fields
     ------
     name
-        Structure name (``'ar1'`` / ``'car1'`` / ``'cs'``).
+        Structure name (``'ar1'`` / ``'car1'`` / ``'cs'`` / ``'iid'``).
     n_params
-        Number of correlation parameters (``1`` for all three here).
+        Number of correlation parameters (``1`` for :func:`ar1`, :func:`car1`
+        and :func:`cs`; ``0`` for :func:`iid`).
     whiten
         ``(z_pad, gaps, nsize, mask, raw) -> (w_pad, half_logdet)``: apply the
         per-group whitener to a ``(G, T, k)`` padded stack ``z_pad`` (zeroed pad),
-        returning the whitened stack and ``0.5 * sum_i log|R_i|`` (summed over
+        returning the whitened stack and :math:`0.5 \sum_i \log|R_i|` (summed over
         groups).  ``gaps`` is the ``(G, T)`` time gap to the previous in-group
-        observation (``car1``); ``nsize`` the ``(G,)`` real group sizes; ``mask``
-        the ``(G, T)`` validity mask; ``raw`` the ``(n_params,)`` unconstrained
-        parameter.
+        observation (used by :func:`car1`); ``nsize`` the ``(G,)`` real group
+        sizes; ``mask`` the ``(G, T)`` validity mask; ``raw`` the ``(n_params,)``
+        unconstrained parameter.
     to_natural
         ``raw -> rho`` (the bounded natural correlation, for reporting).
     init_raw
-        A reasonable unconstrained start.
+        A reasonable unconstrained start, as a function of dtype.
     """
 
     name: str
@@ -111,13 +117,36 @@ def _innovations_whiten(
     phi: Float[Array, 'G T'],
     mask: Bool[Array, 'G T'],
 ) -> Tuple[Float[Array, 'G T k'], Float[Array, '']]:
-    """Innovations whitening ``w_t = (z_t - phi_t z_{t-1}) / sqrt(1 - phi_t^2)``.
+    r"""Innovations whitening of a padded, time-sorted group stack.
 
-    ``phi[:, 0]`` is taken as ``0`` (so ``w_0 = z_0``); ``phi`` for ``t >= 1`` is
-    the lag-1 (AR1) or time-decayed (CAR1) coefficient.  A single shift along the
-    time axis implements the recurrence -- it depends on the *original* lagged
-    value, not the whitened one, so no scan is needed.  Padded positions are
-    re-zeroed; ``half_logdet = 0.5 sum_{real, t>=1} log(1 - phi_t^2)``.
+    Applies the one-shift recurrence
+    :math:`w_t = (z_t - \phi_t z_{t-1}) / \sqrt{1 - \phi_t^2}` along the time
+    axis.  ``phi[:, 0]`` is taken as :math:`0` (so :math:`w_0 = z_0`); ``phi``
+    for :math:`t \geq 1` is the lag-1 (AR1) or time-decayed (CAR1) coefficient.
+    A single shift implements the recurrence -- it depends on the *original*
+    lagged value, not the whitened one, so no scan is needed.  Padded positions
+    are re-zeroed.
+
+    Parameters
+    ----------
+    z_pad : Float[Array, 'G T k']
+        Left-packed, time-sorted padded stack of ``k``-vectors for ``G`` groups
+        of at most ``T`` observations, with padded positions zeroed.
+    phi : Float[Array, 'G T']
+        Per-position innovations coefficient.  Entry ``phi[:, 0]`` is ignored
+        (forced to zero internally); entries for :math:`t \geq 1` give the
+        correlation with the previous in-group observation.
+    mask : Bool[Array, 'G T']
+        Validity mask; ``True`` at real observations, ``False`` at padding.
+
+    Returns
+    -------
+    Float[Array, 'G T k']
+        The whitened stack ``w``, with padded positions zeroed.
+    Float[Array, '']
+        The half log-determinant contribution
+        :math:`0.5 \sum_{\text{real},\, t \geq 1} \log(1 - \phi_t^2)`, summed
+        over all real observations that have a predecessor.
     """
     g, t = phi.shape
     phi = phi.at[:, 0].set(0.0)
@@ -136,10 +165,18 @@ def _innovations_whiten(
 
 
 def ar1() -> CorrSpec:
-    """Discrete AR(1) within-group correlation (``nlme`` ``corAR1``).
+    r"""Discrete AR(1) within-group correlation (``nlme`` ``corAR1``).
 
-    ``R_{ij} = rho^{|i - j|}`` over the time-ordered observations; ``rho`` may be
-    negative (oscillating), so ``rho = tanh(raw) in (-1, 1)``.
+    The correlation matrix is :math:`R_{ij} = \rho^{|i - j|}` over the
+    time-ordered observations.  Here :math:`\rho` may be negative (an
+    oscillating process), so it is parameterised as
+    :math:`\rho = \tanh(\text{raw}) \in (-1, 1)`.
+
+    Returns
+    -------
+    CorrSpec
+        A correlation structure whose whitener applies the innovations
+        recurrence with the constant coefficient :math:`\phi_t = \rho`.
     """
 
     def whiten(
@@ -163,11 +200,21 @@ def ar1() -> CorrSpec:
 
 
 def car1() -> CorrSpec:
-    """Continuous-time AR(1) for unequally-spaced times (``nlme`` ``corCAR1``).
+    r"""Continuous-time AR(1) for unequally-spaced times (``nlme`` ``corCAR1``).
 
-    ``R_{ij} = rho^{|t_i - t_j|}`` with ``rho in (0, 1)`` (a positive decay), so
-    ``rho = sigmoid(raw)``.  ``phi_t = rho^{Delta t_t}`` is the decay over the gap
-    to the previous in-group observation; AR(1) is the unit-gap special case.
+    The correlation matrix is :math:`R_{ij} = \rho^{|t_i - t_j|}` with
+    :math:`\rho \in (0, 1)` (a positive decay), parameterised as
+    :math:`\rho = \operatorname{sigmoid}(\text{raw})`.  The innovations
+    coefficient :math:`\phi_t = \rho^{\Delta t_t}` is the decay over the time gap
+    to the previous in-group observation; discrete AR(1) is the unit-gap special
+    case.
+
+    Returns
+    -------
+    CorrSpec
+        A correlation structure whose whitener applies the innovations
+        recurrence with the gap-dependent coefficient
+        :math:`\phi_t = \rho^{\Delta t_t}`.
     """
 
     def whiten(
@@ -192,14 +239,24 @@ def car1() -> CorrSpec:
 
 
 def cs() -> CorrSpec:
-    """Compound symmetry (exchangeable) within-group correlation
-    (``nlme`` ``corCompSymm``).
+    r"""Compound symmetry (exchangeable) within-group correlation.
 
-    ``R = (1 - rho) I + rho 11^T`` (constant off-diagonal ``rho``).  Whitened by
-    the rank-one transform ``w = a z + (b - a) mean(z) 1``,
-    ``a = (1-rho)^{-1/2}``, ``b = (1 + (n_i-1) rho)^{-1/2}``.  ``rho in (0, 1)``
-    via ``sigmoid`` (the common positive-correlation regime; the small negative
-    range admissible for finite ``n`` is not exposed).
+    Every pair of within-group observations shares one constant off-diagonal
+    correlation :math:`\rho`, giving
+    :math:`R = (1 - \rho) I + \rho\, 1 1^{\top}` (the ``nlme`` ``corCompSymm``
+    structure).  It is whitened by the rank-one transform
+    :math:`w = a z + (b - a)\, \operatorname{mean}(z)\, 1` with
+    :math:`a = (1 - \rho)^{-1/2}` and :math:`b = (1 + (n_i - 1)\rho)^{-1/2}`.
+    Here :math:`\rho \in (0, 1)` via :math:`\operatorname{sigmoid}` (the common
+    positive-correlation regime; the small negative range admissible for finite
+    ``n`` is not exposed).
+
+    Returns
+    -------
+    CorrSpec
+        A correlation structure whose whitener applies the rank-one compound
+        symmetry transform, with :math:`\log|R_i| = (n_i - 1)\log(1 - \rho) +
+        \log(1 + (n_i - 1)\rho)` per group.
     """
 
     def whiten(
@@ -240,13 +297,19 @@ def cs() -> CorrSpec:
 
 
 def iid() -> CorrSpec:
-    """The trivial (identity) residual structure ``R = I`` -- no correlation, no
-    parameters.
+    r"""The trivial (identity) residual structure with no correlation.
 
-    Useful as the correlation slot when only a **variance function** is wanted
-    (a pure heteroscedastic GLS, ``nlme::gls(weights=…)`` with no
-    ``correlation``).  The whitener is the identity (padded positions zeroed) and
-    ``log|R_i| = 0``.
+    The correlation matrix is :math:`R = I`, carrying no parameters.  This is
+    useful as the correlation slot when only a **variance function** is wanted (a
+    pure heteroscedastic GLS, ``nlme::gls(weights=…)`` with no ``correlation``).
+    The whitener is the identity (padded positions zeroed) and
+    :math:`\log|R_i| = 0`.
+
+    Returns
+    -------
+    CorrSpec
+        A parameter-free correlation structure whose whitener returns the input
+        unchanged (up to zeroing padding) with a zero log-determinant.
     """
 
     def whiten(
@@ -280,9 +343,24 @@ _CORRS: Mapping[str, Callable[[], CorrSpec]] = {
 
 
 def resolve_corr(corr: Union[str, CorrSpec]) -> CorrSpec:
-    """Resolve a ``str`` name (a built-in) or a ``CorrSpec`` to a ``CorrSpec``.
+    """Resolve a name or an explicit spec to a :class:`CorrSpec`.
 
-    Built-ins: ``'ar1'`` / ``'car1'`` / ``'cs'``.
+    Parameters
+    ----------
+    corr : str or CorrSpec
+        Either a built-in structure name (``'ar1'`` / ``'car1'`` / ``'cs'`` /
+        ``'iid'``) or an already-constructed :class:`CorrSpec`, which is returned
+        unchanged.
+
+    Returns
+    -------
+    CorrSpec
+        The resolved correlation structure.
+
+    Raises
+    ------
+    ValueError
+        If ``corr`` is a string that names no built-in structure.
     """
     if isinstance(corr, CorrSpec):
         return corr

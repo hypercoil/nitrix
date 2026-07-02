@@ -1,0 +1,51 @@
+---
+title: "mesh_pool_max"
+generated: true
+description: "Max-pool fine-level features to a coarse level via an ELL adjacency."
+---
+
+[‹ back to `nitrix.sparse.mesh`](../nitrix-sparse-mesh.qmd)
+
+<!-- nitrix:gen sig:mesh_pool_max -->
+```python
+mesh_pool_max(cross_level_adjacency: ELL, fine_features: Float[Array, '... n_fine d']) -> Float[Array, '... n_coarse d']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:mesh_pool_max -->
+Max-pool fine-level features to a coarse level via an ELL adjacency.
+
+For each coarse vertex `i`, returns the max of fine-vertex
+features at the positions `cross_level_adjacency.indices[i, :]`.
+Equivalent to a [`semiring_ell_matmul`](../nitrix-semiring.qmd) under
+`TROPICAL_MAX_PLUS` with the ELL's `values` ignored (the
+max-plus reduction degenerates to `max` when all values are 0).
+
+Used in mesh hierarchies (e.g. icosphere-cascaded networks) for
+coarse-to-fine downsampling: `cross_level_adjacency` is the
+[`ELL`](../nitrix-sparse-ell/ELL.qmd) whose row `i` (coarse vertex) lists
+the fine vertices that map to it under the subdivision rule.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:mesh_pool_max -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `cross_level_adjacency` | `ELL` | — | — | An [`ELL`](../nitrix-sparse-ell/ELL.qmd) of shape `(n_coarse, n_fine)`; row `i` indexes the fine vertices belonging to coarse vertex `i`. Stored `values` are ignored (replaced internally by zeros for the max-plus identity). |
+| `fine_features` | `Float` | `...` × `n_fine` × `d` | — | `(..., n_fine, d)` per-vertex fine-level features. |
+
+**Returns** `Float` — shape `...` × `n_coarse` × `d`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:mesh_pool_max -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n_fine` | *(undocumented — add to `_dimensions.yml`)* |
+| `d` | spatial dimension (2 or 3) |
+| `n_coarse` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

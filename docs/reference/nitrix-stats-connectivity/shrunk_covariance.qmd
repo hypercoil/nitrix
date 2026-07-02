@@ -1,0 +1,42 @@
+---
+title: "shrunk_covariance"
+generated: true
+description: "Analytic-shrinkage covariance, returning the covariance only."
+---
+
+[‹ back to `nitrix.stats.connectivity`](../nitrix-stats-connectivity.qmd)
+
+<!-- nitrix:gen sig:shrunk_covariance -->
+```python
+shrunk_covariance(X: Float[Array, 'n p'], *, method: ShrinkageMethod = 'ledoit_wolf', assume_centered: bool = False) -> Float[Array, 'p p']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:shrunk_covariance -->
+Analytic-shrinkage covariance, returning the covariance only.
+
+Thin wrapper over [`ledoit_wolf`](../nitrix-stats-connectivity/ledoit_wolf.qmd) and [`oas`](../nitrix-stats-connectivity/oas.qmd) that returns just the
+shrunk covariance, discarding the shrinkage intensity.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:shrunk_covariance -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X` | `Float` | `n` × `p` | — | Data matrix of `n` observations by `p` features. |
+| `method` | `ShrinkageMethod` | — | `'ledoit_wolf'` | Which analytic-shrinkage estimator to use. `'ledoit_wolf'` (the default) is a common connectome default; `'oas'` selects the oracle-approximating-shrinkage intensity. |
+| `assume_centered` | `bool` | — | `False` | If `True`, treat `X` as already mean-centred; otherwise centre each feature before estimating the covariance. Default `False`. |
+
+**Returns** `Float` — shape `p` × `p`. The shrunk covariance matrix.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:shrunk_covariance -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

@@ -1,0 +1,52 @@
+---
+title: "lme_predict"
+generated: true
+description: "Per-element LME prediction on a (new) design `X`."
+---
+
+[‹ back to `nitrix.stats.lme`](../nitrix-stats-lme.qmd)
+
+*Re-exported here; defined in `nitrix.stats.lme._blup`.*
+
+<!-- nitrix:gen sig:lme_predict -->
+```python
+lme_predict(result: Any, X: Float[Array, 'N p'], *, z: Optional[Float[Array, 'N r']] = None, group: Optional[Int[Array, ' N']] = None, level: PredictLevel = 'population') -> Float[Array, 'V N']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:lme_predict -->
+Per-element LME prediction on a (new) design `X`.
+
+`level='population'` (default) returns the marginal mean
+$X\hat{\beta}$ (defined for **every** tier).  `level='conditional'`
+adds the subject-specific random-effect contribution
+$Z b_{\mathrm{group}}$ using the fitted modes ([`ranef`](../nitrix-stats-lme/ranef.qmd)), so the
+result must come from [`lme_fit`](../nitrix-stats-lme-reml/lme_fit.qmd) under `retain_blups=True`.  A
+`group` label outside the fitted range (an unseen subject) -- or
+`group=None` -- falls back to the marginal mean.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:lme_predict -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `result` | `Any` | — | — | An LME result ([`REMLResult`](../nitrix-stats.qmd), [`LMEResult`](../nitrix-stats.qmd), or another fitted-LME result carrying `beta_hat` and, for the conditional level, `blups`). |
+| `X` | `Float` | `N` × `p` | — | `(N, p)` fixed-effect design (same columns as the fit). |
+| `z` | `Optional[Float[Array, 'N r']]` | — | `None` | `(N, r)` random-effect design for the new rows (a random-slope fit); `None` for a scalar intercept. |
+| `group` | `Optional[Int[Array, ' N']]` | — | `None` | `(N,)` integer group labels indexing the fitted levels `0..q-1`; out-of-range / `None` -> the marginal mean for those rows. |
+| `level` | `PredictLevel` | — | `'population'` | `'population'` (marginal) or `'conditional'` (subject-specific BLUP). |
+
+**Returns** `Float` — shape `V` × `N`. The `(V, N)` predicted means, one length-`N` vector per element. Differentiable with respect to `X` / `z` (and the fitted coefficients / modes).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:lme_predict -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `N` | observations — time points, subjects, or sampled points |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+<!-- nitrix:/gen -->

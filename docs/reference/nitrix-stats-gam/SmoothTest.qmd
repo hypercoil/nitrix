@@ -1,0 +1,34 @@
+---
+title: "SmoothTest"
+generated: true
+description: "Per-smooth approximate-significance test (Wood, 2013; integer-rank)."
+---
+
+[‹ back to `nitrix.stats.gam`](../nitrix-stats-gam.qmd)
+
+<!-- nitrix:gen sig:SmoothTest -->
+```python
+class SmoothTest(NamedTuple)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:SmoothTest -->
+Per-smooth approximate-significance test (Wood, 2013; integer-rank).
+
+Each field is `(V, m)` -- one column per smooth (in `smooths` order),
+one row per element.  `stat` is the test statistic $T_r$, `rank`
+its reference degrees of freedom, `p_value` the upper-tail p-value
+($\chi^2$ for a fixed-dispersion family, $F$ with
+$N - \text{edf}_{\text{total}}$ denominator degrees of freedom
+otherwise), and `edf` the smooth's effective degrees of freedom (the
+`mgcv::summary.gam` "edf" column).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:SmoothTest -->
+### References
+
+Wood, S. N. (2013). On p-values for smooth components of an extended
+generalized additive model. Biometrika, 100(1), 221-228.
+https://doi.org/10.1093/biomet/ass048
+<!-- nitrix:/gen -->
+

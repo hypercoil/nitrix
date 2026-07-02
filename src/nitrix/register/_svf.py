@@ -9,7 +9,7 @@ the same family: a coarse-to-fine flow of one or two voxel-unit velocity
 fields, regularised by separable Gaussian smoothing, with the only
 difference being the per-level update.  This module holds what they share
 -- the anisotropy-aware smoothing helpers and the coarse-to-fine scaffold
-(``svf_coarse_to_fine``) -- so each recipe is just its per-level update
+(:func:`svf_coarse_to_fine`) -- so each recipe is just its per-level update
 plus its finalisation, not a re-derived multiresolution loop.
 
 (The matrix-transform driver, by contrast, carries a small parameter
@@ -63,10 +63,10 @@ __all__ = [
 
 @dataclass(frozen=True)
 class SVFSpec:
-    """Shared stationary-velocity-field schedule (G1) -- the base both SVF
-    recipe specs (:class:`DemonsSpec`, :class:`SyNSpec`) embed.
+    """Shared stationary-velocity-field schedule embedded by both SVF recipe specs.
 
-    Holds the multi-resolution + regularisation + convergence fields the
+    The base configuration that :class:`DemonsSpec` and :class:`SyNSpec` both
+    embed.  Holds the multi-resolution + regularisation + convergence fields the
     log-Demons and greedy-SyN recipes have in common, so a recipe spec adds only
     its own force/update knobs (Demons: ``alpha`` / ``bch_order``; SyN:
     ``radius`` / ``step`` / ``step_mode``) and the field's type, default, and
@@ -103,10 +103,10 @@ class SVFSpec:
         *stationary velocity(ies)* and re-exponentiates every iteration (the
         exact-SVF path, byte-identical to the pre-v4 recipe, the parity oracle).
         The velocity output is recovered from the final displacement(s) via
-        ``geometry.field_log`` in group mode.  (The recipe sets how many
+        :func:`nitrix.geometry.field_log` in group mode.  (The recipe sets how many
         displacements / velocities -- one for Demons, a symmetric pair for SyN.)
     mode
-        Iteration strategy (B2).  ``'fixed'`` (the SVF default) runs the full
+        Iteration strategy.  ``'fixed'`` (the SVF default) runs the full
         fixed schedule (a ``lax.scan``); ``'early_exit'`` runs the windowed-slope
         ``lax.while_loop`` -- a level stops once the normalised cost slope drops
         below ``convergence.threshold`` (or ``iterations`` is hit).
@@ -121,13 +121,13 @@ class SVFSpec:
         inert under ``mode='fixed'``.
     compute_velocity
         Whether to recover and return the stationary velocity output (the
-        ``geometry.field_log`` of the final displacement(s)).  ``False`` (default)
-        leaves it ``None`` and skips the ``field_log`` finalisation entirely --
-        under ``jit`` that loop nest is never traced, so it costs neither compile
-        nor runtime; the deformation outputs (``warped`` / ``displacement`` /
-        ``jacobian_det``) never depend on it.  Set ``True`` to recover it (e.g.
-        to feed ``geometry.velocity_mean`` or the transform-algebra path).  **The
-        default changed in this release** (was always computed).
+        :func:`nitrix.geometry.field_log` of the final displacement(s)).
+        ``False`` (default) leaves it ``None`` and skips the
+        :func:`nitrix.geometry.field_log` finalisation entirely -- under ``jit``
+        that loop nest is never traced, so it costs neither compile nor runtime;
+        the deformation outputs (``warped`` / ``displacement`` / ``jacobian_det``)
+        never depend on it.  Set ``True`` to recover it (e.g. to feed
+        :func:`nitrix.geometry.velocity_mean` or the transform-algebra path).
     """
 
     levels: int = 3
@@ -147,12 +147,32 @@ class SVFSpec:
 def resolve_smoothing(
     smoothing_sigma: Optional[Union[float, Sequence[float]]], levels: int
 ) -> Optional[tuple[float, ...]]:
-    """Per-level smoothing sigmas in **finest-first** pyramid order (or None).
+    """Resolve per-level smoothing sigmas to finest-first pyramid order.
 
     A scalar -> the same sigma at every level; a length-``levels``
     **coarse-to-fine** sequence (the ANTs ``-s`` order, e.g. ``2x1x0``) ->
     reversed to the finest-first pyramid indexing.  ``None`` -> no extra
     smoothing.
+
+    Parameters
+    ----------
+    smoothing_sigma
+        Additional per-level Gaussian smoothing.  A scalar applies the same
+        sigma at every level; a length-``levels`` sequence is given in
+        coarse-to-fine order; ``None`` requests no extra smoothing.
+    levels
+        Number of pyramid levels.
+
+    Returns
+    -------
+    tuple of float or None
+        The per-level sigmas in finest-first pyramid order (length ``levels``),
+        or ``None`` when no extra smoothing was requested.
+
+    Raises
+    ------
+    ValueError
+        If ``smoothing_sigma`` is a sequence whose length is not ``levels``.
     """
     if smoothing_sigma is None:
         return None
@@ -172,12 +192,29 @@ def smooth_pyramid(
     sigmas: Optional[tuple[float, ...]],
     ndim: int,
 ) -> tuple[Array, ...]:
-    """Independent per-level Gaussian smoothing of a (channel-last) pyramid (A4).
+    """Independent per-level Gaussian smoothing of a channel-last pyramid.
 
     Decouples the multi-resolution smoothing (ANTs ``-s``) from the shrink (the
-    pyramid's anti-alias): ``sigmas`` (finest-first, from ``resolve_smoothing``)
-    smooths each level on top of the shrink.  ``None`` / a ``0`` sigma leaves the
-    level unchanged.
+    pyramid's anti-alias): ``sigmas`` (finest-first, from
+    :func:`resolve_smoothing`) smooths each level on top of the shrink.  ``None``
+    / a ``0`` sigma leaves the level unchanged.
+
+    Parameters
+    ----------
+    pyr
+        Gaussian pyramid as a tuple of channel-last arrays (finest first), each
+        of shape ``(*spatial, 1)``.
+    sigmas
+        Per-level smoothing sigmas in finest-first order (as returned by
+        :func:`resolve_smoothing`), or ``None`` for no extra smoothing.
+    ndim
+        Spatial rank of each pyramid level.
+
+    Returns
+    -------
+    tuple of Array
+        The pyramid with each level additionally Gaussian-smoothed by its sigma;
+        levels with ``None`` or non-positive sigma are returned unchanged.
     """
     if sigmas is None:
         return pyr
@@ -197,6 +234,17 @@ def _pin_range(x: Array) -> tuple[float, float]:
     -- a traced reduction can.  ``stop_gradient`` keeps the bin edges *constant*
     (the Mattes piecewise-constant-edge assumption; no gradient flows through
     the range derivation).  Eager value is identical to the old ``float`` path.
+
+    Parameters
+    ----------
+    x
+        Image array whose extent defines the range.
+
+    Returns
+    -------
+    tuple of float
+        The ``(lo, hi)`` minimum and maximum of ``x`` as gradient-stopped scalar
+        arrays.
     """
     lo = lax.stop_gradient(jnp.min(x))
     hi = lax.stop_gradient(jnp.max(x))
@@ -210,11 +258,28 @@ def pin_force_ranges(force: Force, moving: Array, fixed: Array) -> Force:
     optimisation (a non-stationary objective) and truncates the force at the clip
     boundary, so each SVF recipe resolves any ``None`` range on an
     :class:`MIForce` **once**, before the pyramid, from the full-resolution
-    images -- a ``stop_gradient``-ed reduction (``_pin_range``), so the range
+    images -- a ``stop_gradient``-ed reduction (:func:`_pin_range`), so the range
     rides the frozen force as a *constant* (the piecewise-constant-edge Mattes
     gradient) and the pin is **jit-safe**: ``MIForce(bins=...)`` needs no
     explicit range even under ``jax.jit`` (the eager value is unchanged).  A
-    no-op for any other force (and for an ``MIForce`` already pinned).
+    no-op for any other force (and for an :class:`MIForce` already pinned).
+
+    Parameters
+    ----------
+    force
+        The similarity force.  Only an unpinned :class:`MIForce` is modified;
+        any other force (or an already-pinned one) is returned unchanged.
+    moving
+        Full-resolution moving image, used to derive the moving-side range.
+    fixed
+        Full-resolution fixed image, used to derive the fixed-side range.
+
+    Returns
+    -------
+    Force
+        The input force with any ``None`` intensity range filled in from the
+        image extents; the same object for a non-:class:`MIForce` or an
+        already-pinned :class:`MIForce`.
     """
     if isinstance(force, MIForce) and (
         force.range_moving is None or force.range_fixed is None
@@ -235,6 +300,18 @@ def _smooth_fast(
     FIR.  On CPU the FIR shift-sum dominates and the O(N) Young-van Vliet
     recursion is ~1.1-1.5x cheaper, so ``'recursive'`` -- but only when every
     per-axis sigma clears the YvV validity floor (>= 0.5), else FIR.
+
+    Parameters
+    ----------
+    sigma
+        Gaussian standard deviation: a scalar (isotropic) or a per-axis
+        sequence.
+
+    Returns
+    -------
+    {'fir', 'recursive'}
+        ``'fir'`` on GPU, or on CPU when any per-axis sigma is below the
+        Young-van Vliet validity floor (0.5); ``'recursive'`` on CPU otherwise.
     """
     if default_backend_is_gpu():
         return 'fir'
@@ -257,6 +334,21 @@ def _smooth_method(
     the fast pick; ``nitrix.reproducible()`` forces the canonical ``'fir'`` on
     every platform (the regulariser is then bit-stable cross-platform up to the
     FIR/recursive tolerance); an explicit ``driver`` overrides.
+
+    Parameters
+    ----------
+    sigma
+        Gaussian standard deviation: a scalar (isotropic) or a per-axis
+        sequence.  Passed through to :func:`_smooth_fast` for the fast pick.
+    driver
+        Driver selector on the ``register.field_smooth`` axis.  ``'auto'``
+        (default) takes the hardware-aware fast pick; ``'fir'`` / ``'recursive'``
+        force that engine; the reproducible mode forces canonical ``'fir'``.
+
+    Returns
+    -------
+    {'fir', 'recursive'}
+        The resolved Gaussian engine.
     """
     return cast(
         Literal['fir', 'recursive'],
@@ -278,8 +370,26 @@ def _smooth_vector(
 
     ``sigma`` is a scalar (isotropic) or a length-``ndim`` per-axis
     sequence (anisotropic regularisation).  The engine is the ``driver`` axis
-    (``_smooth_method``): hardware-aware by default (FIR on GPU, recursive on
+    (:func:`_smooth_method`): hardware-aware by default (FIR on GPU, recursive on
     CPU), forced to canonical FIR under ``nitrix.reproducible()``.
+
+    Parameters
+    ----------
+    field
+        Channel-last field of shape ``(*spatial, c)``; each channel is smoothed
+        independently over the spatial axes.
+    sigma
+        Gaussian standard deviation: a scalar (isotropic) or a length-``ndim``
+        per-axis sequence (anisotropic).
+    ndim
+        Spatial rank (number of leading spatial axes).
+    driver
+        Driver selector passed to :func:`_smooth_method`; ``'auto'`` by default.
+
+    Returns
+    -------
+    Array
+        The smoothed field, same shape as ``field``.
     """
     moved = jnp.moveaxis(field, -1, 0)
     smoothed = gaussian(
@@ -314,6 +424,25 @@ def _relative_spacing(
     the ratio) and ``1`` for isotropic spacing, so the regularisation /
     force only see the per-axis *anisotropy*, not an absolute scale --
     isotropic data is unchanged.
+
+    Parameters
+    ----------
+    spacing
+        Per-axis voxel spacing (physical units): a scalar, a length-``ndim``
+        sequence, or ``None`` (voxel-unit registration).
+    ndim
+        Spatial rank.
+
+    Returns
+    -------
+    tuple of float or None
+        The per-axis spacing divided by its geometric mean, or ``None`` when the
+        spacing is absent or isotropic (all ratios equal to one).
+
+    Raises
+    ------
+    ValueError
+        If ``spacing`` is a sequence whose length is not ``ndim``.
     """
     if spacing is None:
         return None
@@ -403,15 +532,16 @@ _STEP_ROBUST_PCTL = 99.0
 
 
 def _normalise_step(u: Array, step: float, *, scale_to: bool = False) -> Array:
-    """Cap (or scale to) the force field's (robust) largest voxel displacement.
+    r"""Cap (or scale to) the force field's (robust) largest voxel displacement.
 
     ``scale_to=False`` (default) is the trust-region **clamp**; ``scale_to=
     True`` is the ANTs **scale-to** (``step/cap``, magnitude-invariant) -- the
     branch the centre-only LNCC force needs (see the body).
 
     **The clamp (``scale_to=False``).**
-    A trust-region clamp (``min(1, step/‖u‖_cap)``), not a scale-to.  The
-    two coincide when the force exceeds the cap (both divide by ``‖u‖_cap``);
+    A trust-region clamp (:math:`\min(1, step / \|u\|_{cap})`), not a scale-to.
+    The two coincide when the force exceeds the cap (both divide by
+    :math:`\|u\|_{cap}`);
     they differ only *below* it, where the clamp keeps the raw gradient
     magnitude rather than amplifying it to a full step.  Under a fixed
     iteration budget (no convergence gate) that is the safer discipline: a
@@ -419,7 +549,7 @@ def _normalise_step(u: Array, step: float, *, scale_to: bool = False) -> Array:
     inflated -- scale-to-step would force a full ``step`` in whatever
     direction the (often spurious, flat-region) maximum points.
 
-    **Robust cap (B4).**  ``‖u‖_cap`` is the ``_STEP_ROBUST_PCTL``-th
+    **Robust cap.**  :math:`\|u\|_{cap}` is the ``_STEP_ROBUST_PCTL``-th
     *percentile* of the per-voxel displacement, not the global ``max``: a single
     outlier voxel (edge / boundary / hot voxel) would otherwise set the cap for
     the whole field and starve the real signal.  A high *percentile* (not the
@@ -431,17 +561,34 @@ def _normalise_step(u: Array, step: float, *, scale_to: bool = False) -> Array:
     brain-scale profile flags it.)
 
     **Contingent on the fixed-budget scheme.**  This choice is *because* the
-    forward is a fixed-length ``lax.scan`` (no convergence gate).  If the
-    ``while_loop`` early-exit (``docs/feature-requests/
-    registration-early-stopping-while-loop.md``) is adopted, a convergence
-    gate would bound the constant-step dithering that motivates the clamp,
-    making scale-to-step (the ANTS choice) viable again -- so revisit
-    clamp-vs-scale here if that lands.
+    forward is a fixed-length ``lax.scan`` (no convergence gate).  With a
+    ``while_loop`` early-exit, a convergence gate would bound the constant-step
+    dithering that motivates the clamp, making scale-to-step (the ANTs choice)
+    viable again -- so revisit clamp-vs-scale here if that lands.
 
     Note an LNCC force does **not** vanish at a perfect match -- the metric's
-    ``eps`` guard leaves ``cc < 1`` in low-variance windows -- so it is the
+    ``eps`` guard leaves :math:`cc < 1` in low-variance windows -- so it is the
     symmetric forward/inverse cancellation, not a vanishing force or this
     clamp, that zeroes the *net* deformation there.
+
+    Parameters
+    ----------
+    u
+        Force / displacement field, channel-last of shape ``(*spatial, ndim)``.
+    step
+        Trust-region step size: the target cap (clamp mode) or exact
+        robust-max magnitude (scale-to mode).
+    scale_to
+        ``False`` (default) applies the trust-region clamp
+        :math:`\min(1, step / \|u\|_{cap})`; ``True`` applies the ANTs
+        magnitude-invariant scale-to (:math:`step / \|u\|_{cap}`) with a
+        dtype-derived zero-cap guard.
+
+    Returns
+    -------
+    Array
+        The field scaled by the (per-field scalar) clamp or scale-to factor,
+        same shape as ``u``.
     """
     norm = jnp.sqrt(jnp.sum(u * u, axis=-1))
     # Robust cap as the top-(100-pctl)% order statistic via lax.top_k
@@ -476,14 +623,44 @@ def _normalise_step(u: Array, step: float, *, scale_to: bool = False) -> Array:
 def _per_axis_sigma(
     sigma: float, rel_spacing: Optional[tuple[float, ...]]
 ) -> Union[float, tuple[float, ...]]:
-    """Anisotropy-correct a regularisation sigma (per-axis when anisotropic)."""
+    """Anisotropy-correct a regularisation sigma (per-axis when anisotropic).
+
+    Parameters
+    ----------
+    sigma
+        The isotropic regularisation sigma (in voxel units).
+    rel_spacing
+        Relative (anisotropy-only) per-axis spacing from
+        :func:`_relative_spacing`, or ``None`` for isotropic data.
+
+    Returns
+    -------
+    float or tuple of float
+        ``sigma`` unchanged when ``rel_spacing`` is ``None``; otherwise the
+        per-axis sigma ``sigma / rel_spacing`` (larger sigma along the
+        finer-spaced axes).
+    """
     if rel_spacing is None:
         return sigma
     return tuple(sigma / r for r in rel_spacing)
 
 
 def _mask_force(u: Array, mask: Optional[Array]) -> Array:
-    """Gate a force field by a (channel-less) mask; ``None`` -> unchanged."""
+    """Gate a force field by a (channel-less) mask; ``None`` -> unchanged.
+
+    Parameters
+    ----------
+    u
+        Force field, channel-last of shape ``(*spatial, ndim)``.
+    mask
+        Channel-less mask broadcast over the vector components (shape
+        ``(*spatial,)``), or ``None`` to leave the force unchanged.
+
+    Returns
+    -------
+    Array
+        The force with the mask applied per voxel, same shape as ``u``.
+    """
     return u if mask is None else u * mask[..., None]
 
 
@@ -496,6 +673,21 @@ def _restrict_force(u: Array, restrict: Optional[tuple[float, ...]]) -> Array:
     suppression *persists*: the zeroed component never enters the additive
     log-update, and the spatial-only (per-channel) Gaussian smoothing cannot
     reintroduce it.  ``None`` -> unchanged.
+
+    Parameters
+    ----------
+    u
+        Force field, channel-last of shape ``(*spatial, ndim)``.
+    restrict
+        Length-``ndim`` per-axis weight on the force's vector components (``0``
+        suppresses deformation along that axis), or ``None`` to leave the force
+        unchanged.
+
+    Returns
+    -------
+    Array
+        The force with each vector component scaled by its axis weight, same
+        shape as ``u``.
     """
     if restrict is None:
         return u
@@ -517,8 +709,35 @@ def _regularise(
     The fluid+diffusion operator splitting both SVF drivers share: an optional
     trust-region step clamp (``step is not None``; the SyN convention), fluid
     Gaussian smoothing of the update, the log-domain accumulation
-    (``v + u`` additive, or BCH ``compose_velocity`` for ``bch_order > 1``),
-    and diffusion Gaussian smoothing of the accumulated velocity.
+    (``v + u`` additive, or the Baker-Campbell-Hausdorff
+    :func:`nitrix.geometry.compose_velocity` for ``bch_order > 1``), and
+    diffusion Gaussian smoothing of the accumulated velocity.
+
+    Parameters
+    ----------
+    v
+        Accumulated velocity field, channel-last of shape ``(*spatial, ndim)``.
+    u
+        Raw per-update force field, same shape as ``v``.
+    step
+        Trust-region step cap passed to :func:`_normalise_step`, or ``None`` to
+        skip the clamp.
+    sigma_fluid
+        Gaussian sigma for the fluid (per-update) smoothing of ``u``; scalar or
+        per-axis.
+    sigma_diffusion
+        Gaussian sigma for the diffusion (accumulated-field) smoothing of ``v``;
+        scalar or per-axis.
+    bch_order
+        Order of the log-domain accumulation: ``1`` is the additive update
+        ``v + u``; higher orders use the Baker-Campbell-Hausdorff composition.
+    ndim
+        Spatial rank.
+
+    Returns
+    -------
+    Array
+        The updated, diffusion-smoothed velocity field, same shape as ``v``.
     """
     if step is not None:
         u = _normalise_step(u, step)
@@ -530,16 +749,32 @@ def _regularise(
 def _step_clamp_diffeo(
     delta: Array, *, det_floor: float = 0.1, max_halvings: int = 3
 ) -> Array:
-    """Per-step diffeomorphism guard for the group (compositive) update.
+    r"""Per-step diffeomorphism guard for the group (compositive) update.
 
-    Halve the increment ``δ`` until ``det(I + ∇δ) > det_floor`` everywhere -- a
-    clamp on the *Jacobian* (a magnitude clamp can still fold).  ``max_halvings``
-    is a small static bound (the halving rarely fires under a sane
-    ``_normalise_step`` + fluid smoothing); the ``jnp.where`` makes it jit-safe
-    (a satisfied step is a no-op, so the remaining iterations do nothing).
-    Mirrors the 0b inverse-compositional backtracking discipline.  The *total*-
-    field ``det > 0`` QA is necessary but not sufficient -- an intermediate
+    Halve the increment :math:`\delta` until
+    :math:`\det(I + \nabla\delta) > det\_floor` everywhere -- a clamp on the
+    *Jacobian* (a magnitude clamp can still fold).  ``max_halvings`` is a small
+    static bound (the halving rarely fires under a sane :func:`_normalise_step`
+    + fluid smoothing); the ``jnp.where`` makes it jit-safe (a satisfied step is
+    a no-op, so the remaining iterations do nothing).  Mirrors the
+    inverse-compositional backtracking discipline.  The *total*-field
+    :math:`\det > 0` check is necessary but not sufficient -- an intermediate
     compose can fold while the total stays positive -- so the guard is per step.
+
+    Parameters
+    ----------
+    delta
+        The compositive increment, channel-last of shape ``(*spatial, ndim)``.
+    det_floor
+        Lower bound on the per-voxel Jacobian determinant of ``id + delta``;
+        the increment is halved while any voxel falls at or below it.
+    max_halvings
+        Static upper bound on the number of halvings attempted.
+
+    Returns
+    -------
+    Array
+        The (possibly halved) increment, same shape as ``delta``.
     """
     for _ in range(max_halvings):
         det = jacobian_det_displacement(delta)
@@ -555,22 +790,39 @@ def _group_regularise(
     ndim: int,
     step_mode: Literal['clamp', 'normalize'] = 'clamp',
 ) -> Array:
-    """Per-update regularisation for the group (greedy) driver.
+    r"""Per-update regularisation for the group (greedy) driver.
 
-    Produces the increment ``δ`` the level fn composes onto the total
-    displacement: the step normalisation (``_normalise_step``), fluid (update)
-    Gaussian smoothing, and -- in ``'clamp'`` mode -- the per-step
+    Produces the increment :math:`\delta` the level fn composes onto the total
+    displacement: the step normalisation (:func:`_normalise_step`), fluid
+    (update) Gaussian smoothing, and -- in ``'clamp'`` mode -- the per-step
     diffeomorphism guard (:func:`_step_clamp_diffeo`).  The *total*-field
     (diffusion) smoothing is applied to ``s`` **after** the composition, in the
     level fn -- the same fluid/diffusion split the algebra :func:`_regularise`
     keeps.
 
-    ``step_mode`` (L3): ``'clamp'`` (default) is the trust-region clamp + the
-    Jacobian-backtracking guard.  ``'normalize'`` is the ANTs recipe -- a
-    magnitude-invariant **scale-to** step (so a small-magnitude force such as
-    the centre-only LNCC is not under-stepped) and **no** Jacobian backtracking
-    (a bounded ``step``-sized smoothed increment is diffeomorphic by
-    construction, so the per-step det guard is dropped -- the ANTs choice).
+    Parameters
+    ----------
+    u
+        Raw per-update force field, channel-last of shape ``(*spatial, ndim)``.
+    step
+        Trust-region step size passed to :func:`_normalise_step`, or ``None`` to
+        skip the step normalisation.
+    sigma_fluid
+        Gaussian sigma for the fluid (per-update) smoothing; scalar or per-axis.
+    ndim
+        Spatial rank.
+    step_mode
+        ``'clamp'`` (default) applies the trust-region clamp followed by the
+        Jacobian-backtracking guard :func:`_step_clamp_diffeo`.  ``'normalize'``
+        applies the ANTs magnitude-invariant scale-to step (so a small-magnitude
+        force such as the centre-only LNCC is not under-stepped) and drops the
+        per-step Jacobian guard, since a bounded ``step``-sized smoothed
+        increment is diffeomorphic by construction.
+
+    Returns
+    -------
+    Array
+        The regularised compositive increment, same shape as ``u``.
     """
     if step is None:
         delta = u
@@ -601,16 +853,62 @@ def single_sided_level(
     restrict: Optional[tuple[float, ...]] = None,
     convergence: Optional[Convergence] = None,
 ) -> tuple[Array, Array]:
-    """Single-sided SVF iterations on one resolution (the Demons structure).
+    r"""Single-sided SVF iterations on one resolution (the Demons structure).
 
-    Warps ``moving`` by ``exp(v)`` and drives ``v`` up the similarity under
+    Warps ``moving`` by :math:`\exp(v)` and drives ``v`` up the similarity under
     ``force`` -- metric-generic: any :class:`Force` plugs in.  The force is
-    bound to ``fixed`` **once** (its fixed-state, e.g. ``∇fixed``, is hoisted
-    out of the iteration).  ``mask`` (this level's, channel-less) gates the
-    force to a region -- the masked area drives the deformation, the rest
+    bound to ``fixed`` **once** (its fixed-state, e.g. :math:`\nabla fixed`, is
+    hoisted out of the iteration).  ``mask`` (this level's, channel-less) gates
+    the force to a region -- the masked area drives the deformation, the rest
     follows by regularisation.  ``restrict`` (length-``ndim``) weights the force
-    per axis (deformation-axis masking).  Rolled with ``lax.scan``; returns
-    ``(v, costs)``.
+    per axis (deformation-axis masking).  Rolled with ``lax.scan``.
+
+    Parameters
+    ----------
+    moving
+        Moving image at this resolution, shape ``(*spatial,)``.
+    fixed
+        Fixed (target) image at this resolution, shape ``(*spatial,)``.
+    v
+        Initial stationary velocity field, channel-last of shape
+        ``(*spatial, ndim)``.
+    force
+        The similarity :class:`Force` driving the update.
+    ndim
+        Spatial rank.
+    iterations
+        Number of iterations at this resolution.
+    n_steps
+        Number of scaling-and-squaring steps used to integrate ``v`` to a
+        displacement each iteration.
+    boundary_mode
+        Out-of-bounds handling for the warp and integration.
+    sigma_fluid
+        Gaussian sigma for the fluid (per-update) regularisation.
+    sigma_diffusion
+        Gaussian sigma for the diffusion (accumulated-field) regularisation.
+    bch_order
+        Order of the log-domain accumulation (``1`` for the additive update,
+        higher for the Baker-Campbell-Hausdorff composition).
+    step
+        Trust-region step cap, or ``None`` to skip the step clamp.
+    rel_spacing
+        Relative (anisotropy-only) per-axis spacing, or ``None`` for isotropic
+        data.
+    mask
+        Channel-less region mask gating the force, or ``None``.
+    restrict
+        Length-``ndim`` per-axis force weight (deformation-axis masking), or
+        ``None``.
+    convergence
+        Early-exit convergence criterion, or ``None`` for the fixed schedule.
+
+    Returns
+    -------
+    v : Array
+        The updated velocity field, same shape as the input ``v``.
+    costs : Array
+        The per-iteration cost trace.
     """
     id_grid = identity_grid(fixed.shape, dtype=fixed.dtype)
     bound = force.bind(fixed, ndim=ndim, rel_spacing=rel_spacing)
@@ -668,7 +966,57 @@ def symmetric_level(
     step** (its "fixed" is the other image at the midpoint, which changes every
     iteration).  ``mask`` (this level's) gates both half-forces to a region;
     ``restrict`` (length-``ndim``) weights both per axis (deformation-axis
-    masking).  Rolled with ``lax.scan``; returns ``(v_fwd, v_inv, costs)``.
+    masking).  Rolled with ``lax.scan``.
+
+    Parameters
+    ----------
+    moving
+        Moving image at this resolution, shape ``(*spatial,)``.
+    fixed
+        Fixed (target) image at this resolution, shape ``(*spatial,)``.
+    v_fwd
+        Initial forward velocity field (moving -> midpoint), channel-last of
+        shape ``(*spatial, ndim)``.
+    v_inv
+        Initial inverse velocity field (fixed -> midpoint), same shape as
+        ``v_fwd``.
+    force
+        The similarity :class:`Force` driving both half-updates.
+    ndim
+        Spatial rank.
+    iterations
+        Number of iterations at this resolution.
+    n_steps
+        Number of scaling-and-squaring steps used to integrate each velocity to
+        a displacement.
+    boundary_mode
+        Out-of-bounds handling for the warps and integration.
+    sigma_fluid
+        Gaussian sigma for the fluid (per-update) regularisation.
+    sigma_diffusion
+        Gaussian sigma for the diffusion (accumulated-field) regularisation.
+    step
+        Trust-region step cap, or ``None`` to skip the step clamp.
+    rel_spacing
+        Relative (anisotropy-only) per-axis spacing, or ``None`` for isotropic
+        data.
+    mask
+        Channel-less region mask gating both half-forces, or ``None``.
+    restrict
+        Length-``ndim`` per-axis force weight applied to both halves, or
+        ``None``.
+    convergence
+        Early-exit convergence criterion, or ``None`` for the fixed schedule.
+        The early-exit cost is the symmetric mean of both half-costs.
+
+    Returns
+    -------
+    v_fwd : Array
+        The updated forward velocity field.
+    v_inv : Array
+        The updated inverse velocity field.
+    costs : Array
+        The per-iteration symmetric-mean cost trace.
     """
     id_grid = identity_grid(fixed.shape, dtype=fixed.dtype)
     sf = _per_axis_sigma(sigma_fluid, rel_spacing)
@@ -741,17 +1089,62 @@ def group_single_sided_level(
     convergence: Optional[Convergence] = None,
     step_mode: Literal['clamp', 'normalize'] = 'clamp',
 ) -> tuple[Array, Array]:
-    """Single-sided **group (greedy)** iterations on one resolution.
+    r"""Single-sided **group (greedy)** iterations on one resolution.
 
     The group-domain sibling of :func:`single_sided_level`: the state is the
-    *displacement* ``s`` (``φ = id + s``), warped **directly** (one gather, no
-    ``exp``), and the regularised increment is **composed** onto ``s`` (the
-    compositive demons update ``φ ← φ ∘ (id+δ)``) rather than added in the log
-    domain.  ~2 gathers/iter (warp + compose) vs the algebra driver's ~7.  No
-    per-iteration ``exp``; the velocity is recovered once at finalisation via
-    ``field_log`` (the recipe).  Dropping ``n_steps`` / ``bch_order`` (no
-    integration, no log-domain BCH) marks it a different driver, not a
-    re-parametrised one.
+    *displacement* ``s`` (:math:`\varphi = id + s`), warped **directly** (one
+    gather, no exponential), and the regularised increment is **composed** onto
+    ``s`` (the compositive demons update
+    :math:`\varphi \leftarrow \varphi \circ (id + \delta)`) rather than added in
+    the log domain.  ~2 gathers/iter (warp + compose) vs the algebra driver's
+    ~7.  No per-iteration exponential; the velocity is recovered once at
+    finalisation via :func:`nitrix.geometry.field_log` (the recipe).  Dropping
+    ``n_steps`` / ``bch_order`` (no integration, no log-domain BCH) marks it a
+    different driver, not a re-parametrised one.
+
+    Parameters
+    ----------
+    moving
+        Moving image at this resolution, shape ``(*spatial,)``.
+    fixed
+        Fixed (target) image at this resolution, shape ``(*spatial,)``.
+    s
+        Initial displacement field, channel-last of shape ``(*spatial, ndim)``.
+    force
+        The similarity :class:`Force` driving the update.
+    ndim
+        Spatial rank.
+    iterations
+        Number of iterations at this resolution.
+    boundary_mode
+        Out-of-bounds handling for the warp and composition.
+    sigma_fluid
+        Gaussian sigma for the fluid (per-update) regularisation.
+    sigma_diffusion
+        Gaussian sigma for the diffusion (total-field) regularisation applied
+        after each composition.
+    step
+        Trust-region step size, or ``None`` to skip the step normalisation.
+    rel_spacing
+        Relative (anisotropy-only) per-axis spacing, or ``None`` for isotropic
+        data.
+    mask
+        Channel-less region mask gating the force, or ``None``.
+    restrict
+        Length-``ndim`` per-axis force weight (deformation-axis masking), or
+        ``None``.
+    convergence
+        Early-exit convergence criterion, or ``None`` for the fixed schedule.
+    step_mode
+        Step discipline passed to :func:`_group_regularise`: ``'clamp'``
+        (default) or ``'normalize'``.
+
+    Returns
+    -------
+    s : Array
+        The updated displacement field, same shape as the input ``s``.
+    costs : Array
+        The per-iteration cost trace.
     """
     id_grid = identity_grid(fixed.shape, dtype=fixed.dtype)
     bound = force.bind(fixed, ndim=ndim, rel_spacing=rel_spacing)
@@ -807,6 +1200,57 @@ def group_symmetric_level(
     driver's ~12.  **No per-iteration inversion** -- inverse-consistency is
     realised once at finalisation (``compose(s_fwd, invert(s_inv))``), exactly as
     the algebra SyN, not per step.
+
+    Parameters
+    ----------
+    moving
+        Moving image at this resolution, shape ``(*spatial,)``.
+    fixed
+        Fixed (target) image at this resolution, shape ``(*spatial,)``.
+    s_fwd
+        Initial forward displacement field (moving -> midpoint), channel-last of
+        shape ``(*spatial, ndim)``.
+    s_inv
+        Initial inverse displacement field (fixed -> midpoint), same shape as
+        ``s_fwd``.
+    force
+        The similarity :class:`Force` driving both half-updates.
+    ndim
+        Spatial rank.
+    iterations
+        Number of iterations at this resolution.
+    boundary_mode
+        Out-of-bounds handling for the warps and compositions.
+    sigma_fluid
+        Gaussian sigma for the fluid (per-update) regularisation.
+    sigma_diffusion
+        Gaussian sigma for the diffusion (total-field) regularisation applied
+        after each composition.
+    step
+        Trust-region step size, or ``None`` to skip the step normalisation.
+    rel_spacing
+        Relative (anisotropy-only) per-axis spacing, or ``None`` for isotropic
+        data.
+    mask
+        Channel-less region mask gating both half-forces, or ``None``.
+    restrict
+        Length-``ndim`` per-axis force weight applied to both halves, or
+        ``None``.
+    convergence
+        Early-exit convergence criterion, or ``None`` for the fixed schedule.
+        The early-exit cost is the symmetric mean of both half-costs.
+    step_mode
+        Step discipline passed to :func:`_group_regularise`: ``'clamp'``
+        (default) or ``'normalize'``.
+
+    Returns
+    -------
+    s_fwd : Array
+        The updated forward displacement field.
+    s_inv : Array
+        The updated inverse displacement field.
+    costs : Array
+        The per-iteration symmetric-mean cost trace.
     """
     id_grid = identity_grid(fixed.shape, dtype=fixed.dtype)
     sf = _per_axis_sigma(sigma_fluid, rel_spacing)
@@ -867,13 +1311,38 @@ def resolve_init_displacement(
     """Resolve a recipe's init arguments to a fixed-grid displacement (or None).
 
     At most one of ``init_affine`` (a fixed-voxel -> moving-voxel homogeneous
-    matrix, as ``rigid_register`` / ``affine_register`` return in ``IndexSpace``)
-    or ``init_displacement`` (a displacement field on the fixed grid, e.g. a
-    SynthMorph network output) may be given; the diffeomorphic recipe pre-warps
-    ``moving`` by the result and registers the residual (warm-start /
-    multi-stage).  An affine is expanded to its displacement field by applying
-    the **self-contained** recipe matrix about the origin (its grid centre is
-    already baked in -- B1).
+    matrix, as :func:`rigid_register` / :func:`affine_register` return in
+    :class:`IndexSpace`) or ``init_displacement`` (a displacement field on the
+    fixed grid, e.g. a SynthMorph network output) may be given; the
+    diffeomorphic recipe pre-warps ``moving`` by the result and registers the
+    residual (warm-start / multi-stage).  An affine is expanded to its
+    displacement field by applying the **self-contained** recipe matrix about
+    the origin (its grid centre is already baked in).
+
+    Parameters
+    ----------
+    init_affine
+        Homogeneous ``(ndim + 1, ndim + 1)`` fixed-voxel -> moving-voxel matrix,
+        or ``None``.  Mutually exclusive with ``init_displacement``.
+    init_displacement
+        Displacement field on the fixed grid, channel-last of shape
+        ``(*shape, ndim)``, or ``None``.  Mutually exclusive with
+        ``init_affine``.
+    shape
+        Spatial shape of the fixed grid.
+    dtype
+        Dtype of the constructed identity / displacement grid.
+
+    Returns
+    -------
+    Array or None
+        The initialisation as a fixed-grid displacement field of shape
+        ``(*shape, ndim)``, or ``None`` when neither initialisation was given.
+
+    Raises
+    ------
+    ValueError
+        If both ``init_affine`` and ``init_displacement`` are provided.
     """
     if init_affine is not None and init_displacement is not None:
         raise ValueError(
@@ -904,6 +1373,26 @@ def prewarp_moving(
     sampled at ``id + init_disp`` so it lands on the fixed grid even when its own
     grid differs -- the residual deformable then registers this pre-warped image
     (this is what retires the matching-grid constraint for a multi-stage run).
+
+    Parameters
+    ----------
+    moving
+        Moving image, shape ``(*shape,)``.
+    init_disp
+        Fixed-grid initialisation displacement, channel-last of shape
+        ``(*shape, ndim)``, or ``None`` for the no-init path.
+    shape
+        Spatial shape of the fixed grid.
+    dtype
+        Dtype of the constructed identity grid.
+    boundary_mode
+        Out-of-bounds handling for the resample.
+
+    Returns
+    -------
+    Array
+        ``moving`` unchanged when ``init_disp`` is ``None``; otherwise ``moving``
+        resampled onto the fixed grid at ``id + init_disp``, shape ``(*shape,)``.
     """
     if init_disp is None:
         return moving
@@ -924,10 +1413,34 @@ def finalize_with_init(
 ) -> tuple[Array, Array, Array]:
     """Compose the residual deformable with the init; warp the original moving.
 
-    Returns ``(total_displacement, warped, jacobian_det)`` -- the full
-    ``moving -> fixed`` map (init applied, then the residual), the *original*
-    ``moving`` resampled by it, and the Jacobian determinant of the **total**
-    map (``init_disp is None`` reduces exactly to the residual).
+    The full ``moving -> fixed`` map applies the init first, then the residual
+    deformable; ``init_disp is None`` reduces exactly to the residual.
+
+    Parameters
+    ----------
+    moving
+        The *original* moving image, shape ``(*shape,)``.
+    residual_disp
+        The residual deformable displacement on the fixed grid, channel-last of
+        shape ``(*shape, ndim)``.
+    init_disp
+        The initialisation displacement composed before the residual, same shape
+        as ``residual_disp``, or ``None``.
+    shape
+        Spatial shape of the fixed grid.
+    dtype
+        Dtype of the constructed identity grid.
+    boundary_mode
+        Out-of-bounds handling for the composition and warp.
+
+    Returns
+    -------
+    total : Array
+        The total ``moving -> fixed`` displacement, shape ``(*shape, ndim)``.
+    warped : Array
+        The original ``moving`` resampled by the total map, shape ``(*shape,)``.
+    jacobian_det : Array
+        The Jacobian determinant of the total map, shape ``(*shape,)``.
     """
     id_grid = identity_grid(shape, dtype=dtype)
     total = (

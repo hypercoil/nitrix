@@ -1,0 +1,22 @@
+---
+title: "REAL"
+generated: true
+description: "The ordinary real algebra :math:`( mathbb{R}, +,  times)`."
+---
+
+[‹ back to `nitrix.semiring.algebras`](../nitrix-semiring-algebras.qmd)
+
+<!-- nitrix:gen sig:REAL -->
+```python
+REAL: StrictSemiring[Any] = StrictSemiring(monoid=(_SumMonoid()), binary_op=(_ProductSemigroup()), identity=0.0, annihilator=0.0, name='real', matmul_vjp=real_matmul_vjp, ell_matmul_vjp=real_ell_matmul_vjp)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:REAL -->
+The ordinary real algebra $(\mathbb{R}, +, \times)$.
+
+Sum-of-products contraction: the monoid is addition with identity 0 and
+the binary operation is multiplication, with 0 as annihilator so a zero
+entry masks its product. Recovers standard matrix multiplication.
+<!-- nitrix:/gen -->
+

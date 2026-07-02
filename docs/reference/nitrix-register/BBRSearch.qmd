@@ -1,0 +1,40 @@
+---
+title: "BBRSearch"
+generated: true
+description: "Coarse grid multistart for the BBR basin (FSL `gridmeasurecost`)."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._bbr`.*
+
+<!-- nitrix:gen sig:BBRSearch -->
+```python
+class BBRSearch
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:BBRSearch -->
+Coarse grid multistart for the BBR basin (FSL `gridmeasurecost`).
+
+BBR's cost is markedly non-convex; a local solve from a single start can
+latch a *wrong* boundary alignment (and, with the wide-basin coarse
+`step`, descend confidently into it).  Before the local refine, the cost
+is evaluated on a grid of rigid seeds around `init_params` -- a
+Cartesian product of `steps` offsets per degree of freedom over
+$\pm$ `rotation` (rad) on each rotation DOF and $\pm$
+`translation` (mm / voxels) on each translation DOF -- and the
+lowest-cost seed initialises the
+optimise.  The capture range widens to roughly `rotation` / `translation`
+per axis (a few mm / degrees -- BBR remains a *local* refinement of a prior
+affine, not a global search).
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:BBRSearch.__init__ -->
+```python
+__init__(rotation: float = 0.07, translation: float = 4.0, steps: int = 3, step: Optional[float] = None) -> None
+```
+<!-- nitrix:/gen -->
+

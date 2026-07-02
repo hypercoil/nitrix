@@ -1,0 +1,38 @@
+---
+title: "re_smooth"
+generated: true
+description: "Build a random-effect smooth block (mgcv `bs='re'`)."
+---
+
+[‹ back to `nitrix.stats.basis`](../nitrix-stats-basis.qmd)
+
+<!-- nitrix:gen sig:re_smooth -->
+```python
+re_smooth(g: Int[Array, ' n'], *, by: Optional[Float[Array, ' n']] = None, n_levels: Optional[int] = None) -> REBasis
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:re_smooth -->
+Build a random-effect smooth block (mgcv `bs="re"`).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:re_smooth -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `g` | `Int` | `n` | — | `(n,)` integer group labels in `0 .. q-1` (the factor levels) -- one per observation. |
+| `by` | `Optional[Float[Array, ' n']]` | — | `None` | Optional `(n,)` covariate for a random **slope** `(by \| g)`; `None` gives a random **intercept** `(1 \| g)`. The design is then `one_hot(g) * by[:, None]`. |
+| `n_levels` | `Optional[int]` | — | `None` | Number of levels `q` (defaults to `int(g.max()) + 1`). Pass it when some levels are absent from this sample so the block width is stable. |
+
+**Returns** `REBasis`. The [`REBasis`](../nitrix-stats-basis/REBasis.qmd) smooth-term block for [`gam_fit`](../nitrix-stats.qmd). The Fellner-Schall smoothing parameter on this block is the random-effect precision $1 / \sigma_b^2$; the fitted block coefficients are the BLUPs.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:re_smooth -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

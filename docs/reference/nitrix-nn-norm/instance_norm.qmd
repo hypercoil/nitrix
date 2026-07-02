@@ -1,0 +1,54 @@
+---
+title: "instance_norm"
+generated: true
+description: "InstanceNorm for channels-first n-D inputs, with backend dispatch."
+---
+
+[‹ back to `nitrix.nn.norm`](../nitrix-nn-norm.qmd)
+
+<!-- nitrix:gen sig:instance_norm -->
+```python
+instance_norm(x: Float[Array, 'n c *spatial'], weight: Optional[Float[Array, 'c']] = None, bias: Optional[Float[Array, 'c']] = None, *, eps: float = 1e-05, out_scale: float = 1.0, backend: Backend = 'auto') -> Float[Array, 'n c *spatial']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:instance_norm -->
+InstanceNorm for channels-first n-D inputs, with backend dispatch.
+
+Standardises each sample and channel of a channels-first
+`(N, C, *spatial)` input over its spatial elements to zero mean and unit
+variance (biased), then applies the optional per-channel affine transform
+and the `out_scale` depth-scaling factor. This is equivalent to
+[`group_norm`](../nitrix-nn-norm/group_norm.qmd) with one group per channel; see the
+[`reference_instance_norm`](../nitrix-nn-norm/reference_instance_norm.qmd) oracle.
+
+When the resolved backend is `pallas-cuda` the fused kernel is attempted;
+if it cannot run for the given shape or host, the call falls back loudly to
+the JAX reference.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:instance_norm -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Float` | `n` × `c` × `*spatial` | — | Channels-first input with a batch axis `n`, channel axis `c` and zero or more trailing spatial axes. |
+| `weight` | `Optional[Float[Array, 'c']]` | — | `None` | Per-channel affine scale of shape `(c,)`. If omitted, no scaling is applied. |
+| `bias` | `Optional[Float[Array, 'c']]` | — | `None` | Per-channel affine shift of shape `(c,)`. If omitted, no shift is applied. |
+| `eps` | `float` | — | `1e-05` | Constant added to the variance before the reciprocal square root, for numerical stability. |
+| `out_scale` | `float` | — | `1.0` | Depth-scaling multiplier applied to the full affine output. |
+| `backend` | `Backend` | — | `'auto'` | Execution backend. `'auto'` resolves to `'pallas-cuda'` on a capable GPU and `'jax'` otherwise. |
+
+**Returns** `Float` — shape `n` × `c` × `*spatial`. The normalised, affine-transformed and depth-scaled array, with the same shape and dtype as `x`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:instance_norm -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `c` | feature channels (channels-last) |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

@@ -1,0 +1,64 @@
+---
+title: "invert_displacement"
+generated: true
+description: "Inverse displacement field of the deformation $ varphi =  mathrm{id} + s$."
+---
+
+[‹ back to `nitrix.geometry.deformation`](../nitrix-geometry-deformation.qmd)
+
+<!-- nitrix:gen sig:invert_displacement -->
+```python
+invert_displacement(s: Float[Array, '*spatial ndim'], *, tol: float = 1e-05, max_iter: int = 50, mode: BoundaryMode = 'nearest', acceleration: Literal['picard', 'anderson'] = 'picard', return_residual: bool = False) -> Float[Array, '*spatial ndim'] | tuple[Float[Array, '*spatial ndim'], Float[Array, '']]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:invert_displacement -->
+Inverse displacement field of the deformation
+$\varphi = \mathrm{id} + s$.
+
+Returns `s_inv` with
+$(\mathrm{id} + s) \circ (\mathrm{id} + s_{\mathrm{inv}}) \approx \mathrm{id}$,
+found as the fixed point
+$s_{\mathrm{inv}} = -s \circ (\mathrm{id} + s_{\mathrm{inv}})$ via
+`fixed_point_solve` (so it is differentiable with
+respect to `s` by the implicit-function theorem).  The iteration
+converges geometrically with factor $\lVert \nabla s \rVert$ (the
+diffeomorphic regime $\lVert \nabla s \rVert < 1$) -- fast for the
+smoothed deformations registration produces.
+
+The failure mode of a bare iteration cap is a *silent* non-converged
+inverse returned at `max_iter` (a stiff
+$\lVert \nabla s \rVert \to 1$ deformation).  Setting
+`return_residual` returns the realised inversion error so the caller
+can assert convergence rather than trust it; for a genuinely stiff fixed
+point (where plain Picard plateaus) pass `acceleration='anderson'` (a
+quasi-Newton mixing that converges where Picard stalls).  Plain Picard is
+the default because it is faster *and* more accurate on the smoothed
+(non-stiff) regime registration actually hits -- Anderson helps only once
+Picard genuinely stalls.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:invert_displacement -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `s` | `Float` | `*spatial` × `ndim` | — | Displacement field, `(*spatial, ndim)`. |
+| `tol` | `float` | — | `1e-05` | Fixed-point convergence controls: the residual tolerance and the iteration cap. |
+| `max_iter` | `int` | — | `50` | Fixed-point convergence controls: the residual tolerance and the iteration cap. |
+| `mode` | `BoundaryMode` | — | `'nearest'` | Boundary mode for the inner sampling. |
+| `acceleration` | `Literal['picard', 'anderson']` | — | `'picard'` | `'picard'` (default) -- the plain iteration, best on the smoothed regime; `'anderson'` -- Anderson-accelerated, for a stiff $\lVert \nabla s \rVert \to 1$ deformation where Picard plateaus. |
+| `return_residual` | `bool` | — | `False` | If `True`, also return the scalar inversion residual $\mathrm{rms}\big((\mathrm{id} + s) \circ (\mathrm{id} + s_{\mathrm{inv}}) - \mathrm{id}\big)$ (zero at a perfect inverse), so the caller can assert convergence rather than trust it. |
+
+**Returns** `Float` — shape —. The inverse displacement field `s_inv`, `(*spatial, ndim)`, if `return_residual` is `False`; otherwise the pair `(s_inv, residual)` where `residual` is the scalar root-mean-square inversion error.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:invert_displacement -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->

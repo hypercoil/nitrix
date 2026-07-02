@@ -1,0 +1,94 @@
+---
+title: "nitrix.linalg.decompose"
+generated: true
+signature-hash: 43ef50546c480ba3
+description: "Randomized (sketch) low-rank SVD."
+listing:
+  id: nitrix-linalg-decompose-symbols
+  contents: "nitrix-linalg-decompose/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.linalg.decompose`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Randomized (sketch) low-rank SVD.
+
+[`randomized_svd`](nitrix-linalg-decompose/randomized_svd.qmd) recovers the top-`k` singular triplets of a (possibly
+huge) $(m, n)$ matrix in $O(m n (k + p))$ matmuls -- the Halko,
+Martinsson & Tropp range finder with subspace (power) iteration -- instead of
+the $O(m n \min(m, n))$ dense SVD.  It is the decomposition primitive the
+small-sample regime wants: $m$ (voxels) is 100k--500k but only the leading
+$k$ modes are needed (principal-component / aCompCor confound bases,
+NORDIC-style singular value denoising, spatial eigenimages, the top-`k`
+eigensolve consumer).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### Cusolver free
+
+The construction is entirely matmuls plus solver calls on tiny
+$(l, l)$ matrices ($l = k + p$ for oversampling `p`).
+Orthonormalisation is done through the eigendecomposition of the small Gram
+matrix $g^{\top} g$ (giving $Q = g V \Lambda^{-1/2}$), never `qr`
+or `svd`: on the cuSOLVER-affected GPU stacks `qr` / `svd` are broken while
+the routed symmetric eigendecomposition falls back to a device where it works.
+So the large data matrix never enters a solver; only the $(l, l)$ Gram
+does.  This mirrors the randomised principal-component solver in
+[`nitrix.stats`](nitrix-stats.qmd) (the same eigh-based range finder), promoted here to a
+shared, response-agnostic SVD.
+
+It is *not* a mass-univariate fit accelerator: projecting the response onto a
+low-rank basis and recombining is exact only for estimators *linear* in the
+data, where a single matmul already beats forming the sketch; the iterative
+nonlinear fits (IRLS / GAM / LME) do not commute with the projection.  This
+primitive is for decomposition / denoising, where the low-rank factor *is* the
+object of interest.
+
+::: {.callout-note}
+Call this eagerly, like the one-off principal-component and REML
+decompositions.  The routed symmetric-eigendecomposition CPU fallback is an
+*eager* `try`/`except` (it needs concrete arrays to catch the cuSOLVER
+failure), so on a broken-cuSOLVER stack the eigendecomposition lowers to the
+dead GPU solver under `jit` and crashes at runtime -- wrapping this (or a
+pipeline containing it) in a single `jit` / `vmap` / `grad` fails there.
+Decompose eagerly, then `jit` the heavy downstream separately.  The large
+matmuls still run on-device eagerly; only the tiny $(l, l)$ Gram
+eigendecomposition bounces to CPU.  On a backend with a healthy symmetric
+eigendecomposition (a working-cuSOLVER GPU, or CPU) the whole pipeline *is*
+`jit`-able with `k` passed statically.
+
+Singular values match a dense SVD's leading `k` once the spectrum is resolved
+(raise `n_power` for slowly decaying spectra); the reconstruction
+$U \operatorname{diag}(s) V^{\top}$ is the rank-`k` approximation
+regardless of sign.
+:::
+
+### References
+
+Halko, N., Martinsson, P.-G., & Tropp, J. A. (2011).  Finding structure with
+randomness: probabilistic algorithms for constructing approximate matrix
+decompositions.  *SIAM Review*, 53(2), 217--288.
+https://doi.org/10.1137/090771806
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `m` | rows of a multi-row contrast |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-linalg-decompose-symbols}
+:::

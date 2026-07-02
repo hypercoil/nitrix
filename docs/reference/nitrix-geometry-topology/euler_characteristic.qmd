@@ -1,0 +1,33 @@
+---
+title: "euler_characteristic"
+generated: true
+description: "Euler characteristic $ chi = V - E + F$."
+---
+
+[‹ back to `nitrix.geometry.topology`](../nitrix-geometry-topology.qmd)
+
+<!-- nitrix:gen sig:euler_characteristic -->
+```python
+euler_characteristic(mesh: Mesh) -> int
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:euler_characteristic -->
+Euler characteristic $\chi = V - E + F$.
+
+Combines the vertex, edge, and face counts of the mesh into the classical
+topological invariant.  A closed genus-0 surface (topological sphere) has
+$\chi = 2$; a torus has $\chi = 0$; an open disk has
+$\chi = 1$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:euler_characteristic -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mesh` | `Mesh` | — | — | Triangle mesh, with vertices, `(n_faces, 3)` faces, and the edge set induced by those faces. |
+
+**Returns** `int`. The integer Euler characteristic $\chi$. Host-side; not differentiable.
+<!-- nitrix:/gen -->
+

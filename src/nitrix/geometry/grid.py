@@ -7,25 +7,25 @@ Regular-grid deformable-registration primitives.
 The voxelmorph-style operations needed to express dense deformation
 fields and integrate stationary velocity fields:
 
-- ``identity_grid``       -- the "no-op" deformation, useful as a
+- :func:`identity_grid` -- the "no-op" deformation, useful as a
   starting point for learned displacements.
-- ``spatial_transform``   -- warp an image by a displacement field;
+- :func:`spatial_transform` -- warp an image by a displacement field;
   the sampling kernel is selectable via ``method=``.
-- ``integrate_velocity_field`` -- scaling-and-squaring SVF
-  integration (the diffeomorphic exponential map).
-- ``resample``            -- resize to a target spatial shape; the
+- :func:`integrate_velocity_field` -- scaling-and-squaring stationary
+  velocity-field integration (the diffeomorphic exponential map).
+- :func:`resample` -- resize to a target spatial shape; the
   common dispatcher over the available interpolation methods.
 
-``spatial_transform`` and ``resample`` share one sampler: they differ
-only in *where* the sample coordinates come from (a deformation field
-vs an align-corners resize grid).  The interpolation *kernel* is an
-orthogonal axis selected by ``method=`` -- an immutable
-``Interpolator`` record (``Linear`` (default), ``NearestNeighbour``,
-``Lanczos``, ``CubicBSpline``, ``MultiLabel``).  See
-``geometry._interpolate``.
+:func:`spatial_transform` and :func:`resample` share one sampler: they
+differ only in *where* the sample coordinates come from (a deformation
+field vs an align-corners resize grid).  The interpolation *kernel* is
+an orthogonal axis selected by ``method=`` -- an immutable
+:class:`Interpolator` record (:class:`Linear` (default),
+:class:`NearestNeighbour`, :class:`Lanczos`, :class:`CubicBSpline`,
+:class:`MultiLabel`).
 
-Plus ``center_of_mass_grid`` for weighted centre-of-mass on a
-regular grid (replaces the legacy ``cmass_regular_grid``).
+Plus :func:`center_of_mass_grid` for weighted centre-of-mass on a
+regular grid.
 
 Channel-last layout for images: ``(..., *spatial, C)``.
 Displacement fields are channel-last with ``ndim`` channels (one
@@ -108,7 +108,7 @@ def identity_grid(
     ``(D, H, W, 3)`` with ``grid[k, i, j] == (k, i, j)``.
 
     Adding a displacement ``delta`` to this grid yields a
-    deformation field consumable by ``spatial_transform``.
+    deformation field consumable by :func:`spatial_transform`.
 
     Parameters
     ----------
@@ -151,7 +151,7 @@ def spatial_transform(
     ``method`` ((multi-)linear by default).  ``deformation`` is
     therefore an *absolute* coordinate map, not a relative
     displacement.  To use a displacement field ``delta``, add
-    ``identity_grid`` first::
+    :func:`identity_grid` first::
 
         warped = spatial_transform(image, identity_grid(spatial) + delta)
 
@@ -170,19 +170,18 @@ def spatial_transform(
         Out-of-bounds handling.  Default ``"constant"`` (preserves
         the prior contract for image-sampling).  Set
         ``mode="nearest"`` for edge-replicate (voxelmorph
-        convention for flow-warp); see ``integrate_velocity_field``
+        convention for flow-warp); see :func:`integrate_velocity_field`
         which defaults to ``"nearest"`` for the same reason.  Other
         valid values: ``"wrap"``, ``"mirror"``, ``"reflect"``.
     cval
         Constant fill value when ``mode="constant"``.  Ignored
         otherwise.  Default ``0``.
     method
-        Interpolation kernel -- an ``Interpolator`` record.  Default
-        ``Linear()`` ((multi-)linear, the prior behaviour).
-        ``NearestNeighbour()`` is the label-preserving choice but is
-        not differentiable w.r.t. the deformation (so it cannot drive
-        a registration loss); see ``geometry._interpolate`` for the
-        full method set and their differentiability contracts.
+        Interpolation kernel -- an :class:`Interpolator` record.  Default
+        :class:`Linear` ((multi-)linear, the prior behaviour).
+        :class:`NearestNeighbour` is the label-preserving choice but is
+        not differentiable with respect to the deformation (so it cannot
+        drive a registration loss).
 
     Returns
     -------
@@ -198,11 +197,10 @@ def spatial_transform(
     leading axes is *not* attempted (the asymmetry between image
     and deformation shape semantics makes silent broadcast
     error-prone).  For a leading-batch convenience that broadcasts
-    a shared image or deformation, see ``spatial_transform_batched``.
+    a shared image or deformation, see :func:`spatial_transform_batched`.
 
-    No cubic (``order=3``) B-spline path exists yet (tracked in
-    ``docs/feature-requests/cubic-resample.md``).  See ``resample``
-    Notes for the parity implication.
+    No cubic (``order=3``) B-spline path exists yet.  See
+    :func:`resample` Notes for the parity implication.
     """
     ndim = deformation.shape[-1]
     # The image has one trailing channel dim plus ``ndim`` spatial
@@ -256,12 +254,12 @@ def spatial_transform_batched(
     cval: float = 0.0,
     method: Interpolator = Linear(),
 ) -> Float[Array, '...']:
-    """Map ``spatial_transform`` over a single leading batch axis.
+    """Map :func:`spatial_transform` over a single leading batch axis.
 
     Convenience wrapper for the common case where the batch axis is
     carried by only one operand: a batch of images warped by a
     single shared deformation (or a single image under a batch of
-    deformations).  ``spatial_transform`` itself requires the
+    deformations).  :func:`spatial_transform` itself requires the
     leading batch dims of ``image`` and ``deformation`` to match
     exactly -- it deliberately does not broadcast -- so this case
     otherwise needs an explicit ``jax.vmap`` with the right
@@ -283,7 +281,7 @@ def spatial_transform_batched(
         one of ``image`` / ``deformation`` must carry the leading
         batch axis.
     mode, cval, method
-        Forwarded to ``spatial_transform``.
+        Forwarded to :func:`spatial_transform`.
 
     Returns
     -------
@@ -299,7 +297,7 @@ def spatial_transform_batched(
     -----
     Maps over exactly **one** leading axis.  To broadcast a shared
     operand across *several* leading batch dims, broadcast it to the
-    full batch shape and call ``spatial_transform`` directly (which
+    full batch shape and call :func:`spatial_transform` directly (which
     handles multiple matching leading dims natively).
     """
     ndim = deformation.shape[-1]
@@ -355,18 +353,36 @@ def _resolve_n_steps(
     velocity: Float[Array, '*spatial ndim'],
     n_steps: Union[int, Literal['auto']],
 ) -> int:
-    """Resolve ``n_steps`` (F2): pass an ``int`` through; derive ``'auto'``.
+    """Resolve ``n_steps``: pass an ``int`` through; derive ``'auto'``.
 
-    Scaling-and-squaring is diffeomorphic only when the first sub-step ``v /
-    2**n_steps`` is small enough (~<= 0.5 vox) that ``id + v/2**n`` is itself
-    invertible; below that the integrated flow can fold (measured: a moderate
-    velocity folds at ``n_steps=0``).  ``'auto'`` sets the standard
-    ``n_steps = ceil(log2(2 * max|v|))`` so the first sub-step clears the regime,
-    clamped to ``[_AUTO_SS_FLOOR, _AUTO_SS_CAP]``.  It reads ``max|v|`` as a
-    **concrete** value, so it is unavailable under ``jax.jit`` (the scan length
-    must be static, which a traced reduction cannot provide) -- pass an explicit
-    ``int`` there (the recipes do; their pre-affine-aligned residual velocities
-    sit well inside the default ``n_steps``'s regime).
+    Scaling-and-squaring is diffeomorphic only when the first sub-step
+    :math:`v / 2^{n}` is small enough (roughly :math:`\\leq 0.5` voxels)
+    that :math:`\\mathrm{id} + v / 2^{n}` is itself invertible; below that
+    the integrated flow can fold (measured: a moderate velocity folds at
+    ``n_steps=0``).  ``'auto'`` sets the standard
+    :math:`n = \\lceil \\log_2(2 \\, \\max|v|) \\rceil` so the first
+    sub-step clears the regime, clamped to
+    ``[_AUTO_SS_FLOOR, _AUTO_SS_CAP]``.  It reads :math:`\\max|v|` as a
+    **concrete** value, so it is unavailable under ``jax.jit`` (the scan
+    length must be static, which a traced reduction cannot provide) --
+    pass an explicit ``int`` there (the recipes do; their pre-affine-
+    aligned residual velocities sit well inside the default ``n_steps``'s
+    regime).
+
+    Parameters
+    ----------
+    velocity
+        Stationary velocity field, ``(*spatial, ndim)``.  Consulted only
+        in the ``'auto'`` branch, where its per-voxel magnitude
+        :math:`\\max|v|` sizes the scan.
+    n_steps
+        Either an explicit number of doublings (returned unchanged) or
+        the string ``'auto'`` (derived from ``velocity`` as above).
+
+    Returns
+    -------
+    int
+        The resolved number of scaling-and-squaring doublings.
     """
     if isinstance(n_steps, int):
         return n_steps
@@ -426,7 +442,7 @@ def integrate_velocity_field(
         within the ``~0.5``-voxel regime where ``id + v/2**n`` is itself
         invertible -- below that the flow can **fold**, so ``n_steps`` should
         cover the velocity magnitude (``>= ceil(log2(2*max|v|))``).  ``'auto'``
-        picks exactly that (F2) from the velocity, but reads ``max|v|`` as a
+        picks exactly that from the velocity, but reads ``max|v|`` as a
         concrete value, so it is **eager-only** (unavailable under ``jax.jit`` --
         the scan length must be static; pass an explicit ``int`` there).  Note a
         warp larger than the grid can resolve folds at *any* ``n_steps`` (a
@@ -448,8 +464,8 @@ def integrate_velocity_field(
     Returns
     -------
     Displacement field of the same shape as ``velocity``; adding
-    ``identity_grid`` yields the absolute deformation suitable for
-    ``spatial_transform``.
+    :func:`identity_grid` yields the absolute deformation suitable for
+    :func:`spatial_transform`.
 
     Notes
     -----
@@ -533,12 +549,11 @@ def resample(
     cval
         Constant fill value when ``mode="constant"``.  Default ``0``.
     method
-        Interpolation kernel -- an ``Interpolator`` record.  Default
-        ``Linear()`` ((multi-)linear, the prior behaviour).
-        ``NearestNeighbour()`` preserves label values exactly (the
+        Interpolation kernel -- an :class:`Interpolator` record.  Default
+        :class:`Linear` ((multi-)linear, the prior behaviour).
+        :class:`NearestNeighbour` preserves label values exactly (the
         choice for integer segmentations when anti-aliasing is *not*
-        wanted).  See ``geometry._interpolate`` for the method set and
-        their differentiability contracts.
+        wanted).
 
     Returns
     -------
@@ -598,7 +613,7 @@ def center_of_mass_grid(
     """Centre of mass over a regular grid of unit-spaced coordinates.
 
     For a tensor ``weight``, computes the centre of mass treating
-    each cell's coordinate along axis ``d`` as its index ``i_d``
+    each cell's coordinate along axis ``d`` as its index :math:`i_d`
     (zero-based).  ``axes`` selects which axes to reduce over; the
     reduction is over those axes per slice spanned by the
     *remaining* axes.
@@ -676,6 +691,28 @@ def _central_diff_along_axis(
     difference; the denominator is still ``2 * spacing`` (matching
     scipy / voxelmorph convention which treats the boundary cell
     as if neighbouring itself).
+
+    Parameters
+    ----------
+    field
+        Channel-last field, ``(..., s, c)``, where ``s`` is the size
+        along the axis being differentiated and ``c`` the trailing
+        channel axis.
+    spatial_axis
+        Axis to differentiate along (negative-indexable).
+    mode
+        Boundary handling: ``'nearest'`` (edge-duplicate), ``'wrap'``
+        (periodic), or ``'mirror'`` (non-repeating mirror).  Any other
+        value raises ``ValueError``.
+    spacing
+        Grid spacing along ``spatial_axis``; the central-difference
+        denominator is ``2 * spacing``.
+
+    Returns
+    -------
+    Float[Array, '... s c']
+        Central difference of ``field`` along ``spatial_axis``, the same
+        shape as ``field``.
     """
     n = field.ndim
     ax = spatial_axis % n
@@ -720,7 +757,23 @@ def _central_diff_along_axis(
 
 
 def _negate_at_index(x: Array, axis: int, index: int) -> Array:
-    """Negate ``x`` at ``index`` along ``axis``, leave the rest unchanged."""
+    """Negate ``x`` at ``index`` along ``axis``, leave the rest unchanged.
+
+    Parameters
+    ----------
+    x
+        Array whose entries are selectively negated.
+    axis
+        Axis along which to select the slice (negative-indexable).
+    index
+        Position along ``axis`` of the single slice to negate.
+
+    Returns
+    -------
+    Array
+        Copy of ``x`` with the slice at ``index`` along ``axis`` negated
+        and every other entry unchanged.
+    """
     n = x.ndim
     axis_norm = axis % n
     sl = [slice(None)] * n
@@ -734,10 +787,12 @@ def jacobian_displacement(
     boundary_mode: Literal['nearest', 'wrap', 'mirror'] = 'nearest',
     spacing: Union[float, Sequence[float]] = 1.0,
 ) -> Float[Array, '... *spatial d d']:
-    """Per-point Jacobian of the deformation φ = id + u.
+    """Per-point Jacobian of the deformation :math:`\\varphi = \\mathrm{id} + u`.
 
+    Here :math:`\\varphi` is the deformation and ``u`` the displacement.
     For a channel-last displacement field ``u`` with ``d`` spatial
-    axes, returns ``J[..., i, j] = δ_{i,j} + ∂ u_i / ∂ x_j``,
+    axes, returns
+    :math:`J[\\dots, i, j] = \\delta_{i,j} + \\partial u_i / \\partial x_j`,
     computed via central differences along each spatial axis.
 
     Parameters
@@ -765,7 +820,7 @@ def jacobian_displacement(
 
     Notes
     -----
-    For folding detection use ``jacobian_det_displacement`` which
+    For folding detection use :func:`jacobian_det_displacement` which
     avoids materialising the full Jacobian when only the
     determinant is needed.
     """
@@ -819,20 +874,39 @@ def jacobian_det_displacement(
 ) -> Float[Array, '... *spatial']:
     """Per-point determinant of the deformation Jacobian.
 
-    Computes ``det(I + ∇u)`` at each spatial location.  For
+    Computes :math:`\\det(I + \\nabla u)` at each spatial location.  For
     ``d <= 3`` uses the explicit closed-form determinant (avoiding
-    LU factorisation noise and ``O(d^3)`` cost); for ``d > 3``
-    falls back to ``jnp.linalg.det``.
+    LU factorisation noise and :math:`O(d^3)` cost); for ``d > 3``
+    falls back to ``jnp.linalg.det``.  The Jacobian itself is obtained
+    from :func:`jacobian_displacement`, whose ``boundary_mode`` and
+    ``spacing`` semantics are shared.
 
-    Parameters and ``boundary_mode`` / ``spacing`` semantics match
-    ``jacobian_displacement``.
-
-    Folding interpretation: ``det(J) > 0`` means the deformation
-    is locally orientation-preserving; ``det(J) <= 0`` indicates
+    Folding interpretation: :math:`\\det(J) > 0` means the deformation
+    is locally orientation-preserving; :math:`\\det(J) \\leq 0` indicates
     the warp folds at this voxel (and is not a diffeomorphism
     there).  The standard QA threshold is "no voxels with
-    ``det <= 0``"; the soft regulariser is
-    ``mean(max(0, ε - det)^2)`` for some ``ε > 0``.
+    :math:`\\det \\leq 0`"; the soft regulariser is
+    :math:`\\operatorname{mean}(\\max(0, \\varepsilon - \\det)^2)` for
+    some :math:`\\varepsilon > 0`.
+
+    Parameters
+    ----------
+    u
+        Displacement field, channel-last,
+        ``(*leading, *spatial, d)`` with ``len(spatial) == d``.
+    boundary_mode
+        Boundary handling for the central difference.  ``"nearest"``
+        (default) clamps to the edge cell; ``"wrap"`` is periodic;
+        ``"mirror"`` is non-repeating mirror.
+    spacing
+        Voxel spacing along each spatial axis.  ``float`` ->
+        isotropic; sequence -> per-axis (length ``d``).
+
+    Returns
+    -------
+    Float[Array, '... *spatial']
+        Per-point Jacobian determinant, ``(*leading, *spatial)`` (the
+        trailing displacement-component axis of ``u`` reduced away).
     """
     J = jacobian_displacement(
         u,
@@ -887,11 +961,11 @@ def sample_at_points(
 ) -> Float[Array, '...']:
     """Sample a volume at an arbitrary list of continuous points.
 
-    The scattered-point complement to ``spatial_transform`` (which samples
-    on a coordinate *grid*): given ``points`` of shape ``(*n, ndim)`` in
-    **index/voxel coordinates** (coordinate ``c`` maps to array index
-    ``c`` -- the ``align_corners`` convention, matching ``identity_grid``),
-    interpolate ``volume`` at each point.
+    The scattered-point complement to :func:`spatial_transform` (which
+    samples on a coordinate *grid*): given ``points`` of shape
+    ``(*n, ndim)`` in **index/voxel coordinates** (coordinate ``c`` maps
+    to array index ``c`` -- the ``align_corners`` convention, matching
+    :func:`identity_grid`), interpolate ``volume`` at each point.
 
     Parameters
     ----------
@@ -901,8 +975,9 @@ def sample_at_points(
     points
         ``(*n, ndim)`` sample coordinates in index space.
     method
-        Interpolation kernel (``Linear`` default; ``NearestNeighbour`` for
-        label volumes; any ``geometry`` ``Interpolator``).
+        Interpolation kernel (:class:`Linear` default;
+        :class:`NearestNeighbour` for label volumes; any
+        :class:`Interpolator`).
     mode
         Out-of-bounds boundary mode: ``"constant"`` (zero-/``cval``-fill,
         the default) or ``"nearest"`` (edge-clamp / border), etc.

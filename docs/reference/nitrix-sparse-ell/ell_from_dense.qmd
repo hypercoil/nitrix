@@ -1,0 +1,70 @@
+---
+title: "ell_from_dense"
+generated: true
+description: "Convert a dense matrix to ELL by keeping the largest entries per row."
+---
+
+[‹ back to `nitrix.sparse.ell`](../nitrix-sparse-ell.qmd)
+
+<!-- nitrix:gen sig:ell_from_dense -->
+```python
+ell_from_dense(dense: Num[Array, 'm n'], *, k_max: Optional[int] = None, threshold: float = 0.0, identity: Any = 0.0, symmetrize: bool = False) -> ELL
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:ell_from_dense -->
+Convert a dense matrix to ELL by keeping the largest entries per row.
+
+Each row of `dense` is reduced to at most `k_max` stored entries.
+Entries with absolute value `<= threshold` are treated as
+structural zeros.  If a row has more than `k_max` non-zero
+entries, the largest-by-magnitude `k_max` are kept.  If `k_max`
+is `None`, it is chosen as the maximum row degree present.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:ell_from_dense -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `dense` | `Num` | `m` × `n` | — | Dense matrix, shape `(m, n)`. |
+| `k_max` | `Optional[int]` | — | `None` | Target column count of the ELL. Defaults to the worst-case per-row non-zero count. With `symmetrize=True` the *effective* column count may exceed this (the symmetric closure can add edges). |
+| `threshold` | `float` | — | `0.0` | Absolute-value cutoff for "structurally zero". |
+| `identity` | `Any` | — | `0.0` | Pad fill in `values`. |
+| `symmetrize` | `bool` | — | `False` | When `True`, return the symmetric kNN graph of the selection: take the top-`k_max` pattern $P$, then store $\tfrac{1}{2}(S + S^{\top})$ over the closure $P \cup P^{\top}$ where $S = \mathrm{dense} \odot P$. The result is an exactly-symmetric ELL ([`ell_to_dense`](../nitrix-sparse-ell/ell_to_dense.qmd) is symmetric); `m` must equal `n`. Default `False` (the historical asymmetric top-k behaviour). **Storage is not bounded by a small multiple of** `k_max`. The effective column count is $\max_i \|\mathrm{row}_i(P) \cup \mathrm{col}_i(P)\|$ -- i.e. `k_max` plus the largest top-k *in-degree* (how many rows selected a given column). In-degree is **not** limited by `k_max`: a hub/star (one column selected by every row) drives the closure of that row to the full `n`, so `symmetrize=True` can densify hub rows entirely. For hub-heavy or unknown-degree graphs prefer the storage-free matvec symmetrisation (`promise_symmetry=False` on the spectral consumers), which never materialises $P \cup P^{\top}$. |
+
+**Returns** `ELL`. Sparse matrix of shape `(m, n)` holding the selected entries.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:ell_from_dense -->
+::: {.callout-warning}
+Top-`k_max`-per-row selection is **not** symmetry-preserving: row
+`i` may keep edge `(i, j)` while row `j` drops `(j, i)`, so
+the stored pattern is generally **asymmetric** even when `dense`
+is symmetric.  This matters for the spectral consumers
+(`laplacian_eigenmap` /
+`diffusion_embedding` and
+`eigsolve_top_k`), whose iterative solvers
+assume a symmetric operator.  Two remedies: pass the result with the
+connectopy default `promise_symmetry=False` (the operator is
+symmetrised at the matvec, storage-free, as
+$\tfrac{1}{2}(A x + A^{\top} x)$); or build a symmetric ELL
+here with `symmetrize=True` (below).
+:::
+
+::: {.callout-note}
+Implemented with NumPy on the host: this is a one-shot
+construction helper, not a JIT-traceable op.  Treat it as a
+convenience for tests and small workloads.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:ell_from_dense -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `m` | rows of a multi-row contrast |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

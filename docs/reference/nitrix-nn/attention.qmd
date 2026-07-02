@@ -1,0 +1,11 @@
+---
+title: "attention"
+generated: true
+---
+
+[‹ back to `nitrix.nn`](../nitrix-nn.qmd)
+
+::: {.callout-warning title="TODO — could not introspect"}
+Re-exported submodule — see its own page.
+:::
+

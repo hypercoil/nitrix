@@ -1,0 +1,95 @@
+---
+title: "nitrix.linalg.residual"
+generated: true
+signature-hash: c3c61244e419b4be
+description: "Residualisation via linear least squares."
+listing:
+  id: nitrix-linalg-residual-symbols
+  contents: "nitrix-linalg-residual/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.linalg.residual`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Residualisation via linear least squares.
+
+The canonical fMRI-confound use case: regress out a set of
+nuisance regressors `X` from a data tensor `Y`, returning the
+residual (signal of interest) or the projection (the part
+explained by confounds).
+
+Two solver paths, both differentiable:
+
+- `method="cholesky"` (**default**): normal-equations OLS via a
+  **cuSOLVER-free** rolled Cholesky (`spd_chol`) + cuBLAS triangular
+  solves, so it runs on the cuSOLVER-affected GPU stacks (where
+  `jnp.linalg.cholesky` / `svd` fail to create a handle).  Tall-and-skinny
+  optimised -- for `X` of shape $(\mathrm{obs}, k)$ with
+  $\mathrm{obs} \gg k$ (typical fMRI: 400 TRs $\times$
+  24 confounds), the heavy step is $X^{\top} X$
+  ($O(\mathrm{obs} \cdot k^2)$, bandwidth-limited) followed by a
+  $k \times k$ Cholesky and two triangular solves ($O(k^3)$).
+  $X^{\top} X$ is numerically squared in condition number, so this
+  path wants a well-conditioned `X` or an `l2 > 0` ridge; a rank-deficient
+  Gram is regularised by the modified-Cholesky pivot floor (a finite result,
+  not `NaN` -- but prefer `l2 > 0` for a controlled treatment).
+- `method="svd"`: SVD-based lstsq.  Stable even for rank-deficient `X`;
+  slower (~2× on tall systems) but works without an L2 ridge on collinear
+  columns.  **cuSOLVER-backed** (`gesvd`), so on the broken stacks use the
+  `"cholesky"` default (or run on a working backend).
+
+QR was considered as a third path but is currently broken on
+the test runner's GPU (cuSolver ABI mismatch); `method="qr"`
+is not exposed.  We can add it back when the cuSolver issue
+is fixed -- the wrapper machinery doesn't change.
+
+Per-observation weights (heteroscedastic regression) are
+supported via `weights`: a length-`obs` vector defining the
+diagonal of the weight matrix.  Implementation note: we
+*pre-scale* rows by `sqrt(weights)` rather than form
+$X^{\top} \operatorname{diag}(w) X$ explicitly -- preserves the
+QR / SVD structure and is numerically equivalent.
+
+Differentiability: both solver paths are reverse-mode
+differentiable (JAX ships VJPs for `qr`, `lstsq`, and
+triangular solve).  Gradients have been verified by
+finite-difference parity in the test suite.
+
+What the legacy `hypercoil.functional.resid.residualise` had
+that we drop:
+
+- `proj_atol` / `proj_rtol`: the "if proj is numerically
+  close to Y, return Y" trick.  Composable post-hoc by the user
+  if needed; not a primitive concern.
+
+What the legacy did NOT have that we add:
+
+- `weights` for heteroscedastic / GLS-like regression.
+- `method` selection for the speed / stability trade-off.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `C_Y` | *(undocumented — add to `_dimensions.yml`)* |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+| `C_X` | *(undocumented — add to `_dimensions.yml`)* |
+| `C_S` | *(undocumented — add to `_dimensions.yml`)* |
+| `C_N` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-linalg-residual-symbols}
+:::

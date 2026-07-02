@@ -1,0 +1,51 @@
+---
+title: "edge_face_adjacency"
+generated: true
+description: "Pairs of faces sharing an edge (the face-adjacency topology)."
+---
+
+[‹ back to `nitrix.sparse.mesh`](../nitrix-sparse-mesh.qmd)
+
+<!-- nitrix:gen sig:edge_face_adjacency -->
+```python
+edge_face_adjacency(faces: Int[Array, 'n_faces 3']) -> Int[Array, 'n_adjacent_pairs 2']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:edge_face_adjacency -->
+Pairs of faces sharing an edge (the face-adjacency topology).
+
+For every undirected edge incident to **exactly two** faces, emit the
+`(face_a, face_b)` index pair; boundary edges (one incident face) and
+non-manifold edges (three or more) contribute no pair.  This is the
+topology a face-pair regulariser consumes -- e.g. a normal-consistency
+penalty comparing [`face_normals`](../nitrix-sparse-mesh/face_normals.qmd) across each shared edge.
+
+Host-side / static construction (NumPy over `faces`), like
+[`mesh_k_ring_adjacency`](../nitrix-sparse-mesh/mesh_k_ring_adjacency.qmd) and `_edges_from_faces`: the result
+depends only on the integer connectivity, not on vertex coordinates, so
+it is computed once on the host and the returned index array then flows
+through `jit` as a constant gather table.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:edge_face_adjacency -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `faces` | `Int` | `n_faces` × `3` | — | `(n_faces, 3)` vertex indices. |
+
+**Returns** `Int` — shape `n_adjacent_pairs` × `2`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:edge_face_adjacency -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_faces` | *(undocumented — add to `_dimensions.yml`)* |
+| `3` | *(undocumented — add to `_dimensions.yml`)* |
+| `n_adjacent_pairs` | *(undocumented — add to `_dimensions.yml`)* |
+| `2` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

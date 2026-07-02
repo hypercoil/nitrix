@@ -1,0 +1,58 @@
+---
+title: "nitrix.sparse.ell_sectioned"
+generated: true
+signature-hash: 4431e52d2edac054
+description: "Sectioned ELL -- bucketed-row format for variable-degree adjacencies."
+listing:
+  id: nitrix-sparse-ell_sectioned-symbols
+  contents: "nitrix-sparse-ell_sectioned/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.sparse.ell_sectioned`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Sectioned ELL -- bucketed-row format for variable-degree adjacencies.
+
+The naive ELL layout pads every row to the global $k_{\max}$.  That is
+memory-efficient when $k_{\max} \approx \operatorname{median}(k)$ but
+pathological when the worst-case row is much larger -- e.g. distance-thresholded
+neighbourhoods in irregular point clouds ($k_{\max}$ can be 10-100x the
+median) or atlas-parcel adjacencies (parcel sizes vary by 1-2 orders of
+magnitude).
+
+The sectioned-ELL trick: bucket rows by $\lceil \log_2(\mathrm{degree})
+\rceil$, run [`semiring_ell_matmul`](nitrix-semiring.qmd) once per bucket with
+the bucket's *local* $k_{\max}$, and scatter the results back to the
+original row order.  Memory cost is dominated by the largest bucket, not by the
+worst-case row.
+
+This is a Python-level wrapper around the existing
+[`semiring_ell_matmul`](nitrix-semiring.qmd) kernel -- no new kernel code.
+Construction is *not* JIT-compatible because the per-bucket shapes are
+data-dependent.  Reuse is JIT-friendly (the per-bucket matmuls trace once and
+the dispatch is a static Python loop).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_cols` | *(undocumented — add to `_dimensions.yml`)* |
+| `ncol` | *(undocumented — add to `_dimensions.yml`)* |
+| `m` | rows of a multi-row contrast |
+| `n_rows` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-sparse-ell_sectioned-symbols}
+:::

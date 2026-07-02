@@ -1,0 +1,44 @@
+---
+title: "principal_curvatures"
+generated: true
+description: "Per-vertex principal curvatures $( kappa_1,  kappa_2)$."
+---
+
+[‹ back to `nitrix.geometry.surface`](../nitrix-geometry-surface.qmd)
+
+<!-- nitrix:gen sig:principal_curvatures -->
+```python
+principal_curvatures(mesh: Mesh, *, area_scheme: Literal['voronoi', 'barycentric'] = 'voronoi') -> Float[Array, 'n_vertices 2']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:principal_curvatures -->
+Per-vertex principal curvatures $(\kappa_1, \kappa_2)$.
+
+The two principal curvatures are ordered $\kappa_1 \geq \kappa_2$.
+They follow from the mean and Gaussian curvatures via
+$\kappa = H \pm \sqrt{\max(H^2 - K, 0)}$ (the discriminant is
+clamped at zero, where it can dip slightly negative from discretisation).
+Inherits the sign convention of [`mean_curvature`](../nitrix-geometry-surface/mean_curvature.qmd).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:principal_curvatures -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mesh` | `Mesh` | — | — | Triangle mesh (closed). |
+| `area_scheme` | `Literal['voronoi', 'barycentric']` | — | `'voronoi'` | Vertex-area scheme (`'voronoi'` default). |
+
+**Returns** `Float` — shape `n_vertices` × `2`. Per-vertex principal curvatures, shape `(n_vertices, 2)`: column 0 is $\kappa_1$ (larger), column 1 is $\kappa_2$. Pure JAX; differentiable.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:principal_curvatures -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_vertices` | *(undocumented — add to `_dimensions.yml`)* |
+| `2` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

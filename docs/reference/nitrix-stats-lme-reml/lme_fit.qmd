@@ -1,0 +1,99 @@
+---
+title: "lme_fit"
+generated: true
+description: "Voxelwise mixed model, dispatched to the cheapest exact solver."
+---
+
+[‹ back to `nitrix.stats.lme.reml`](../nitrix-stats-lme-reml.qmd)
+
+<!-- nitrix:gen sig:lme_fit -->
+```python
+lme_fit(Y: Float[Array, 'V N'], X: Float[Array, 'N p'], *, group: Int[Array, 'N'], z: Optional[Float[Array, 'N r']] = None, inner: Optional[Int[Array, 'N']] = None, cross: Optional[Int[Array, 'N']] = None, corr: Optional[Union[str, CorrSpec]] = None, time: Optional[Float[Array, 'N']] = None, structure: Structure = 'unstructured', n_iter: int = 20, damping: float = 1e-06, block: Optional[int] = None, low_rank: Optional[bool] = None, retain_blups: bool = False) -> Union[REMLResult, LMEResult, NestedLMEResult, CorrLMEResult, CrossedLMEResult]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:lme_fit -->
+Voxelwise mixed model, dispatched to the cheapest exact solver.
+
+A single grouping factor `group` with per-observation random covariates
+`z` (`None` -> a scalar random intercept).  The dispatcher honours a
+**performance-preserving** invariant: it routes to the cheapest solver that
+is *exact* for the given random structure, so the shipped fast paths stay the
+realised path for the cases they already serve.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:lme_fit -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `Y` | `Float` | `V` × `N` | — | `(V, N)` responses and `(N, p)` shared fixed-effect design. `X` carries its own intercept column (no intercept is added). |
+| `X` | `Float` | `N` × `p` | — | `(V, N)` responses and `(N, p)` shared fixed-effect design. `X` carries its own intercept column (no intercept is added). |
+| `group` | `Int` | `N` | — | `(N,)` integer group labels (`0 .. M-1`). The **outer** factor `g1` when `inner` is given (R3). |
+| `z` | `Optional[Float[Array, 'N r']]` | — | `None` | `(N, r)` per-observation random covariates; `None` is the scalar random intercept (`r = 1`, `z = 1`). |
+| `inner` | `Optional[Int[Array, 'N']]` | — | `None` | `(N,)` **nested** inner factor `g2` (each `(group, inner)` pair is a sublevel `g1:g2`). When given, routes to the R3 nested solver (`z` must be `None`); `None` (default) keeps the single-factor R1/R2 dispatch. |
+| `cross` | `Optional[Int[Array, 'N']]` | — | `None` | `(N,)` second **crossed** factor. When given, routes to the R4 crossed solver -- `(1 \| group) + (1 \| cross)`, the two factors crossed (not nested). `z` / `inner` / `corr` must be unset. Tier-2; cost scales with the *smaller* factor's level count cubed. |
+| `corr` | `Optional[Union[str, CorrSpec]]` | — | `None` | Within-group residual correlation structure (`'ar1'` / `'car1'` / `'cs'` or a [`CorrSpec`](../nitrix-stats-lme/CorrSpec.qmd)). When given, routes to the R2 + corr whitened block-Woodbury (a random effect plus a structured residual); `None` (default) is the $\sigma_e^2 I$ residual. |
+| `time` | `Optional[Float[Array, 'N']]` | — | `None` | `(N,)` observation times for a `car1` residual (see `corr`). |
+| `structure` | `Structure` | — | `'unstructured'` | `'unstructured'` (full `r x r` `G`, `(1 + x \| g)`) or `'diagonal'` (independent variance components, `(x \|\| g)` -- the off-diagonal of `G` is held at zero). Both run the R2 block-Woodbury. |
+| `n_iter` | `int` | — | `20` | Newton iterations, AI damping, and voxel-block chunking (all tiers). |
+| `damping` | `float` | — | `1e-06` | Newton iterations, AI damping, and voxel-block chunking (all tiers). |
+| `block` | `Optional[int]` | — | `None` | Newton iterations, AI damping, and voxel-block chunking (all tiers). |
+| `low_rank` | `Optional[bool]` | — | `None` | **R1-only.** Toggles the FaST-LMM q-rank decomposition on the single-scalar-factor (R1) path; `None` (default) auto-selects low-rank when `q < N` (the brain-scale case; matches the dense fit to tolerance). **Ignored on the R2 / R3 / R4 / +corr tiers**, which have no dense-vs-low-rank choice -- passing it there is a silent no-op. |
+| `retain_blups` | `bool` | — | `False` | Retain the per-group random-effect modes (BLUPs) on the returned result for later conditional prediction. `False` (default) discards them. Currently supported only on the single-factor R1 (scalar intercept), R2 (random slope) and R2 + corr (structured residual) tiers; requesting it alongside `cross=` or `inner=` raises. Read the retained modes via [`ranef`](../nitrix-stats.qmd). |
+
+**Returns** `Union[REMLResult, LMEResult, NestedLMEResult, CorrLMEResult, CrossedLMEResult]`. The fit for the selected tier: a [`REMLResult`](../nitrix-stats-lme-reml/REMLResult.qmd) (R1), an [`LMEResult`](../nitrix-stats-lme-reml/LMEResult.qmd) (R2), a [`NestedLMEResult`](../nitrix-stats-lme-reml/NestedLMEResult.qmd) (R3), a [`CorrLMEResult`](../nitrix-stats-lme/CorrLMEResult.qmd) (R2 + corr), or a [`CrossedLMEResult`](../nitrix-stats-lme-reml/CrossedLMEResult.qmd) (R4 crossed).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:lme_fit -->
+### Dispatch ladder
+
+- **R1** -- one **scalar** random effect (`z` is `None` or a single
+  column): the FaST-LMM spectral [`reml_fit`](../nitrix-stats-lme-reml/reml_fit.qmd) (dense, or q-rank via
+  `low_rank=`).  Returns a [`REMLResult`](../nitrix-stats-lme-reml/REMLResult.qmd) (with the fixed-effect
+  inference fields).  *Bit-for-bit the shipped path.*
+- **R2** -- one **correlated / diagonal** random effect (`z` has `r >= 2`
+  columns, e.g. `[1, x]` for `(1 + x | g)`): the block-Woodbury REML
+  (`_blockwoodbury`) -- per-group `r x r` Woodbury, no `N x N`
+  intermediate, cuSOLVER-free.  Returns an [`LMEResult`](../nitrix-stats-lme-reml/LMEResult.qmd).
+  `structure='unstructured'` fits a full `r x r` `G`;
+  `structure='diagonal'` constrains `G` to be diagonal -- the
+  uncorrelated `(x || g)` random effect (independent intercept and slope),
+  fitting only the `r` variances (`nt = r + 1` parameters).
+
+- **R3** -- a **nested** two-level hierarchy `(1 | g1/g2)` (pass the inner
+  factor as `inner`; `z` must be `None`): the telescoping-Woodbury
+  nested solver (`_nested`) over the three variance components
+  $[\sigma_1^2, \sigma_2^2, \sigma_e^2]$ -- block-diagonal across
+  `g1`, Sherman-Morrison at each nested level, no $N \times N$
+  intermediate, cuSOLVER-free.  Returns a [`NestedLMEResult`](../nitrix-stats-lme-reml/NestedLMEResult.qmd).
+- **R2 + corr** -- a random effect **and** a structured within-group residual
+  $\operatorname{Cov}(\epsilon) = \sigma_e^2 R(\rho)$ (pass
+  `corr=` and, for [`car1`](../nitrix-stats.qmd), `time=`).  Whitening by
+  $R$ reduces each group to a standard block-Woodbury, so the per-group
+  Woodbury algebra is reused with $\rho$ joining the REML
+  $\theta$; cuSOLVER-free.  Returns a [`CorrLMEResult`](../nitrix-stats-lme/CorrLMEResult.qmd).
+  `z=None` is the random intercept; `z` a random slope
+  (`structure='diagonal'` for `(x || g)`).
+- **R4** -- two **crossed** scalar random intercepts `(1 | group) +
+  (1 | cross)` (pass the second factor as `cross`; `z` / `inner` /
+  `corr` must be unset).  $V$ is not block-diagonal across either
+  factor, so this is the sparse mixed-model-equations regime: a Woodbury with
+  the combined design, whose inner matrix has diagonal blocks (the level
+  counts) and an off-diagonal incidence, so a diagonal Schur eliminates the
+  larger factor and leaves a single dense
+  $\min(q_{\mathrm{group}}, q_{\mathrm{cross}})^3$ solve per Newton
+  step (`_crossed`).  cuSOLVER-free; **cheap when one factor is small,
+  expensive when both are large.**  Returns a [`CrossedLMEResult`](../nitrix-stats-lme-reml/CrossedLMEResult.qmd).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:lme_fit -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `N` | observations — time points, subjects, or sampled points |
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

@@ -1,0 +1,41 @@
+---
+title: "BetaResult"
+generated: true
+description: "Per-element beta-regression fit output."
+---
+
+[‹ back to `nitrix.stats.betareg`](../nitrix-stats-betareg.qmd)
+
+<!-- nitrix:gen sig:BetaResult -->
+```python
+class BetaResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:BetaResult -->
+Per-element beta-regression fit output.
+
+Frozen container of the fitted mean-model coefficients, precision,
+coefficient covariance, and maximised log-likelihood for every element of a
+mass-univariate beta regression, together with the observation count.  Each
+of the `V` elements (voxels, vertices, ...) is fitted independently and
+shares the single design matrix passed to [`beta_fit`](../nitrix-stats-betareg/beta_fit.qmd).
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:BetaResult.__init__ -->
+```python
+__init__(coef: Float[Array, 'V p'], precision: Float[Array, 'V'], cov_unscaled: Float[Array, 'V p p'], log_lik: Float[Array, 'V'], n_obs: int) -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:BetaResult -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

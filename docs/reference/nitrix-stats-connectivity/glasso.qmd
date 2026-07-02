@@ -1,0 +1,56 @@
+---
+title: "glasso"
+generated: true
+description: "Graphical-LASSO sparse precision (inverse covariance)."
+---
+
+[‹ back to `nitrix.stats.connectivity`](../nitrix-stats-connectivity.qmd)
+
+<!-- nitrix:gen sig:glasso -->
+```python
+glasso(S: Float[Array, 'p p'], lam: float | Float[Array, ''], *, n_outer: int = 100, n_inner: int = 50) -> Float[Array, 'p p']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:glasso -->
+Graphical-LASSO sparse precision (inverse covariance).
+
+Solves
+
+$$
+\operatorname*{argmin}_{\Theta}\;
+\langle S, \Theta \rangle - \log\det\Theta
++ \lambda \lVert\Theta\rVert_{1,\mathrm{off}}
+$$
+
+(an off-diagonal-only L1 penalty -- the standard convention) by the
+block-coordinate descent of Friedman, Hastie and Tibshirani (2008): an
+outer sweep over columns, each an inner lasso on the working covariance
+`W`, with the precision recovered from the converged per-column
+coefficients.  There is no factorisation and no cuSOLVER; all loops are
+rolled (an $O(p^2)$ graph), so the solve is differentiable through the
+fixed iteration budget and compiles flat in $p$ (well suited to
+connectome sizes of $p = 100$-$400$).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:glasso -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `S` | `Float` | `p` × `p` | — | `(p, p)` sample covariance (e.g. `stats.covariance.cov` or a shrinkage estimate). Off-diagonal-only penalty fixes `W_jj = S_jj`. |
+| `lam` | `float | Float[Array, '']` | — | — | Non-negative L1 penalty. Larger `lam` -> sparser `Theta`. |
+| `n_outer` | `int` | — | `100` | Outer column sweeps and inner lasso sweeps per column (fixed budget; the defaults reach KKT stationarity to machine precision on well-scaled connectome covariances and can be reduced for speed). |
+| `n_inner` | `int` | — | `50` | Outer column sweeps and inner lasso sweeps per column (fixed budget; the defaults reach KKT stationarity to machine precision on well-scaled connectome covariances and can be reduced for speed). |
+
+**Returns** `Float` — shape `p` × `p`. `(p, p)` symmetric sparse precision; the inactive off-diagonals are exactly zero (the conditional-independence graph).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:glasso -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

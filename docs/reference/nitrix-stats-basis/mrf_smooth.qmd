@@ -1,0 +1,48 @@
+---
+title: "mrf_smooth"
+generated: true
+description: "Build a Markov-random-field smooth (mgcv `bs='mrf'`) over a region adjacency."
+---
+
+[‹ back to `nitrix.stats.basis`](../nitrix-stats-basis.qmd)
+
+<!-- nitrix:gen sig:mrf_smooth -->
+```python
+mrf_smooth(labels: Int[Array, ' n'], neighbours: Float[Array, 'R R'], *, center: bool = True) -> SplineBasis
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:mrf_smooth -->
+Build a Markov-random-field smooth (mgcv `bs='mrf'`) over a region
+adjacency.
+
+The natural smoother on a parcel / vertex graph.  Each observation carries
+an integer region `label` in `0 .. R-1`; the smooth is a per-region
+effect (design = region indicator) penalised by the **combinatorial graph
+Laplacian** $L = D - A$ of the region adjacency
+($\beta^{\top} L \beta = \sum_{i \sim j} (\beta_i - \beta_j)^2$
+-- neighbouring regions are shrunk together).  The penalty is built with
+`laplacian` -- a direct substrate reuse.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:mrf_smooth -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `labels` | `Int` | `n` | — | `(n,)` integer region index per observation (`0 .. R-1`). |
+| `neighbours` | `Float` | `R` × `R` | — | `(R, R)` region adjacency matrix (non-negative, symmetric; `1` for adjacent regions). |
+| `center` | `bool` | — | `True` | Apply the (count-weighted) sum-to-zero constraint (default `True`). |
+
+**Returns** `SplineBasis`. The [`SplineBasis`](../nitrix-stats-basis/SplineBasis.qmd) for the MRF smooth (`kind='mrf'`, with `n_basis = R`).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:mrf_smooth -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `R` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

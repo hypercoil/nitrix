@@ -1,0 +1,56 @@
+---
+title: "dice"
+generated: true
+description: "Soft Sørensen--Dice overlap coefficient."
+---
+
+[‹ back to `nitrix.metrics.overlap`](../nitrix-metrics-overlap.qmd)
+
+<!-- nitrix:gen sig:dice -->
+```python
+dice(pred: Float[Array, '...'], target: Float[Array, '...'], *, axis: Optional[_AxisArg] = None, smooth: float = 1e-07, reduction: Reduction = 'mean') -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:dice -->
+Soft Sørensen--Dice overlap coefficient.
+
+For soft masks `p` (`pred`) and `t` (`target`) the
+coefficient over the summed region is
+
+$(2 \sum p\, t + s) / (\sum p + \sum t + s)$
+
+with $s$ the value of `smooth`.  Values lie in
+$[0, 1]$; $1$ is a perfect overlap.  Use
+$1 - \mathrm{dice}$ as a loss.
+
+The inputs are treated as soft masks and are *not* activated here:
+pass class probabilities (e.g. a softmax) against a one-hot target
+for the multi-class case, or a sigmoid against a
+$\{0, 1\}$ target for the binary case.  Keeping the
+activation in the caller leaves
+this a pure overlap measure.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:dice -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `pred` | `Float` | `...` | — | Soft masks of identical shape. |
+| `target` | `Float` | `...` | — | Soft masks of identical shape. |
+| `axis` | `Optional[_AxisArg]` | — | `None` | Axes that span a single overlap region (summed in the numerator and denominator). `None` (default) sums over the whole tensor for one global coefficient; pass the spatial axes (e.g. `axis=(-3, -2, -1)` on a `(batch, class, *spatial)` volume) for a per-`(batch, class)` coefficient. |
+| `smooth` | `float` | — | `1e-07` | Laplace smoothing added to both numerator and denominator. Besides guarding the empty-mask denominator, adding it to the numerator makes an empty prediction against an empty target score exactly `1` (vacuously perfect) rather than `0/0`. |
+| `reduction` | `Reduction` | — | `'mean'` | `"mean"` (default), `"sum"`, or `"none"` applied to the per-region coefficient array. |
+
+**Returns** `Float` — shape `...`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:dice -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

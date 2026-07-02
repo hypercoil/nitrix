@@ -1,0 +1,42 @@
+---
+title: "f_contrast"
+generated: true
+description: "Per-element F-test of a multi-row contrast $C  beta = 0$."
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+<!-- nitrix:gen sig:f_contrast -->
+```python
+f_contrast(result: GLMResult, contrast: Float[Array, 'm p'], *, cov: Optional[Float[Array, '... p p']] = None) -> Tuple[Float[Array, 'V'], Float[Array, 'V'], float, float]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:f_contrast -->
+Per-element F-test of a multi-row contrast $C \beta = 0$.
+
+Forms the Wald quadratic form of the `m` contrast rows against the fitted
+coefficients and returns an F statistic per element.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:f_contrast -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `result` | `GLMResult` | — | — | A fitted [`GLMResult`](../nitrix-stats-glm/GLMResult.qmd) supplying the coefficients, unscaled covariance, dispersion, and residual degrees of freedom. |
+| `contrast` | `Float` | `m` × `p` | — | `(m, p)` contrast matrix $C$; the tested hypothesis is $C \beta = 0$. |
+| `cov` | `Optional[Float[Array, '... p p']]` | — | `None` | Optional coefficient covariance override, either a shared `(p, p)` or a per-element `(V, p, p)` matrix -- e.g. the robust output of [`sandwich_cov`](../nitrix-stats-glm/sandwich_cov.qmd). When given, the Wald quadratic form uses $C \Sigma\, C^{\top}$ directly and the statistic is $\mathrm{quad} / m$ (no dispersion rescale). The default (`None`) uses the model-based covariance $\mathrm{dispersion} \cdot (X^{\top} W X)^{-1}$. |
+
+**Returns** `Tuple[Float[Array, 'V'], Float[Array, 'V'], float, float]`. `(V,)` F statistic, one per element. `(V,)` upper-tail p-value on `(df1, df2)` degrees of freedom. Numerator degrees of freedom, equal to the contrast rank `m`. Denominator degrees of freedom, equal to `result.dof_resid`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:f_contrast -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `m` | rows of a multi-row contrast |
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

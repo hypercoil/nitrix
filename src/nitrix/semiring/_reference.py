@@ -8,7 +8,7 @@ These functions are the **correctness floor** for the library.  Every
 Pallas kernel is checked against the corresponding reference in the
 backend-parity tests; if a Pallas kernel is unable to tile a given shape
 × algebra combination it falls back to the reference (with a
-``NitrixBackendFallback`` warning).
+:class:`NitrixBackendFallback` warning).
 
 The reference walks the contraction dim with ``lax.fori_loop`` and the
 supplied ``Monoid.update``, so the pytree-state pattern is exercised on
@@ -34,33 +34,38 @@ def reference_semiring_matmul(
     *,
     semiring: Semiring[S],
 ) -> Num[Array, 'm n']:
-    """Pure-JAX reference for ``semiring_matmul``.
+    """Pure-JAX reference for :func:`semiring_matmul`.
 
-    Computes ``C[i, j] = (+)_k ( A[i, k] (*) B[k, j] )``
-    via ``lax.fori_loop`` over the contraction axis with the supplied
-    ``semiring.monoid.update``.
+    Computes the dense semiring matrix product
+    :math:`C_{ij} = \\bigoplus_k \\left( A_{ik} \\otimes B_{kj} \\right)`,
+    where :math:`\\oplus` is the monoid reduction and :math:`\\otimes` the
+    per-element combine of the supplied algebra.  The contraction axis is
+    walked with :func:`jax.lax.fori_loop`, folding each rank-one outer
+    product into the accumulator via ``semiring.monoid.update``.
 
     Parameters
     ----------
-    A
+    A : Num[Array, 'm k']
         Left operand, shape ``(m, k)``.
-    B
-        Right operand, shape ``(k, n)``.
-    semiring
-        The algebra to reduce under.  Either ``Semiring`` (relaxed) or
-        ``StrictSemiring``; this function fixes the reduction order so
-        the relaxed type is sufficient.
+    B : Num[Array, 'k n']
+        Right operand, shape ``(k, n)``.  Its leading axis is the
+        contraction dimension shared with ``A``.
+    semiring : Semiring
+        The algebra to reduce under.  Either a relaxed :class:`Semiring`
+        or a :class:`StrictSemiring`; this function fixes the reduction
+        order, so the relaxed type is sufficient.
 
     Returns
     -------
-    Array of shape ``(m, n)`` and the same dtype as ``A``.
+    Num[Array, 'm n']
+        The product ``C``, shape ``(m, n)``, with the same dtype as ``A``.
 
     Notes
     -----
-    No batching dims here; ``semiring_matmul`` in ``matmul.py``
-    handles broadcast over leading batch dimensions by ``vmap``-ing
-    over this reference.  Keeping the reference 2-D simplifies the
-    Pallas parity contract.
+    There are no batching dimensions here.  The public
+    :func:`semiring_matmul` handles broadcast over leading batch
+    dimensions by ``vmap``-ing over this reference.  Keeping the reference
+    two-dimensional simplifies the Pallas parity contract.
     """
     if A.ndim != 2 or B.ndim != 2:
         raise ValueError(
@@ -96,36 +101,41 @@ def reference_semiring_ell_matmul(
     semiring: Semiring[S],
     n_cols: int | None = None,
 ) -> Num[Array, 'm ncol']:
-    """Pure-JAX reference for ``semiring_ell_matmul``.
+    """Pure-JAX reference for :func:`semiring_ell_matmul`.
 
-    The implicit M×N sparse operand has the per-row neighbour list
-    ``indices[i, :]`` with weights ``values[i, :]``.  Output is::
-
-        C[i, j] = (+)_p ( values[i, p] (*) B[indices[i, p], j] )
-
-    where ``p`` runs over the ``k_max`` columns of the ELL row.
+    The implicit :math:`m \\times n` sparse left operand is held in ELL
+    layout: row ``i`` has neighbour list ``indices[i, :]`` with weights
+    ``values[i, :]``.  Multiplying it against the dense right operand
+    ``B`` gathers those neighbours from the rows of ``B`` and reduces them
+    under the algebra,
+    :math:`C_{ij} = \\bigoplus_p \\left( \\mathtt{values}_{ip} \\otimes
+    B_{\\,\\mathtt{indices}_{ip},\\, j} \\right)`, where :math:`p` runs
+    over the ``k_max`` columns of the ELL row.  The reduction is performed
+    with :func:`jax.lax.fori_loop` over ``p``.
 
     Parameters
     ----------
-    values
+    values : Num[Array, 'm kmax']
         ELL values, shape ``(m, k_max)``.
-    indices
-        ELL column indices into ``B``'s outer dim, shape ``(m, k_max)``.
-        Padding positions must point at a valid row of ``B`` and have
-        ``values`` set to the semiring identity (i.e., ``B``'s row at
-        that index contributes a no-op).  The caller is responsible for
-        this; see ``nitrix.sparse.ell.ell_pad``.
-    B
+    indices : Num[Array, 'm kmax']
+        ELL column indices into ``B``'s outer dimension, shape
+        ``(m, k_max)``.  Padding positions must point at a valid row of
+        ``B`` and carry a ``values`` entry equal to the semiring identity,
+        so that ``B``'s row at that index contributes a no-op.  The caller
+        is responsible for this; see :func:`ell_pad`.
+    B : Num[Array, 'n_cols ncol']
         Dense right operand, shape ``(n_cols, ncol)``.
-    semiring
-        Algebra to reduce under.
-    n_cols
-        Outer dim of the implicit sparse operand (``B.shape[0]``).
-        Optional; defaults to ``B.shape[0]`` and is asserted equal.
+    semiring : Semiring
+        The algebra to reduce under.
+    n_cols : int or None, optional
+        Outer dimension of the implicit sparse operand (``B.shape[0]``).
+        Defaults to ``B.shape[0]`` and, when supplied, is asserted equal.
 
     Returns
     -------
-    ``C``, shape ``(m, ncol)``.
+    Num[Array, 'm ncol']
+        The product ``C``, shape ``(m, ncol)``, with the same dtype as
+        the accumulator initialised from ``B``.
     """
     if values.shape != indices.shape:
         raise ValueError(
@@ -168,45 +178,54 @@ def reference_semiring_ell_rmatvec(
     semiring: Semiring[S],
     n_cols: int,
 ) -> Num[Array, 'n_cols ncol']:
-    """REAL adjoint (transpose) of the ELL matvec: ``Y = Aᵀ X``.
+    """REAL adjoint (transpose) of the ELL matvec: :math:`Y = A^{\\top} X`.
 
-    Where ``semiring_ell_matmul`` gathers -- ``(A X)[i] = Σ_p values[i, p]
-    · X[indices[i, p]]`` -- this scatters::
+    Where :func:`semiring_ell_matmul` gathers --
+    :math:`(A X)_i = \\sum_p \\mathtt{values}_{ip} \\cdot
+    X_{\\,\\mathtt{indices}_{ip}}` -- this routine scatters,
 
-        Y[c, j] = Σ_{(i, p) : indices[i, p] == c} values[i, p] · X[i, j]
+    .. math::
 
-    for the same implicit ``m × n_cols`` operand ``A``.  This is the
-    **additive** adjoint: the scatter reduction is ``+`` (not a general
-    monoid), so pad positions -- whose ``values`` carry REAL's additive
-    identity ``0`` -- contribute nothing, exactly as in the gather
-    direction.  It is the single source of truth for both the ``g_B`` term
-    of ``real_ell_matmul_vjp`` and the symmetric matvec ``½(A X + Aᵀ X)``
-    used by the spectral solvers on adjacencies whose top-k construction
-    did not preserve symmetry.
+        Y_{cj} = \\sum_{(i, p)\\,:\\,\\mathtt{indices}_{ip} = c}
+            \\mathtt{values}_{ip} \\cdot X_{ij},
 
-    ``semiring`` mirrors ``reference_semiring_ell_matmul``'s signature, but
-    only **REAL** is implemented: the additive scatter has no meaning for a
-    general monoid (``½(A + Aᵀ)`` averaging needs the linear structure, and
-    a non-zero pad identity would inject spurious mass).  Any other algebra
-    raises ``NotImplementedError`` rather than silently mis-reducing.
+    for the same implicit :math:`m \\times n_{\\mathrm{cols}}` operand
+    :math:`A`, accumulating with :func:`jax.lax.fori_loop` over the ELL
+    columns.  This is the **additive** adjoint: the scatter reduction is
+    :math:`+` (not a general monoid), so pad positions -- whose ``values``
+    carry REAL's additive identity ``0`` -- contribute nothing, exactly as
+    in the gather direction.  It is the single source of truth for both
+    the ``g_B`` term of :func:`real_ell_matmul_vjp` and the symmetric
+    matvec :math:`\\tfrac{1}{2}(A X + A^{\\top} X)` used by the spectral
+    solvers on adjacencies whose top-``k`` construction did not preserve
+    symmetry.
+
+    ``semiring`` mirrors :func:`reference_semiring_ell_matmul`'s
+    signature, but only **REAL** is implemented: the additive scatter has
+    no meaning for a general monoid (the :math:`\\tfrac{1}{2}(A +
+    A^{\\top})` averaging needs the linear structure, and a non-zero pad
+    identity would inject spurious mass).  Any other algebra raises
+    ``NotImplementedError`` rather than silently mis-reducing.
 
     Parameters
     ----------
-    values
+    values : Num[Array, 'm kmax']
         ELL values, shape ``(m, k_max)``.  Pad positions must hold ``0``.
-    indices
+    indices : Num[Array, 'm kmax']
         ELL column indices, shape ``(m, k_max)``; the scatter targets.
-    X
+    X : Num[Array, 'm ncol']
         Dense operand indexed by the ELL *row*, shape ``(m, ncol)``.
-    semiring
+    semiring : Semiring
         The algebra to reduce under.  REAL only (see above).
-    n_cols
-        Outer dim of the implicit operand ``A`` -- the length of ``Y``'s
-        leading axis (the scatter range).
+    n_cols : int
+        Outer dimension of the implicit operand :math:`A` -- the length of
+        ``Y``'s leading axis (the scatter range).
 
     Returns
     -------
-    ``Y``, shape ``(n_cols, ncol)``.
+    Num[Array, 'n_cols ncol']
+        The adjoint product ``Y``, shape ``(n_cols, ncol)``, with dtype
+        given by ``jnp.result_type(values.dtype, X.dtype)``.
     """
     if semiring.name != 'real':
         raise NotImplementedError(
@@ -229,7 +248,9 @@ def reference_semiring_ell_rmatvec(
     out_dtype = jnp.result_type(values.dtype, X.dtype)
     acc_init = jnp.zeros((n_cols, ncol), dtype=out_dtype)
 
-    def body(p: int, acc: Num[Array, 'n_cols ncol']) -> Num[Array, 'n_cols ncol']:
+    def body(
+        p: int, acc: Num[Array, 'n_cols ncol']
+    ) -> Num[Array, 'n_cols ncol']:
         idx_p = lax.dynamic_slice_in_dim(indices, p, 1, axis=1)[:, 0]  # (m,)
         v_p = lax.dynamic_slice_in_dim(values, p, 1, axis=1)  # (m, 1)
         return acc.at[idx_p].add(v_p * X)

@@ -1,0 +1,58 @@
+---
+title: "nitrix.metrics.information"
+generated: true
+signature-hash: bc01d813d5dc8c36
+description: "Information-theoretic and variance-ratio image-similarity metrics."
+listing:
+  id: nitrix-metrics-information-symbols
+  contents: "nitrix-metrics-information/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.metrics.information`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Information-theoretic and variance-ratio image-similarity metrics.
+
+The cross-modal workhorses (T1 <-> T2, EPI <-> T1, ...), where intensities
+are related by an unknown -- possibly non-monotonic -- mapping:
+
+- [`joint_histogram`](nitrix-metrics-information/joint_histogram.qmd) -- a differentiable (Parzen / linear soft-binned)
+  joint intensity histogram.
+- [`mutual_information`](nitrix-metrics-information/mutual_information.qmd) -- mutual information (and normalised mutual
+  information) from the joint histogram.
+- [`mi_grad`](nitrix-metrics-information/mi_grad.qmd) -- the closed-form Mattes gradient
+  $\partial\mathrm{MI}/\partial\mathrm{moving}$, an analytic gradient
+  that replaces the `jax.grad(mutual_information)` autodiff tape.
+- [`correlation_ratio`](nitrix-metrics-information/correlation_ratio.qmd) -- Roche's $\eta^2$ between-group variance
+  ratio, which assumes only a *functional* (not affine) intensity
+  relationship.
+
+Differentiability is via the smooth soft-binning weights (the bin *index* is
+piecewise-constant, but its gradient is zero almost everywhere; the gradient
+flows through the interpolation weights).  All return a scalar.  By
+convention, mutual information, normalised mutual information, and the
+correlation ratio are *similarities* -- maximise them, or minimise the
+negative (or the $1 - \eta^2$ complement of the correlation ratio).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `bins` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-metrics-information-symbols}
+:::

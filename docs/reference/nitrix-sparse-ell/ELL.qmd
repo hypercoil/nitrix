@@ -1,0 +1,64 @@
+---
+title: "ELL"
+generated: true
+description: "ELL-format sparse matrix."
+---
+
+[‹ back to `nitrix.sparse.ell`](../nitrix-sparse-ell.qmd)
+
+<!-- nitrix:gen sig:ELL -->
+```python
+class ELL
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:ELL -->
+ELL-format sparse matrix.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:ELL.tree_flatten -->
+```python
+tree_flatten() -> Tuple[Tuple[Num[Array, 'm k_max'], Int[Array, 'm k_max']], Tuple[int, Any]]
+```
+<!-- nitrix:/gen -->
+
+Flatten the [`ELL`](../nitrix-sparse-ell/ELL.qmd) into pytree children and static aux.
+
+<!-- nitrix:gen sig:ELL.tree_unflatten -->
+```python
+tree_unflatten(aux: Tuple[int, Any], children: Tuple[Num[Array, 'm k_max'], Int[Array, 'm k_max']]) -> 'ELL'
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sig:ELL.__init__ -->
+```python
+__init__(values: Num[Array, 'm k_max'], indices: Int[Array, 'm k_max'], n_cols: int, identity: Any = None) -> None
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:ELL -->
+::: {.callout-note}
+Registered as a JAX pytree: `values` / `indices` are the array
+children (so an `ELL` flows through `jit` / `vmap` / `grad` as a
+first-class operand, no manual unpack / repack) and `(n_cols, identity)`
+are static aux.  `grad` w.r.t. an `ELL` returns an `ELL` cotangent
+with `values` populated and a `float0` (zero) `indices` cotangent --
+consistent with the sparse eigensolver's `custom_vjp`, which
+differentiates `values` and zeros `indices`.  Because `indices` is an
+integer leaf, differentiating the *whole container* needs
+`jax.grad(f, allow_int=True)` (or differentiate w.r.t. `values`
+directly); the integer leaf then carries the inert `float0` cotangent.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:ELL -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `m` | rows of a multi-row contrast |
+| `k_max` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

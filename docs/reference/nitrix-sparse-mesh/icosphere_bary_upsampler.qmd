@@ -1,0 +1,43 @@
+---
+title: "icosphere_bary_upsampler"
+generated: true
+description: "Fine-from-coarse barycentric upsampler ELL."
+---
+
+[‹ back to `nitrix.sparse.mesh`](../nitrix-sparse-mesh.qmd)
+
+<!-- nitrix:gen sig:icosphere_bary_upsampler -->
+```python
+icosphere_bary_upsampler(hierarchy: IcosphereHierarchy, coarse_level: int, fine_level: int) -> ELL
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:icosphere_bary_upsampler -->
+Fine-from-coarse barycentric upsampler ELL.
+
+Row `i` (fine vertex at level `fine_level`) carries the
+coarse-vertex sources at level `coarse_level` and the
+barycentric weights:
+
+- Coarse-original fine vertex `i`: one source (`i` itself)
+  with weight `1` (and a padded second slot, weight `0`).
+- Midpoint fine vertex of coarse edge `(a, b)`: two sources
+  (`a`, `b`) with weights `(0.5, 0.5)`.
+
+Feeds [`mesh_bary_upsample`](../nitrix-sparse-mesh/mesh_bary_upsample.qmd) to
+interpolate per-vertex coordinates or features from the coarse
+level to the fine level.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:icosphere_bary_upsampler -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `hierarchy` | `IcosphereHierarchy` | — | — | An [`IcosphereHierarchy`](../nitrix-sparse-mesh/IcosphereHierarchy.qmd) produced by [`icosphere_hierarchy`](../nitrix-sparse-mesh/icosphere_hierarchy.qmd). |
+| `coarse_level` | `int` | — | — | Must be consecutive: `fine_level == coarse_level + 1`. |
+| `fine_level` | `int` | — | — | Must be consecutive: `fine_level == coarse_level + 1`. |
+
+**Returns** `ELL`. An [`ELL`](../nitrix-sparse-ell/ELL.qmd) of shape `(n_fine, n_coarse)` with `k_max = 2`.
+<!-- nitrix:/gen -->
+

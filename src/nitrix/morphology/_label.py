@@ -4,28 +4,31 @@
 """
 Connected-components labelling (N-D, jit-able).
 
-``connected_components`` labels the connected foreground regions of a
-boolean mask; ``largest_connected_component`` returns the single biggest
-one (the recurring "clean up the mask" post-processing step).
+:func:`connected_components` labels the connected foreground regions of a
+boolean mask; :func:`largest_connected_component` returns the single
+biggest one (the recurring "clean up the mask" post-processing step).
 
-Method -- **label propagation with pointer jumping**.  Each foreground
-voxel is seeded with a unique label (its flat index + 1).  Every iteration
-does two things: (1) a neighbour-max hop (each voxel takes the maximum
-label over itself and its neighbours), and (2) a **pointer-jumping** step
--- each voxel adopts the label currently held by the voxel its own label
-points to (label ``ℓ`` → flat index ``ℓ - 1``).  Both the pointed-to voxel
-and the neighbour are in the same component, so step (2) only accelerates
-the flood: the reach **doubles** per pass, so a component of diameter ``d``
-converges in ``O(log d)`` passes (a ``lax.while_loop`` to the fixed point)
-rather than ``O(d)``.  The fixed point is identical to a pure neighbour-max
-flood (every voxel ends at its component's maximum seed); pointer jumping
-never merges distinct components.  A final pass renumbers the surviving
-labels to a contiguous ``1 .. K``.  The label *image* has a fixed
-(data-independent) shape throughout, so the whole thing is jit-able.
+The method is label propagation with pointer jumping.  Each foreground
+voxel is seeded with a unique label (its flat index plus one).  Every
+iteration does two things: a neighbour-max hop (each voxel takes the
+maximum label over itself and its neighbours), and a pointer-jumping step
+in which each voxel adopts the label currently held by the voxel that its
+own label points to (label :math:`\\ell` points to flat index
+:math:`\\ell - 1`).  Both the pointed-to voxel and the neighbour lie in
+the same component, so the pointer-jumping step only accelerates the
+flood: the reach doubles per pass, so a component of diameter :math:`d`
+converges in :math:`O(\\log d)` passes (a ``lax.while_loop`` to the fixed
+point) rather than :math:`O(d)`.  The fixed point is identical to a pure
+neighbour-max flood (every voxel ends at its component's maximum seed);
+pointer jumping never merges distinct components.  A final pass renumbers
+the surviving labels to a contiguous :math:`1 \\ldots K`.  The label image
+has a fixed (data-independent) shape throughout, so the whole procedure is
+jit-able.
 
-``connectivity`` follows the scipy convention: an offset is a neighbour
-when ``sum(abs(offset)) <= connectivity``, so ``connectivity=1`` is
-face-adjacency and ``connectivity=ndim`` includes every diagonal.
+The ``connectivity`` argument follows the scipy convention: an offset is a
+neighbour when :math:`\\sum |\\mathrm{offset}| \\leq \\mathrm{connectivity}`,
+so ``connectivity=1`` is face-adjacency and ``connectivity=ndim`` includes
+every diagonal.
 """
 
 from __future__ import annotations
@@ -41,7 +44,28 @@ __all__ = ['connected_components', 'largest_connected_component']
 
 
 def _neighbour_offsets(ndim: int, connectivity: int) -> list[tuple[int, ...]]:
-    """Non-zero ``{-1,0,1}^ndim`` offsets with ``sum|offset| <= connectivity``."""
+    """Enumerate the neighbourhood offsets for a given connectivity.
+
+    Returns the non-zero offsets in :math:`\\{-1, 0, 1\\}^{\\mathrm{ndim}}`
+    whose :math:`\\ell_1` order satisfies
+    :math:`1 \\leq \\sum |\\mathrm{offset}| \\leq \\mathrm{connectivity}`,
+    following the scipy convention.
+
+    Parameters
+    ----------
+    ndim
+        Number of spatial dimensions; the offsets live in
+        :math:`\\{-1, 0, 1\\}^{\\mathrm{ndim}}`.
+    connectivity
+        Neighbourhood order in :math:`[1, \\mathrm{ndim}]`: ``1`` selects
+        face neighbours only, while ``ndim`` includes every diagonal.
+
+    Returns
+    -------
+    list of tuple of int
+        The neighbour offsets, each a length-``ndim`` tuple of entries in
+        :math:`\\{-1, 0, 1\\}`, excluding the all-zero (self) offset.
+    """
     offsets = []
     for offset in itertools.product((-1, 0, 1), repeat=ndim):
         order = sum(abs(v) for v in offset)
@@ -126,7 +150,29 @@ def largest_connected_component(
 ) -> Bool[Array, '*spatial']:
     """Boolean mask of the single largest connected foreground region.
 
-    Empty input (no foreground) yields an all-``False`` mask.
+    Labels the connected foreground regions of ``mask`` (via
+    :func:`connected_components`) and keeps only the component with the
+    most voxels; ties are broken towards the lowest label.  An empty input
+    (no foreground) yields an all-``False`` mask.
+
+    Parameters
+    ----------
+    mask
+        Boolean (or 0/1) array of shape ``(*spatial)``; non-zero entries
+        are foreground.
+    connectivity
+        Neighbourhood order in :math:`[1, \\mathrm{ndim}]`: ``1`` selects
+        face neighbours only, while ``ndim`` includes every diagonal.
+        Follows scipy's :math:`\\sum |\\mathrm{offset}| \\leq
+        \\mathrm{connectivity}` rule.
+
+    Returns
+    -------
+    Bool[Array, '*spatial']
+        Boolean array of the same shape as ``mask`` that is ``True`` only
+        on the single largest connected foreground component, and ``False``
+        everywhere else (including everywhere when ``mask`` has no
+        foreground).
     """
     labels = connected_components(mask, connectivity=connectivity)
     n = labels.size

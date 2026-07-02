@@ -3,9 +3,8 @@
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """Laplace-approximate marginal GLMM solvers -- the ``method='laplace'`` family.
 
-The scalar random-intercept Laplace fit and its r-dimensional random-slope lift
-(Fisher-scoring mode + determinant correction).  Split from the ``glmm`` monolith
-(audit O1).
+The scalar random-intercept Laplace fit and its ``r``-dimensional random-slope
+lift (Fisher-scoring mode plus determinant correction).
 """
 
 from __future__ import annotations
@@ -40,12 +39,48 @@ def _laplace_conditional_modes(
     p: int,
     n_mode: int,
 ) -> Tuple[Float[Array, 'q'], Float[Array, 'q'], Float[Array, 'N']]:
-    """Per-group conditional modes ``b_hat`` (+ the curvature ``sw`` and ``eta``).
+    """Per-group conditional modes :math:`\\hat b` with curvature and predictor.
 
-    Given the fixed effects and ``sigma_b^2`` (in ``theta = [beta, log
-    sigma_b^2]``), the mode of ``sum_i log p(y_i | beta, b_g) - b_g^2/(2
-    sigma_b^2)`` is found by per-group Newton (Fisher scoring), vectorised over
-    groups via ``segment_sum`` -- ``O(N)``, no random-effect-wide system.
+    Given the fixed effects and the random-intercept variance
+    :math:`\\sigma_b^2` (packed as ``theta = [beta, log_sigma_b_squared]``),
+    this locates the per-group mode of
+    :math:`\\sum_i \\log p(y_i \\mid \\beta, b_g) - b_g^2 / (2\\sigma_b^2)`
+    by per-group Newton iteration (Fisher scoring), vectorised over groups via
+    ``segment_sum``.  This costs :math:`O(N)` and never forms a random-effect-wide
+    linear system.
+
+    Parameters
+    ----------
+    theta
+        ``(p + 1,)`` parameter vector ``[beta, log_sigma_b_squared]``: the first
+        ``p`` entries are the fixed-effect coefficients :math:`\\beta`, the last is
+        :math:`\\log \\sigma_b^2`.
+    y
+        ``(N,)`` response vector.
+    X
+        ``(N, p)`` fixed-effect design matrix.
+    group
+        ``(N,)`` integer group (grouping-factor level) index for each observation,
+        with values in ``[0, n_groups)``.
+    n_groups
+        Number of grouping-factor levels ``q``.
+    family
+        Exponential-family specification providing the link, inverse link,
+        variance function and derivative used in Fisher scoring.
+    p
+        Number of fixed-effect columns (length of :math:`\\beta`).
+    n_mode
+        Number of inner Newton (Fisher-scoring) steps used to locate the modes.
+
+    Returns
+    -------
+    b : Float[Array, 'q']
+        ``(q,)`` per-group conditional modes :math:`\\hat b`.
+    sw : Float[Array, 'q']
+        ``(q,)`` per-group Fisher curvature :math:`\\sum_i w_i` at the mode
+        (the observation-weight sum :math:`-\\ell''` per group).
+    eta : Float[Array, 'N']
+        ``(N,)`` linear predictor :math:`\\eta` evaluated at the modes.
     """
     beta = theta[:p]
     sb2 = jnp.exp(theta[p])
@@ -91,10 +126,37 @@ def _laplace_nll(
 ) -> Float[Array, '']:
     """Laplace-approximate marginal negative log-likelihood at ``theta``.
 
-    ``-sum_g [ ell_g(b_hat) - b_hat^2/(2 sigma_b^2) - 0.5 log sigma_b^2
-    - 0.5 log(sum_i w_i + 1/sigma_b^2) ]`` -- the Laplace approximation to the
-    random-effect integral (matches Gauss-Hermite to the approximation order, and
-    corrects the PQL attenuation for binary / low-count responses).
+    Evaluates
+    :math:`-\\sum_g [\\, \\ell_g(\\hat b) - \\hat b^2 / (2\\sigma_b^2)
+    - 0.5\\log\\sigma_b^2 - 0.5\\log(\\sum_i w_i + 1/\\sigma_b^2) \\,]`,
+    the Laplace approximation to the random-effect integral.  It matches
+    Gauss-Hermite quadrature to the order of the approximation and corrects the
+    penalised quasi-likelihood attenuation for binary and low-count responses.
+
+    Parameters
+    ----------
+    theta
+        ``(p + 1,)`` parameter vector ``[beta, log_sigma_b_squared]`` (see
+        :func:`_laplace_conditional_modes`).
+    y
+        ``(N,)`` response vector.
+    X
+        ``(N, p)`` fixed-effect design matrix.
+    group
+        ``(N,)`` integer group index for each observation, in ``[0, n_groups)``.
+    n_groups
+        Number of grouping-factor levels ``q``.
+    family
+        Exponential-family specification.
+    p
+        Number of fixed-effect columns.
+    n_mode
+        Number of inner Newton steps used to locate the conditional modes.
+
+    Returns
+    -------
+    Float[Array, '']
+        Scalar Laplace-approximate marginal negative log-likelihood.
     """
     sb2 = jnp.exp(theta[p])
     b, sw, eta = _laplace_conditional_modes(
@@ -130,8 +192,45 @@ def _glmm_laplace_one(
     Float[Array, ''],
     Float[Array, ''],
 ]:
-    """Single-element Laplace GLMM fit.  Returns ``(beta, blups, re_var,
-    deviance)``."""
+    """Single-element Laplace GLMM fit with a scalar random intercept.
+
+    Optimises the Laplace-approximate marginal negative log-likelihood
+    (:func:`_laplace_nll`) over ``theta = [beta, log_sigma_b_squared]`` by damped
+    Newton iteration, then recovers the fixed effects, the conditional-mode
+    random intercepts and the deviance for a single response vector.
+
+    Parameters
+    ----------
+    y
+        ``(N,)`` response vector for one element.
+    X
+        ``(N, p)`` fixed-effect design matrix.
+    group
+        ``(N,)`` integer group index for each observation, in ``[0, n_groups)``.
+    n_groups
+        Number of grouping-factor levels ``q``.
+    family
+        Exponential-family specification.
+    p
+        Number of fixed-effect columns.
+    n_mode
+        Number of inner Newton steps used to locate the conditional modes.
+    spec
+        Variance-component specification supplying the outer damped-Newton
+        keyword arguments.
+
+    Returns
+    -------
+    beta : Float[Array, 'p']
+        ``(p,)`` fixed-effect estimates :math:`\\hat\\beta`.
+    blups : Float[Array, 'q']
+        ``(q,)`` per-group random-intercept modes (the BLUPs).
+    re_var : Float[Array, '']
+        Scalar random-intercept variance :math:`\\sigma_b^2`.
+    deviance : Float[Array, '']
+        Scalar deviance :math:`-2\\log L_{\\mathrm{Laplace}}` (the ``glmer``
+        deviance) at the optimum.
+    """
 
     def nll(theta: Float[Array, 'p1']) -> Float[Array, '']:
         return _laplace_nll(theta, y, X, group, n_groups, family, p, n_mode)
@@ -160,7 +259,43 @@ def _glmm_laplace(
     damping: float,
     block: Optional[int],
 ) -> GLMMResult:
-    """Laplace GLMM over ``V`` elements (scalar random intercept)."""
+    """Laplace-approximate GLMM over ``V`` elements with a scalar random intercept.
+
+    Fits an independent Laplace-approximate random-intercept GLMM to each of the
+    ``V`` response rows in ``Y`` by mapping :func:`_glmm_laplace_one` over the
+    elements (optionally in blocks of ``block`` to bound peak memory) and packs
+    the per-element estimates into a single :class:`GLMMResult`.
+
+    Parameters
+    ----------
+    Y
+        ``(V, N)`` responses -- one length-``N`` response vector per element.
+    X
+        ``(N, p)`` fixed-effect design matrix, shared across elements.
+    group
+        ``(N,)`` integer group index for each observation, in ``[0, n_groups)``.
+    n_groups
+        Number of grouping-factor levels ``q``.
+    family
+        Exponential-family specification.
+    n_outer
+        Number of outer damped-Newton iterations over ``theta``.
+    n_mode
+        Number of inner Newton steps used to locate the conditional modes.
+    damping
+        Levenberg-style damping factor for the outer Newton optimiser.
+    block
+        Optional element-block size for :func:`blocked_vmap`; ``None`` maps over
+        all ``V`` elements at once.
+
+    Returns
+    -------
+    GLMMResult
+        Per-element fit with ``tier='laplace'``.  ``re_var`` is reshaped to
+        ``(V, 1, 1)`` for the uniform random-effect covariance layout,
+        ``dispersion`` and ``edf_total`` are placeholders (ones, and the
+        fixed-effect count ``p``, respectively).
+    """
     p = X.shape[-1]
     spec = VarCompSpec(n_iter=n_outer, damping=damping)
 
@@ -204,23 +339,64 @@ def _laplace_slope_modes(
     n_mode: int,
     diagonal: bool,
 ) -> Tuple[Float[Array, 'q r'], Float[Array, 'q r r'], Float[Array, 'N']]:
-    """Per-group conditional modes ``b_hat`` (r-vector) + curvature ``H`` + eta.
+    """Per-group conditional modes (``r``-vectors) with curvature and predictor.
 
-    The ``r``-dimensional lift of :func:`_laplace_conditional_modes`: given the
-    fixed effects and ``G`` (in ``theta = [beta, chol(G)]``), the mode of
-    ``sum_i log p(y_i | beta, b_g) - 0.5 b_g^T G^{-1} b_g`` is found by per-group
-    ``r x r`` Newton (Fisher scoring) -- gradient ``sum_i s_i z_i - G^{-1} b_g``,
-    curvature ``H_g = sum_i w_i z_i z_i^T + G^{-1}`` -- vectorised over groups via
-    ``segment_sum`` of the per-observation outer products.  Returns the modes, the
-    per-group curvature ``H_g`` at the mode (for the determinant correction), and
-    the linear predictor.
+    The ``r``-dimensional lift of :func:`_laplace_conditional_modes`.  Given the
+    fixed effects and the random-effect covariance :math:`G` (packed as
+    ``theta = [beta, chol_G]`` with the Cholesky factor of :math:`G`), it locates
+    the per-group mode of
+    :math:`\\sum_i \\log p(y_i \\mid \\beta, b_g) - 0.5\\, b_g^{\\top} G^{-1} b_g`
+    by per-group :math:`r \\times r` Newton iteration (Fisher scoring) --
+    gradient :math:`\\sum_i s_i z_i - G^{-1} b_g` and curvature
+    :math:`H_g = \\sum_i w_i z_i z_i^{\\top} + G^{-1}` -- vectorised over groups
+    via ``segment_sum`` of the per-observation outer products.
 
-    ``H_g`` uses the **expected** (Fisher) information ``w_i = (dmu/deta)^2 / V``,
-    not the observed Hessian ``-d^2 ell/db^2`` -- the deliberate ``glmer``-
-    consistent "Fisher-scoring Laplace".  For the canonical links (logit / log)
-    the two coincide; for a non-canonical link (probit / cloglog slope) they
-    differ at higher order, so this is an approximation choice, not the exact
+    The curvature :math:`H_g` uses the **expected** (Fisher) information
+    :math:`w_i = (d\\mu/d\\eta)^2 / V`, not the observed Hessian
+    :math:`-d^2\\ell/db^2` -- a deliberate, ``glmer``-consistent
+    "Fisher-scoring Laplace".  For canonical links (logit / log) the two
+    coincide; for a non-canonical link (probit / cloglog slope) they differ at
+    higher order, so this is an approximation choice, not the exact
     observed-information Laplace.
+
+    Parameters
+    ----------
+    theta
+        ``(p + m,)`` parameter vector ``[beta, chol_G]``: the first ``p`` entries
+        are the fixed-effect coefficients, the remaining ``m`` entries
+        parametrise the Cholesky factor of :math:`G` (``m = r`` for a diagonal
+        structure, ``r(r+1)/2`` for an unstructured one).
+    y
+        ``(N,)`` response vector.
+    X
+        ``(N, p)`` fixed-effect design matrix.
+    z
+        ``(N, r)`` random-effect design matrix (the slope covariates).
+    group
+        ``(N,)`` integer group index for each observation, in ``[0, n_groups)``.
+    n_groups
+        Number of grouping-factor levels ``q``.
+    family
+        Exponential-family specification.
+    p
+        Number of fixed-effect columns.
+    r
+        Number of random-effect columns (random-slope dimension).
+    n_mode
+        Number of inner Newton (Fisher-scoring) steps used to locate the modes.
+    diagonal
+        Whether :math:`G` is parametrised as diagonal (``True``) or unstructured
+        (``False``), controlling how ``theta[p:]`` maps to the covariance.
+
+    Returns
+    -------
+    b : Float[Array, 'q r']
+        ``(q, r)`` per-group conditional-mode random-effect vectors.
+    h_mat : Float[Array, 'q r r']
+        ``(q, r, r)`` per-group Fisher curvature :math:`H_g` at the mode, used
+        for the Laplace determinant correction.
+    eta : Float[Array, 'N']
+        ``(N,)`` linear predictor :math:`\\eta` evaluated at the modes.
     """
 
     beta = theta[:p]
@@ -275,12 +451,46 @@ def _laplace_slope_nll(
     n_mode: int,
     diagonal: bool,
 ) -> Float[Array, '']:
-    """Laplace-approximate marginal NLL for a random slope.
+    """Laplace-approximate marginal negative log-likelihood for a random slope.
 
-    ``-sum_g [ ell_g(b_hat) - 0.5 b_hat^T G^{-1} b_hat - 0.5 logdet G
-    - 0.5 logdet H_g ]`` -- the ``r``-dimensional generalisation of the scalar
-    determinant correction (reduces to it at ``r = 1``: ``logdet G = log
-    sigma_b^2``, ``logdet H_g = log(sum_i w_i + 1/sigma_b^2)``).
+    Evaluates
+    :math:`-\\sum_g [\\, \\ell_g(\\hat b) - 0.5\\, \\hat b^{\\top} G^{-1} \\hat b
+    - 0.5\\log\\det G - 0.5\\log\\det H_g \\,]`, the ``r``-dimensional
+    generalisation of the scalar determinant correction.  It reduces to the
+    scalar case at :math:`r = 1`, where :math:`\\log\\det G = \\log\\sigma_b^2`
+    and :math:`\\log\\det H_g = \\log(\\sum_i w_i + 1/\\sigma_b^2)`.
+
+    Parameters
+    ----------
+    theta
+        ``(p + m,)`` parameter vector ``[beta, chol_G]`` (see
+        :func:`_laplace_slope_modes`).
+    y
+        ``(N,)`` response vector.
+    X
+        ``(N, p)`` fixed-effect design matrix.
+    z
+        ``(N, r)`` random-effect design matrix (the slope covariates).
+    group
+        ``(N,)`` integer group index for each observation, in ``[0, n_groups)``.
+    n_groups
+        Number of grouping-factor levels ``q``.
+    family
+        Exponential-family specification.
+    p
+        Number of fixed-effect columns.
+    r
+        Number of random-effect columns (random-slope dimension).
+    n_mode
+        Number of inner Newton steps used to locate the conditional modes.
+    diagonal
+        Whether :math:`G` is parametrised as diagonal (``True``) or unstructured
+        (``False``).
+
+    Returns
+    -------
+    Float[Array, '']
+        Scalar Laplace-approximate marginal negative log-likelihood.
     """
 
     g_inv, logdet_g = small_inv_logdet(
@@ -319,8 +529,52 @@ def _glmm_laplace_slope_one(
     Float[Array, 'r r'],
     Float[Array, ''],
 ]:
-    """Single-element Laplace random-slope GLMM fit.  Returns ``(beta, blups,
-    G, deviance)``."""
+    """Single-element Laplace random-slope GLMM fit.
+
+    Optimises the Laplace-approximate marginal negative log-likelihood
+    (:func:`_laplace_slope_nll`) over ``theta = [beta, chol_G]`` by damped Newton
+    iteration from an IRLS warm start for :math:`\\beta` and a small initial
+    :math:`G`, then recovers the fixed effects, the conditional-mode random
+    slopes, the fitted covariance and the deviance for a single response vector.
+
+    Parameters
+    ----------
+    y
+        ``(N,)`` response vector for one element.
+    X
+        ``(N, p)`` fixed-effect design matrix.
+    z
+        ``(N, r)`` random-effect design matrix (the slope covariates).
+    group
+        ``(N,)`` integer group index for each observation, in ``[0, n_groups)``.
+    n_groups
+        Number of grouping-factor levels ``q``.
+    family
+        Exponential-family specification.
+    p
+        Number of fixed-effect columns.
+    r
+        Number of random-effect columns (random-slope dimension).
+    n_mode
+        Number of inner Newton steps used to locate the conditional modes.
+    spec
+        Variance-component specification supplying the outer damped-Newton
+        keyword arguments and the IRLS warm-start ridge.
+    diagonal
+        Whether :math:`G` is parametrised as diagonal (``True``) or unstructured
+        (``False``).
+
+    Returns
+    -------
+    beta : Float[Array, 'p']
+        ``(p,)`` fixed-effect estimates :math:`\\hat\\beta`.
+    blups : Float[Array, 'q r']
+        ``(q, r)`` per-group random-slope modes (the BLUPs).
+    g_cov : Float[Array, 'r r']
+        ``(r, r)`` fitted random-effect covariance :math:`G`.
+    deviance : Float[Array, '']
+        Scalar deviance :math:`-2\\log L_{\\mathrm{Laplace}}` at the optimum.
+    """
     from .._irls import irls_warm_start
 
     def nll(theta: Float[Array, 'pm']) -> Float[Array, '']:
@@ -364,7 +618,48 @@ def _glmm_laplace_slope(
     diagonal: bool,
     block: Optional[int],
 ) -> GLMMResult:
-    """Laplace random-slope GLMM over ``V`` elements."""
+    """Laplace-approximate random-slope GLMM over ``V`` elements.
+
+    Fits an independent Laplace-approximate random-slope GLMM to each of the
+    ``V`` response rows in ``Y`` by mapping :func:`_glmm_laplace_slope_one` over
+    the elements (optionally in blocks of ``block``) and packs the per-element
+    estimates into a single :class:`GLMMResult`.
+
+    Parameters
+    ----------
+    Y
+        ``(V, N)`` responses -- one length-``N`` response vector per element.
+    X
+        ``(N, p)`` fixed-effect design matrix, shared across elements.
+    group
+        ``(N,)`` integer group index for each observation, in ``[0, n_groups)``.
+    n_groups
+        Number of grouping-factor levels ``q``.
+    z
+        ``(N, r)`` random-effect design matrix (the slope covariates).
+    family
+        Exponential-family specification.
+    n_outer
+        Number of outer damped-Newton iterations over ``theta``.
+    n_mode
+        Number of inner Newton steps used to locate the conditional modes.
+    damping
+        Levenberg-style damping factor for the outer Newton optimiser.
+    diagonal
+        Whether the random-effect covariance :math:`G` is parametrised as
+        diagonal (``True``) or unstructured (``False``).
+    block
+        Optional element-block size for :func:`blocked_vmap`; ``None`` maps over
+        all ``V`` elements at once.
+
+    Returns
+    -------
+    GLMMResult
+        Per-element fit with ``tier='laplace'``.  ``re_var`` carries the
+        ``(V, r, r)`` random-effect covariances (diagonal-valued when
+        ``diagonal`` is ``True``); ``dispersion`` and ``edf_total`` are
+        placeholders (ones, and the fixed-effect count ``p``, respectively).
+    """
     p = X.shape[-1]
     r = z.shape[-1]
     spec = VarCompSpec(n_iter=n_outer, damping=damping)

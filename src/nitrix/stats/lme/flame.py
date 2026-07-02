@@ -8,46 +8,52 @@ The model
 ---------
 
 At level 1, each subject's BOLD time series has been fit by a
-GLM, yielding a per-voxel estimate ``beta_i`` of the per-subject
+GLM, yielding a per-voxel estimate :math:`\\beta_i` of the per-subject
 effect (e.g., the activation magnitude on a task contrast) plus
-its within-subject standard error squared ``s_i^2`` (typically
+its within-subject standard error squared :math:`s_i^2` (typically
 the OLS residual variance from the level-1 fit).  These are the
 inputs.
 
-At level 2, the per-voxel group model is::
+At level 2, the per-voxel group model is
 
-    beta_i = X_group gamma + b_i + eps_i
-    b_i ~ N(0, sigma_b^2)        (between-subject variance, unknown)
-    eps_i ~ N(0, s_i^2)          (within-subject variance, known)
+.. math::
 
-So the total per-subject variance is ``sigma_b^2 + s_i^2`` --
-heteroscedastic by subject.  ``gamma`` is the group-level
+    \\beta_i &= X_{\\mathrm{group}}\\, \\gamma + b_i + \\epsilon_i \\\\
+    b_i &\\sim \\mathcal{N}(0, \\sigma_b^2)
+        \\quad \\text{(between-subject variance, unknown)} \\\\
+    \\epsilon_i &\\sim \\mathcal{N}(0, s_i^2)
+        \\quad \\text{(within-subject variance, known)}
+
+So the total per-subject variance is :math:`\\sigma_b^2 + s_i^2` --
+heteroscedastic by subject.  :math:`\\gamma` is the group-level
 fixed-effect vector.
 
 This is the **FSL FLAME** model (Beckmann, Jenkinson, Smith
-2003).  Only ``sigma_b^2`` is estimated; ``gamma`` is profiled
-out analytically; ``s_i^2`` is known.  The implementation is a
+2003).  Only :math:`\\sigma_b^2` is estimated; :math:`\\gamma` is profiled
+out analytically; :math:`s_i^2` is known.  The implementation is a
 **single-parameter REML**: Newton iteration on a scalar log-
-variance.  Avoids the identifiability problem of the generic
-two-parameter REML (where ``sigma_b^2`` and a free scaling on
-``var_within`` trade off).
+variance.  It avoids the identifiability problem of the generic
+two-parameter REML (where :math:`\\sigma_b^2` and a free scaling on
+the within-variance trade off).
 
 Computational structure
 -----------------------
 
-Per voxel, the covariance ``V_v = sigma_b^2 I + diag(s_v^2)`` is
+Per voxel, the covariance
+:math:`V_v = \\sigma_b^2 I + \\operatorname{diag}(s_v^2)` is
 naturally diagonal, so FLAME is the shared diagonalised-REML fit
-(``_varcomp``) with a single free component ``B = [ones]`` and a
-fixed per-coordinate ``offset = var_within`` (the known
-within-variance).  The fit makes **no per-voxel cuSOLVER call**:
-the fixed-effect algebra is closed-form for the dominant ``p in
-{1, 2}`` designs (the intercept ``p = 1`` is a scalar) and the REML
+with a single free component (an all-ones basis) and a
+fixed per-coordinate offset equal to the known within-variance.  The
+fit makes **no per-voxel cuSOLVER call**:
+the fixed-effect algebra is closed-form for the dominant :math:`p \\in
+\\{1, 2\\}` designs (the intercept :math:`p = 1` is a scalar) and the REML
 score / curvature are analytic (no second-order autodiff through a
-Cholesky).  That is what unblocks ``flame_two_level`` on the
-broken-cuSOLVER GPU and flattens its linear-in-``V`` compile.
+Cholesky).  That is what unblocks :func:`flame_two_level` on the
+broken-cuSOLVER GPU and flattens its compile time, which would otherwise
+grow linearly in the voxel count.
 
-Memory: ``Y`` (V, N) + ``var_within`` (V, N) + per-voxel
-parameters.  No ``(V, N, N)`` intermediate.
+Memory: the effect estimates and within-variances are each ``(V, N)``,
+plus per-voxel parameters.  There is no ``(V, N, N)`` intermediate.
 
 Reference
 ---------
@@ -72,12 +78,27 @@ __all__ = ['FLAMEResult', 'flame_two_level']
 _EPS = 1e-12
 
 
-def _huber_weight(
-    z: Float[Array, 'V N'], c: float
-) -> Float[Array, 'V N']:
-    """Huber down-weighting of a studentized residual ``z``: ``1`` for
-    ``|z| <= c``, else ``c / |z|`` (monotone, strictly positive -- never a hard
-    zero, so a down-weighted subject's inflated variance stays finite)."""
+def _huber_weight(z: Float[Array, 'V N'], c: float) -> Float[Array, 'V N']:
+    """Huber down-weighting of a studentized residual.
+
+    Returns :math:`1` where :math:`|z| \\le c` and :math:`c / |z|` otherwise.
+    The weight is monotone and strictly positive -- never a hard zero, so a
+    down-weighted subject's inflated variance stays finite.
+
+    Parameters
+    ----------
+    z
+        Studentized residuals, shape ``(V, N)`` (per voxel, per subject).
+    c
+        Huber tuning constant, the threshold on :math:`|z|` beyond which a
+        residual is down-weighted.
+
+    Returns
+    -------
+    Float[Array, 'V N']
+        Per-voxel, per-subject Huber weights in :math:`(0, 1]`, shape
+        ``(V, N)``.
+    """
     az = jnp.abs(z)
     return jnp.where(az <= c, 1.0, c / jnp.clip(az, _EPS, None))
 
@@ -87,11 +108,23 @@ def _huber_weight(
 class FLAMEResult:
     """Per-voxel FLAME fit output.
 
-    ``weights`` is the per-voxel, per-subject outlier-deweighting weight (audit
-    N4): all ``1`` for the standard FLAME fit (``robust=False``), and the
-    converged robust weights in ``(0, 1]`` for ``robust=True`` -- a value well
-    below ``1`` marks a subject whose level-1 estimate was down-weighted as an
-    outlier.
+    Attributes
+    ----------
+    sigma_b_sq
+        Per-voxel estimated between-subject variance
+        :math:`\\sigma_b^2`, shape ``(V,)``.
+    gamma_hat
+        Per-voxel group-level fixed-effect estimates :math:`\\gamma`,
+        shape ``(V, p)``.
+    log_lik
+        Per-voxel restricted log-likelihood at the fitted variance,
+        shape ``(V,)``.
+    weights
+        Per-voxel, per-subject outlier-deweighting weight, shape ``(V, N)``:
+        all ``1`` for the standard FLAME fit (``robust=False``), and the
+        converged robust weights in :math:`(0, 1]` for ``robust=True`` -- a
+        value well below ``1`` marks a subject whose level-1 estimate was
+        down-weighted as an outlier.
     """
 
     sigma_b_sq: Float[Array, 'V']
@@ -104,11 +137,23 @@ def _flame_default_log_init(
     beta: Float[Array, 'V N'],
     var_within: Float[Array, 'V N'],
 ) -> Float[Array, 'V']:
-    """Initial guess for ``log(sigma_b^2)`` per voxel.
+    """Initial guess for :math:`\\log(\\sigma_b^2)` per voxel.
 
-    Heuristic: residual variance of ``beta`` after the per-subject
-    weighted mean, minus the mean within-variance.  Clamped to
-    a small positive floor so the log is finite.
+    Uses a method-of-moments heuristic: the empirical between-subject
+    variance of ``beta`` about its per-voxel mean, minus the mean
+    within-variance, clamped to a small positive floor so the log is finite.
+
+    Parameters
+    ----------
+    beta
+        Per-voxel, per-subject level-1 effect estimates, shape ``(V, N)``.
+    var_within
+        Per-voxel, per-subject within-subject variances, shape ``(V, N)``.
+
+    Returns
+    -------
+    Float[Array, 'V']
+        Per-voxel initial value of :math:`\\log(\\sigma_b^2)`, shape ``(V,)``.
     """
     # Empirical between-subject variance (per voxel, ignoring X)
     beta_mean = jnp.mean(beta, axis=-1, keepdims=True)
@@ -146,46 +191,57 @@ def flame_two_level(
         Group-level fixed-effect design, ``(N, p)``.  Shared across
         voxels.
     log_sigma_b_sq_init
-        Per-voxel initial ``log(sigma_b^2)``.  Default heuristic:
-        method-of-moments residual variance minus mean within-
-        variance.
+        Per-voxel initial value of :math:`\\log(\\sigma_b^2)`, shape ``(V,)``.
+        Default heuristic: method-of-moments residual variance minus mean
+        within-variance.
     n_iter
-        Newton iterations.  Default ``30``.
+        Number of Newton iterations.  Default ``30``.
     damping
-        Levenberg guard on the (scalar) average-information curvature.
+        Levenberg guard added to the (scalar) average-information curvature.
     block
         Optional voxel-block size bounding peak memory on brain-scale
-        ``V`` (see ``reml_fit``).  ``None`` (default) is a single
-        ``vmap`` over all voxels.
+        ``V`` (see :func:`reml_fit`).  ``None`` (default) maps over all voxels
+        in a single pass.
     robust
-        ``True`` enables **outlier deweighting** (audit N4 -- the FLAMEO-style
-        robust group analysis, FSL's FLAME1 -> FLAME-outlier): a subject whose
+        ``True`` enables outlier deweighting (the FLAMEO-style robust group
+        analysis, FSL's FLAME1 followed by FLAME-outlier): a subject whose
         level-1 estimate is an outlier relative to the group model has its
-        within-variance inflated (``s_i^2 / w_i``), down-weighting it in the
-        precision-weighted group fit.  A deterministic Huber-IRLS deweighting
-        (not the full Woolrich 2008 Bayesian outlier-mixture MCMC); the converged
-        per-subject weights are returned in ``result.weights``.
+        within-variance inflated by :math:`s_i^2 / w_i`, down-weighting it in
+        the precision-weighted group fit.  This is a deterministic Huber-IRLS
+        deweighting (not the full Bayesian outlier-mixture inference of Woolrich
+        2008); the converged per-subject weights are returned in
+        :attr:`FLAMEResult.weights`.
     n_deweight
         Number of deweighting (IRLS reweight) steps when ``robust=True``.
     robust_c
-        Huber tuning constant on the studentized residual (default ``1.345`` --
-        95% normal-efficiency); smaller is more aggressive at down-weighting.
+        Huber tuning constant on the studentized residual (default ``1.345``,
+        giving 95% efficiency under normality); smaller is more aggressive at
+        down-weighting.
 
     Returns
     -------
-    ``FLAMEResult`` with ``sigma_b_sq``, ``gamma_hat``, ``log_lik``, and the
-    per-subject ``weights`` (all ``1`` unless ``robust=True``).
+    FLAMEResult
+        A :class:`FLAMEResult` carrying the per-voxel between-subject variance
+        ``sigma_b_sq`` (shape ``(V,)``), the group fixed-effect estimates
+        ``gamma_hat`` (shape ``(V, p)``), the per-voxel restricted
+        log-likelihood ``log_lik`` (shape ``(V,)``), and the per-subject
+        ``weights`` (shape ``(V, N)``; all ``1`` unless ``robust=True``).
 
     Notes
     -----
-    Single-parameter REML: only ``sigma_b^2`` is estimated;
+    Single-parameter REML: only :math:`\\sigma_b^2` is estimated;
     ``var_within`` is fixed at the user-supplied values.  This
     avoids the identifiability problem of the two-parameter
     relaxation (where the model can absorb a free scaling of
-    ``var_within`` into ``sigma_b^2``).  Implemented as the shared
-    ``_varcomp`` diagonalised-REML fit with one free component
-    (``B = [ones]``) and ``offset = var_within`` -- no per-voxel
-    cuSOLVER call, so it runs on the broken-cuSOLVER GPU.
+    ``var_within`` into :math:`\\sigma_b^2`).  It is implemented as the shared
+    diagonalised-REML fit with one free (all-ones) component and a fixed
+    per-voxel offset equal to ``var_within`` -- no per-voxel cuSOLVER call,
+    so it runs on the broken-cuSOLVER GPU.
+
+    References
+    ----------
+    Woolrich, M. (2008).  Robust group analysis using outlier inference.
+    NeuroImage 41, 286-301.  :doi:`10.1016/j.neuroimage.2008.02.042`
     """
     if beta_subject.shape != var_within.shape:
         raise ValueError(
@@ -231,7 +287,9 @@ def flame_two_level(
             sigma_b_sq = jnp.exp(theta[:, 0])  # (V,)
             fitted = jnp.einsum('np,vp->vn', X_group, gamma_hat)  # (V, N)
             v_total = sigma_b_sq[:, None] + var_within  # (V, N) -- true scale
-            z = (beta_subject - fitted) / jnp.sqrt(jnp.clip(v_total, _EPS, None))
+            z = (beta_subject - fitted) / jnp.sqrt(
+                jnp.clip(v_total, _EPS, None)
+            )
             weights = _huber_weight(z, robust_c)
 
     # Reported estimate: a fit consistent with the (converged) weights.

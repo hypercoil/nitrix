@@ -1,0 +1,39 @@
+---
+title: "rigid_exp"
+generated: true
+description: "Homogeneous rigid transform from its Lie parameters."
+---
+
+[‹ back to `nitrix.geometry.transform`](../nitrix-geometry-transform.qmd)
+
+<!-- nitrix:gen sig:rigid_exp -->
+```python
+rigid_exp(params: Float[Array, '... p'], *, ndim: int) -> Float[Array, '... d1 d1']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:rigid_exp -->
+Homogeneous rigid transform from its Lie parameters.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:rigid_exp -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `params` | `Float` | `...` × `p` | — | `(..., p)` with `p = 3` for `ndim == 2` ($\theta, t_x, t_y$) or `p = 6` for `ndim == 3` ($\omega_x, \omega_y, \omega_z, t_x, t_y, t_z$). $\omega$ is the axis-angle rotation vector; the translation is applied directly. |
+| `ndim` | `int` | — | — | Spatial dimensionality (2 or 3). |
+
+**Returns** `Float` — shape `...` × `d1` × `d1`. Homogeneous matrix, `(..., ndim + 1, ndim + 1)`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:rigid_exp -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `d1` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

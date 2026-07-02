@@ -1,0 +1,51 @@
+---
+title: "iir_filter"
+generated: true
+description: "Recursive Butterworth IIR filter (design + apply)."
+---
+
+[‹ back to `nitrix.signal.filter`](../nitrix-signal-filter.qmd)
+
+*Re-exported here; defined in `nitrix.signal._iir`.*
+
+<!-- nitrix:gen sig:iir_filter -->
+```python
+iir_filter(X: Num[Array, '... obs'], *, fs: float = 1.0, btype: _BType, lo: Optional[float] = None, hi: Optional[float] = None, order: int = 2, zero_phase: bool = True, driver: _Driver = 'auto', impulse_atol: float = 1e-12, axis: int = -1) -> Num[Array, '... obs']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:iir_filter -->
+Recursive Butterworth IIR filter (design + apply).
+
+Convenience wrapper: designs a Butterworth `sos`
+([`butterworth_sos`](../nitrix-signal-filter/butterworth_sos.qmd)) and applies it.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:iir_filter -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X` | `Num` | `...` × `obs` | — | Signal; filtered along `axis` (default trailing time axis). |
+| `fs` | `float` | — | `1.0` | Sampling frequency in Hz (`1 / TR`). |
+| `btype` | `_BType` | — | — | `'lowpass'` / `'highpass'` / `'bandpass'` / `'bandstop'`. |
+| `lo` | `Optional[float]` | — | `None` | Cut-offs in Hz. `'lowpass'` uses `hi`; `'highpass'` uses `lo`; band types use both (`lo < hi`). |
+| `hi` | `Optional[float]` | — | `None` | Cut-offs in Hz. `'lowpass'` uses `hi`; `'highpass'` uses `lo`; band types use both (`lo < hi`). |
+| `order` | `int` | — | `2` | Butterworth order. |
+| `zero_phase` | `bool` | — | `True` | `True` (default) -- forward-backward [`sosfiltfilt`](../nitrix-signal-filter/sosfiltfilt.qmd) (zero phase, squared magnitude, the fMRI default). `False` -- single causal forward pass ([`sosfilt`](../nitrix-signal-filter/sosfilt.qmd)); preserves causality but imposes the Butterworth phase delay. |
+| `driver` | `_Driver` | — | `'auto'` | Numerical variant for both the causal (`zero_phase=False`) and zero-phase (`zero_phase=True`) paths: `'auto'` (default; `'fft'` on GPU, `'scan'` on CPU -- see [`sosfilt`](../nitrix-signal-filter/sosfilt.qmd)) or a forced `'fft'` / `'scan'` / `'associative'`. |
+| `impulse_atol` | `float` | — | `1e-12` | FFT-engine impulse-response truncation tolerance (see [`sosfilt`](../nitrix-signal-filter/sosfilt.qmd)). |
+| `axis` | `int` | — | `-1` | Axis of `X` along which to filter (default `-1`, the trailing time axis). |
+
+**Returns** `Num` — shape `...` × `obs`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:iir_filter -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

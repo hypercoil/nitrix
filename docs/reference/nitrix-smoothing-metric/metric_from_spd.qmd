@@ -1,0 +1,52 @@
+---
+title: "metric_from_spd"
+generated: true
+description: "Factor an explicit SPD metric $M$ into a [`FactorMetric`](../nitrix-smoothing-metric/FactorMetric.qmd)."
+---
+
+[‹ back to `nitrix.smoothing.metric`](../nitrix-smoothing-metric.qmd)
+
+<!-- nitrix:gen sig:metric_from_spd -->
+```python
+metric_from_spd(spd: Float[Array, 'd_f d_f']) -> FactorMetric
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:metric_from_spd -->
+Factor an explicit SPD metric $M$ into a [`FactorMetric`](../nitrix-smoothing-metric/FactorMetric.qmd).
+
+Use when the metric is naturally expressed as a full SPD matrix
+(a learned or estimated precision over feature space) rather than
+as a factor.  Returns a [`FactorMetric`](../nitrix-smoothing-metric/FactorMetric.qmd) holding the
+lower-triangular Cholesky factor $L$ with
+$M = L L^{\top}$, so `FactorMetric.project` on a
+difference $d$ yields `d @ L` and reproduces
+$d^{\top} M d$ exactly.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:metric_from_spd -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `spd` | `Float` | `d_f` × `d_f` | — | Symmetric positive-definite metric $M$, shape $(d_f, d_f)$. |
+
+**Returns** `FactorMetric`. A [`FactorMetric`](../nitrix-smoothing-metric/FactorMetric.qmd) with `factor = cholesky(spd)`, shape $(d_f, d_f)$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:metric_from_spd -->
+::: {.callout-note}
+Numerical conditioning of $M$ is the caller's responsibility;
+[`nitrix.linalg`](../nitrix-linalg.qmd) provides reconditioning helpers if a
+near-singular metric must be regularised before factoring.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:metric_from_spd -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `d_f` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

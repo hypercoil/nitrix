@@ -1,0 +1,62 @@
+---
+title: "deform_to_sdf"
+generated: true
+description: "Advance a mesh's vertices along their normals onto a target SDF zero-set."
+---
+
+[‹ back to `nitrix.geometry.surface`](../nitrix-geometry-surface.qmd)
+
+<!-- nitrix:gen sig:deform_to_sdf -->
+```python
+deform_to_sdf(mesh: Mesh, sdf: Float[Array, 'x y z'], *, n_iterations: int = 50, step: float = 0.2, smooth_weight: float = 0.1, spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0), mode: BoundaryMode = 'nearest', cval: float = 0.0) -> Mesh
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:deform_to_sdf -->
+Advance a mesh's vertices along their normals onto a target SDF zero-set.
+
+The recommended *geometry-light* surface mover: each iteration samples the
+signed-distance field at the current vertices, steps every vertex a
+fraction `step` of its local SDF value back along its (outward) normal
+-- $v \leftarrow v - \mathrm{step} \cdot \mathrm{sdf}(v) \cdot n$
+-- then applies a Laplacian-smoothing fraction.  Deforming e.g. a white
+surface outward onto a pial SDF this way **preserves vertex correspondence
+and inherits genus-0** (the topology / `faces` never change -- no
+re-tessellation, no topology correction), and correspondence cortical
+thickness falls out for free.
+
+A jitted `lax.fori_loop` of pure-JAX ops ([`sample_at_points`](../nitrix-geometry-grid/sample_at_points.qmd) +
+`compute_vertex_normals` + `mesh_laplacian_smooth`), so it is
+**fully differentiable** with respect to both the `sdf` and the initial
+vertices -- usable inside a learned-refinement loss.  Regularisation is
+in-loop and jittable only: no host-side self-intersection guard (run
+[`remove_self_intersections`](../nitrix-geometry-intersection/remove_self_intersections.qmd) as a post-hoc cleanup if needed).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:deform_to_sdf -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mesh` | `Mesh` | — | — | Genus-0 starting mesh (e.g. a white surface). |
+| `sdf` | `Float` | `x` × `y` × `z` | — | Target signed-distance volume `(X, Y, Z)` (negative inside), in the same physical frame as the mesh (sampled at `vertices / spacing`). |
+| `n_iterations` | `int` | — | `50` | Number of march iterations (static). |
+| `step` | `float` | — | `0.2` | Per-iteration fraction of the local SDF value to move (`0 < step <= 1`); smaller is more stable. |
+| `smooth_weight` | `float` | — | `0.1` | Laplacian-smoothing fraction applied each iteration (`0` = none). |
+| `spacing` | `Tuple[float, float, float]` | — | `(1.0, 1.0, 1.0)` | Per-axis voxel size relating vertex physical coordinates to `sdf` index space. |
+| `mode` | `BoundaryMode` | — | `'nearest'` | Out-of-bounds boundary mode for the SDF sample (default `'nearest'` edge-clamp -- sensible for marching, so a vertex stepping outside the volume reads the border distance rather than a zero-fill cliff). This is the *boundary* mode; the interpolation kernel stays `Linear` (so the differentiability claim holds). |
+| `cval` | `float` | — | `0.0` | Fill value for `mode='constant'`. |
+
+**Returns** `Mesh`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:deform_to_sdf -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `x` | *(undocumented — add to `_dimensions.yml`)* |
+| `y` | *(undocumented — add to `_dimensions.yml`)* |
+| `z` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

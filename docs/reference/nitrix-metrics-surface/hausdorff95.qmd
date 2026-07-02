@@ -1,0 +1,46 @@
+---
+title: "hausdorff95"
+generated: true
+description: "95th-percentile symmetric surface distance (MONAI `percentile=95`)."
+---
+
+[‹ back to `nitrix.metrics.surface`](../nitrix-metrics-surface.qmd)
+
+<!-- nitrix:gen sig:hausdorff95 -->
+```python
+hausdorff95(pred: Bool[Array, '*spatial'], target: Bool[Array, '*spatial'], *, spacing: _Spacing = None, backend: Backend = 'auto') -> Float[Array, '']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:hausdorff95 -->
+95th-percentile symmetric surface distance (MONAI `percentile=95`).
+
+Takes the maximum over the two directions of the 95th-percentile directed
+surface distance:
+$\max(Q_{95}(d(S_{\text{pred}} \to S_{\text{target}})),
+Q_{95}(d(S_{\text{target}} \to S_{\text{pred}})))$, where
+$S_{\ast}$ are the connectivity-1 surfaces and the percentile uses
+linear interpolation (the `numpy` / `torch.quantile` default).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:hausdorff95 -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `pred` | `Bool` | `*spatial` | — | Binary masks (any non-zero is foreground), of the same spatial shape. |
+| `target` | `Bool` | `*spatial` | — | Binary masks (any non-zero is foreground), of the same spatial shape. |
+| `spacing` | `_Spacing` | — | `None` | Per-axis voxel size (scalar or one per axis); `None` uses unit spacing. The result is in these units. |
+| `backend` | `Backend` | — | `'auto'` | Execution engine for the underlying [`erode`](../nitrix-morphology/erode.qmd) and Euclidean distance transform (`"auto"` / `"jax"` / `"pallas-cuda"`). |
+
+**Returns** `Float` — shape —. Scalar HD95 in `spacing` units; $+\infty$ if either mask has no surface (is empty), matching MONAI. Non-differentiable (a reporting metric).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:hausdorff95 -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

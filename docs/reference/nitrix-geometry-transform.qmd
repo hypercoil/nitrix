@@ -1,0 +1,67 @@
+---
+title: "nitrix.geometry.transform"
+generated: true
+signature-hash: e6a2cc41aec5e086
+description: "Lie-group parametrisation of rigid and affine transforms."
+listing:
+  id: nitrix-geometry-transform-symbols
+  contents: "nitrix-geometry-transform/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.geometry.transform`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Lie-group parametrisation of rigid and affine transforms.
+
+Registration is optimisation on a transform group; this module supplies
+the chart between a flat parameter vector (what the Gauss-Newton /
+Levenberg-Marquardt optimiser moves) and a homogeneous transform matrix
+(what [`affine_grid`](nitrix-geometry-transform/affine_grid.qmd) + [`spatial_transform`](nitrix-geometry-grid/spatial_transform.qmd) apply).
+
+- **Rigid** ([`rigid_exp`](nitrix-geometry-transform/rigid_exp.qmd) / [`rigid_log`](nitrix-geometry-transform/rigid_log.qmd)) -- rotation from the
+  axis-angle ($\mathfrak{so}(n)$) exponential in **closed form**
+  (Rodrigues in 3-D, the planar rotation in 2-D) plus a **direct**
+  translation.  Closed-form rotation is GPU-native (no cuSolver), so the
+  rigid optimiser's hot loop stays on-device.  Parameter order: 3-D
+  $(\omega_x, \omega_y, \omega_z, t_x, t_y, t_z)$ (6); 2-D
+  $(\theta, t_x, t_y)$ (3).
+- **Affine** ([`affine_exp`](nitrix-geometry-transform/affine_exp.qmd)) -- the linear block is
+  $\exp(A)$ of a general $\mathfrak{gl}(n)$ generator
+  (guaranteeing an invertible, orientation-preserving $\det > 0$
+  map) plus a direct translation.  Parameter order: $n^2$ linear
+  entries (row-major $A$) then $n$ translation.  Uses
+  `matrix_exp`.
+
+[`apply_affine`](nitrix-geometry-transform/apply_affine.qmd) / [`affine_grid`](nitrix-geometry-transform/affine_grid.qmd) turn a homogeneous matrix into
+the absolute sample coordinates [`spatial_transform`](nitrix-geometry-grid/spatial_transform.qmd) consumes, with
+an optional rotation/scaling `center` (registration rotates about the
+image centre, not the voxel origin).
+
+Coordinates are in index space, matching [`identity_grid`](nitrix-geometry-grid/identity_grid.qmd)
+(`grid[i] == i`).  Supported spatial ranks: 2 and 3.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `d1` | *(undocumented — add to `_dimensions.yml`)* |
+| `d` | spatial dimension (2 or 3) |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-geometry-transform-symbols}
+:::

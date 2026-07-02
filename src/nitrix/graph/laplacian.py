@@ -7,26 +7,27 @@ Graph Laplacian variants and the shared sparse-matvec machinery.
 This module is intentionally pure "graph Laplacians": the
 modularity-related operators live in ``community.py`` because their
 *role* is community detection even though their algebraic shape
-overlaps with Laplacians.  The split keeps the ``laplacian`` import
+overlaps with Laplacians.  The split keeps the Laplacian import
 graph free of community-detection concerns.
 
-Three Laplacian variants exposed via ``laplacian(A, normalisation=...)``:
+Three Laplacian variants exposed via :func:`laplacian`
+(selected by ``normalisation=...``):
 
-- ``"combinatorial"``  -- ``L = D - A``.  Eigenvalues unbounded.
-- ``"symmetric"``      -- ``L = I - D^(-1/2) A D^(-1/2)``.  Symmetric,
-  PSD, eigenvalues in ``[0, 2]``; the canonical "normalised
-  Laplacian" used in Laplacian-eigenmap embeddings.
-- ``"random_walk"``    -- ``L = I - D^(-1) A``.  Not symmetric in
+- ``"combinatorial"`` -- :math:`L = D - A`.  Eigenvalues unbounded.
+- ``"symmetric"`` -- :math:`L = I - D^{-1/2} A D^{-1/2}`.  Symmetric,
+  positive semidefinite, eigenvalues in :math:`[0, 2]`; the canonical
+  "normalised Laplacian" used in Laplacian-eigenmap embeddings.
+- ``"random_walk"`` -- :math:`L = I - D^{-1} A`.  Not symmetric in
   general but shares the spectrum of ``"symmetric"`` and is the
   generator of the random walk on the graph.
 
-Multi-format support: ``degree_vector`` and ``laplacian_matvec``
-accept dense ``(..., n, n)``, ``ELL``, or ``SectionedELL`` inputs.
-The explicit ``laplacian(A)`` returns dense -- by definition,
-since the symmetric Laplacian's diagonal is generally non-zero and
-doesn't fit the ELL pattern of the input.  For *operator* use
-(eigenvalue solvers, etc.) call ``laplacian_matvec`` which never
-materialises the dense matrix.
+Multi-format support: :func:`degree_vector` and :func:`laplacian_matvec`
+accept dense ``(..., n, n)``, :class:`~nitrix.sparse.ELL`, or
+:class:`~nitrix.sparse.SectionedELL` inputs.  The explicit
+:func:`laplacian` returns dense -- by definition, since the symmetric
+Laplacian's diagonal is generally non-zero and does not fit the ELL
+pattern of the input.  For *operator* use (eigenvalue solvers, etc.)
+call :func:`laplacian_matvec`, which never materialises the dense matrix.
 """
 
 from __future__ import annotations
@@ -74,7 +75,22 @@ def _delete_diagonal(A: Num[Array, '... n n']) -> Num[Array, '... n n']:
 
 
 def _safe_max(x: Num[Array, '...']) -> Num[Array, '...']:
-    """``max`` clipped to at least 1, used to normalise unbounded logits."""
+    """Maximum over the trailing two axes, clipped to be at least one.
+
+    Used to normalise unbounded logits by a stable scale.
+
+    Parameters
+    ----------
+    x
+        Input array, ``(...)``.  The reduction is taken over the last
+        two axes.
+
+    Returns
+    -------
+    Num[Array, '...']
+        The maximum of ``x`` over its trailing two axes, floored at
+        ``1.0``, with those axes kept as singletons for broadcasting.
+    """
     return jnp.maximum(1.0, x.max(axis=(-1, -2), keepdims=True))
 
 
@@ -88,17 +104,35 @@ def _ell_matvec(
     *,
     promise_symmetry: bool = True,
 ) -> Num[Array, '... n k']:
-    """``A @ x`` for ELL / SectionedELL.
+    """Sparse matrix-block product :math:`A x` for ELL / SectionedELL.
 
     Dispatched once to keep callers simple.  Always uses the REAL
     semiring; for other algebras the caller should use
-    ``semiring_ell_matmul`` / ``sectioned_semiring_ell_matmul``
-    directly.
+    :func:`~nitrix.semiring.semiring_ell_matmul` /
+    :func:`~nitrix.sparse.sectioned_semiring_ell_matmul` directly.
 
     When ``promise_symmetry`` is ``False`` the symmetric part
-    ``½(A x + Aᵀ x)`` is applied instead of the bare ``A x`` -- for
-    adjacencies whose stored pattern is not symmetric (e.g. top-k
-    affinity sparsification).  The operator must be square.
+    :math:`\\tfrac{1}{2}(A x + A^{\\top} x)` is applied instead of the bare
+    :math:`A x` -- for adjacencies whose stored pattern is not symmetric
+    (e.g. top-k affinity sparsification).  The operator must be square.
+
+    Parameters
+    ----------
+    A
+        Sparse adjacency, an :class:`~nitrix.sparse.ELL` or
+        :class:`~nitrix.sparse.SectionedELL` operator.
+    x
+        Block of vectors to apply the operator to, ``(..., n, k)``.
+    promise_symmetry
+        When ``True`` (default) the stored operator is applied directly.
+        When ``False`` the symmetric part
+        :math:`\\tfrac{1}{2}(A x + A^{\\top} x)` is applied instead.
+
+    Returns
+    -------
+    Num[Array, '... n k']
+        The product :math:`A x` (or its symmetric part when
+        ``promise_symmetry`` is ``False``), shape ``(..., n, k)``.
     """
     if isinstance(A, ELL):
         Ax = semiring_ell_matmul(
@@ -133,16 +167,28 @@ def _ell_matvec(
 
 
 def degree_vector(A: _GraphInput) -> Num[Array, '... n']:
-    """Per-node degree (row sum).
+    """Per-node degree (row sum) of an adjacency operator.
 
-    For an ELL adjacency, this is ``A.values.sum(-1)`` (pad
-    positions contribute the identity ``0``).  For SectionedELL,
-    we sum each bucket and scatter back to the original row order.
+    For an :class:`~nitrix.sparse.ELL` adjacency this is the sum of the
+    stored values along the last axis (pad positions contribute the
+    additive identity ``0``).  For :class:`~nitrix.sparse.SectionedELL`,
+    each bucket is summed and scattered back to the original row order.
+    For dense ``A`` it is the row sum ``A.sum(-1)``.
 
-    For directed graphs (asymmetric ``A``) this returns the
-    out-degree; the in-degree is ``A.sum(-2)`` for dense ``A`` and
-    ``semiring_ell_rmatvec(values, indices, ones, n_cols=n)`` (the
-    additive ELL adjoint applied to the ones vector) for sparse inputs.
+    For directed graphs (asymmetric ``A``) this returns the out-degree;
+    the corresponding in-degree is given by :func:`in_degree_vector`.
+
+    Parameters
+    ----------
+    A
+        Adjacency operator: dense ``(..., n, n)``,
+        :class:`~nitrix.sparse.ELL`, or
+        :class:`~nitrix.sparse.SectionedELL`.
+
+    Returns
+    -------
+    Num[Array, '... n']
+        Per-node (out-)degree, shape ``(..., n)``.
     """
     if isinstance(A, ELL):
         return A.values.sum(axis=-1)
@@ -157,14 +203,29 @@ def degree_vector(A: _GraphInput) -> Num[Array, '... n']:
 
 
 def in_degree_vector(A: _GraphInput) -> Num[Array, '... n']:
-    """Per-node *in*-degree (column sum) -- the adjoint of ``degree_vector``.
+    """Per-node in-degree (column sum) -- the adjoint of :func:`degree_vector`.
 
-    For an asymmetric ``A`` this is the column sum ``Σ_i A_ij``; it equals the
-    (row-sum) out-degree iff ``A`` is symmetric.  Computed without
-    materialising ``Aᵀ``: dense ``A.sum(-2)``; ELL / SectionedELL via the
-    additive adjoint matvec applied to the ones vector (``Aᵀ 1``) -- one
-    ``O(nnz)`` pass over the stored sparsity pattern (the same adjoint the
-    spectral solvers use for the ``½(A x + Aᵀ x)`` symmetric matvec).
+    For an asymmetric ``A`` this is the column sum
+    :math:`\\sum_i A_{ij}`; it equals the (row-sum) out-degree if and only
+    if ``A`` is symmetric.  Computed without materialising
+    :math:`A^{\\top}`: dense ``A.sum(-2)``;
+    :class:`~nitrix.sparse.ELL` / :class:`~nitrix.sparse.SectionedELL` via
+    the additive adjoint matvec applied to the ones vector
+    (:math:`A^{\\top} \\mathbf{1}`) -- one ``O(nnz)`` pass over the stored
+    sparsity pattern (the same adjoint the spectral solvers use for the
+    :math:`\\tfrac{1}{2}(A x + A^{\\top} x)` symmetric matvec).
+
+    Parameters
+    ----------
+    A
+        Adjacency operator: dense ``(..., n, n)``,
+        :class:`~nitrix.sparse.ELL`, or
+        :class:`~nitrix.sparse.SectionedELL`.
+
+    Returns
+    -------
+    Num[Array, '... n']
+        Per-node in-degree, shape ``(..., n)``.
     """
     if isinstance(A, ELL):
         ones = jnp.ones(A.values.shape[:-1] + (1,), dtype=A.values.dtype)
@@ -178,17 +239,31 @@ def in_degree_vector(A: _GraphInput) -> Num[Array, '... n']:
 
 
 def symmetric_degree_vector(A: _GraphInput) -> Num[Array, '... n']:
-    """Degree of the *symmetrised* adjacency ``W = ½(A + Aᵀ)``.
+    """Degree of the symmetrised adjacency :math:`W = \\tfrac{1}{2}(A + A^{\\top})`.
 
-    ``d_i = ½(Σ_j A_ij + Σ_j A_ji) = ½(out-degree + in-degree)`` -- the degree
-    the symmetric normalised Laplacian / affinity must normalise by when ``A``
+    The per-node degree is
+    :math:`d_i = \\tfrac{1}{2}(\\sum_j A_{ij} + \\sum_j A_{ji}) =
+    \\tfrac{1}{2}(\\text{out-degree} + \\text{in-degree})` -- the degree the
+    symmetric normalised Laplacian / affinity must normalise by when ``A``
     is **not** symmetric (e.g. a top-k-per-row sparsified affinity).
-    Normalising by the bare row-sum out-degree instead uses the wrong diagonal,
-    so ``½(D^{-1/2} A D^{-1/2} + ·ᵀ)`` is no longer ``D_W^{-1/2} W D_W^{-1/2}``
-    and its trivial (constant) eigenvalue drifts off ``1`` -- the implicit
-    "symmetrise the Laplacian, not the adjacency" error (see
-    ``graph.connectopy``).  Equals ``degree_vector`` exactly for symmetric
-    ``A``.
+    Normalising by the bare row-sum out-degree instead uses the wrong
+    diagonal, so :math:`\\tfrac{1}{2}(D^{-1/2} A D^{-1/2} + (\\cdot)^{\\top})`
+    is no longer :math:`D_W^{-1/2} W D_W^{-1/2}` and its trivial (constant)
+    eigenvalue drifts off :math:`1` -- the implicit "symmetrise the
+    Laplacian, not the adjacency" error.  Equals :func:`degree_vector`
+    exactly for symmetric ``A``.
+
+    Parameters
+    ----------
+    A
+        Adjacency operator: dense ``(..., n, n)``,
+        :class:`~nitrix.sparse.ELL`, or
+        :class:`~nitrix.sparse.SectionedELL`.
+
+    Returns
+    -------
+    Num[Array, '... n']
+        Per-node degree of the symmetrised adjacency, shape ``(..., n)``.
     """
     return 0.5 * (degree_vector(A) + in_degree_vector(A))
 
@@ -207,21 +282,29 @@ def laplacian(
     """Graph Laplacian in one of three standard normalisations.
 
     *Dense only*: the symmetric Laplacian has a non-zero diagonal
-    that doesn't fit the sparse pattern of the input ``A``.  For
-    sparse inputs use ``laplacian_matvec`` to apply the Laplacian
+    that does not fit the sparse pattern of the input ``A``.  For
+    sparse inputs use :func:`laplacian_matvec` to apply the Laplacian
     to a vector without materialising the matrix.
 
     Parameters
     ----------
     A
         Adjacency matrix block, ``(..., n, n)``.  Non-negative;
-        self-loops in ``A`` flow through (we don't subtract them).
+        self-loops in ``A`` flow through (they are not subtracted).
     normalisation
-        ``"combinatorial"`` / ``"symmetric"`` / ``"random_walk"``.
+        Which Laplacian variant to build: ``"combinatorial"``
+        (:math:`D - A`), ``"symmetric"`` (:math:`I - D^{-1/2} A D^{-1/2}`),
+        or ``"random_walk"`` (:math:`I - D^{-1} A`).
     eps
         Floor on degree before division (avoids ``0/0`` for
         isolated nodes; those end up with a zero row in the
         normalised variants).
+
+    Returns
+    -------
+    Num[Array, '... n n']
+        The dense Laplacian in the requested normalisation, shape
+        ``(..., n, n)``.
     """
     if normalisation not in ('combinatorial', 'symmetric', 'random_walk'):
         raise ValueError(
@@ -264,11 +347,13 @@ def laplacian_matvec(
 ) -> Num[Array, '... n k']:
     """Apply the Laplacian to a block of vectors, sparse-friendly.
 
-    Computes ``L @ x`` without ever materialising ``L``.  Accepts
-    dense, ELL, or SectionedELL ``A``; works for the three Laplacian
-    variants.  This is the operator passed to
+    Computes :math:`L x` without ever materialising :math:`L`.  Accepts
+    dense, :class:`~nitrix.sparse.ELL`, or
+    :class:`~nitrix.sparse.SectionedELL` ``A``; works for the three
+    Laplacian variants.  This is the operator passed to
     ``jax.experimental.sparse.linalg.lobpcg_standard`` for top-k
-    eigenvalue decomposition on graphs too large for dense ``eigh``.
+    eigenvalue decomposition on graphs too large for a dense
+    eigendecomposition.
 
     Parameters
     ----------
@@ -282,23 +367,25 @@ def laplacian_matvec(
     eps
         Floor on degree.
     promise_symmetry
-        Sparse (ELL / SectionedELL) only.  When ``True`` (default) the
-        stored ``A`` matvec is applied directly.  When ``False`` the
-        adjacency application is symmetrised to ``½(A x + Aᵀ x)`` -- use
-        this when the stored pattern is not guaranteed symmetric (e.g.
-        top-k affinity sparsification).  The **degree** term still uses the
-        row-sum of the stored ``A`` (matching ``connectopy``'s
-        convention), so for ``'symmetric'`` the result is exactly the
-        normalised Laplacian of ``½(A + Aᵀ)``; for ``'combinatorial'`` /
-        ``'random_walk'`` on a genuinely asymmetric ``A`` the degree and
-        the symmetrised off-diagonal are not mutually consistent (the
-        out-degree ``D`` no longer matches ``sym(A)``) -- symmetrise the
-        adjacency at construction if you need that.  Ignored for dense
-        ``A``.
+        Sparse (:class:`~nitrix.sparse.ELL` /
+        :class:`~nitrix.sparse.SectionedELL`) only.  When ``True``
+        (default) the stored ``A`` matvec is applied directly.  When
+        ``False`` the adjacency application is symmetrised to
+        :math:`\\tfrac{1}{2}(A x + A^{\\top} x)` -- use this when the stored
+        pattern is not guaranteed symmetric (e.g. top-k affinity
+        sparsification).  The **degree** term still uses the row-sum of the
+        stored ``A``, so for ``'symmetric'`` the result is exactly the
+        normalised Laplacian of :math:`\\tfrac{1}{2}(A + A^{\\top})`; for
+        ``'combinatorial'`` / ``'random_walk'`` on a genuinely asymmetric
+        ``A`` the degree and the symmetrised off-diagonal are not mutually
+        consistent (the out-degree :math:`D` no longer matches the
+        symmetrised adjacency) -- symmetrise the adjacency at construction
+        if you need that.  Ignored for dense ``A``.
 
     Returns
     -------
-    ``L @ x``, shape ``(..., n, k)``.
+    Num[Array, '... n k']
+        The product :math:`L x`, shape ``(..., n, k)``.
     """
     deg = degree_vector(A)
     safe_deg = jnp.maximum(deg, eps)

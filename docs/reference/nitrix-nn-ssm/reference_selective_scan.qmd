@@ -1,0 +1,61 @@
+---
+title: "reference_selective_scan"
+generated: true
+description: "Reference Mamba / S6 selective scan (oracle)."
+---
+
+[‹ back to `nitrix.nn.ssm`](../nitrix-nn-ssm.qmd)
+
+*Re-exported here; defined in `nitrix.nn.ssm._reference`.*
+
+<!-- nitrix:gen sig:reference_selective_scan -->
+```python
+reference_selective_scan(x: Float[Array, '... l d'], delta: Float[Array, '... l d'], A: Float[Array, 'd n'], B: Float[Array, '... l n'], C: Float[Array, '... l n'], D: Optional[Float[Array, 'd']] = None, *, driver: Driver = 'auto', chunk_size: int = 64) -> Float[Array, '... l d']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:reference_selective_scan -->
+Reference Mamba / S6 selective scan (oracle).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:reference_selective_scan -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Float` | `...` × `l` × `d` | — | Input sequence and per-step, per-channel step size $\Delta$ (already post-softplus), both `(..., l, d)`. |
+| `delta` | `Float` | `...` × `l` × `d` | — | Input sequence and per-step, per-channel step size $\Delta$ (already post-softplus), both `(..., l, d)`. |
+| `A` | `Float` | `d` × `n` | — | State matrix in diagonal-plus form, `(d, n)` (typically negative for a contractive recurrence). |
+| `B` | `Float` | `...` × `l` × `n` | — | Selective input and output projections, both `(..., l, n)`. |
+| `C` | `Float` | `...` × `l` × `n` | — | Selective input and output projections, both `(..., l, n)`. |
+| `D` | `Optional[Float[Array, 'd']]` | — | `None` | Optional per-channel skip / residual, `(d,)`. Omitted when `None`. |
+| `driver` | `Driver` | — | `'auto'` | Numerical variant. `'sequential'` is the bit-exact `jax.lax.scan` oracle and the canonical variant; `'associative'` is the parallel prefix scan, which materialises the `(l, d, n)` trajectory; `'chunked'` is a pure-XLA memory-sparing chunked scan that never materialises `(l, d, n)` (the Pallas-free analogue of the fused kernel); and `'auto'` selects the parallel scan on GPU and the sequential scan on CPU. `nitrix.reproducible()` forces the canonical `'sequential'`; the variants agree only to a documented tolerance (see `nitrix.divergent_ops()`), not bit-for-bit. |
+| `chunk_size` | `int` | — | `64` | Chunk length used when `driver='chunked'` (must divide `l`); the memory / parallel-depth trade-off knob. Size-based dispatch is left to the performance suite. |
+
+**Returns** `Float` — shape `...` × `l` × `d`. Output sequence `(..., l, d)`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:reference_selective_scan -->
+::: {.callout-note}
+All variants agree up to floating-point reassociation.  `'chunked'` keeps
+peak memory at $O(\mathrm{chunk} \cdot d \cdot n + l \cdot d)$
+instead of $O(l \cdot d \cdot n)$ and, being XLA-stable, has none of
+the fused kernel's float32 within-chunk range limit.  A degenerate
+$A \to 0$ (so $\mathrm{dA} \to 1$) reduces the update to a
+cumulative sum of $\Delta_t B_t x_t$.  A float16 / bfloat16 input is
+upcast to float32 for the recurrence and readout and cast back at the end
+(the float32-accumulation invariant); float32 / float64 inputs are unchanged.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:reference_selective_scan -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `l` | *(undocumented — add to `_dimensions.yml`)* |
+| `d` | spatial dimension (2 or 3) |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

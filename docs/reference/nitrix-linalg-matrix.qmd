@@ -1,0 +1,63 @@
+---
+title: "nitrix.linalg.matrix"
+generated: true
+signature-hash: d497faf87068061f
+description: "Matrix utilities for symmetric matrices, diagonals, and Toeplitz structure."
+listing:
+  id: nitrix-linalg-matrix-symbols
+  contents: "nitrix-linalg-matrix/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.linalg.matrix`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Matrix utilities for symmetric matrices, diagonals, and Toeplitz structure.
+
+A collection of the bread-and-butter primitives used by downstream
+consumers that work with covariance and connectivity matrices: symmetric
+and antisymmetric views, diagonal masking, Toeplitz construction, and
+eigenspace reconditioning for stable differentiation.
+
+The main surfaces are:
+
+- [`symmetric`](nitrix-linalg-matrix/symmetric.qmd) -- symmetrise (or antisymmetrise) any square block.
+- [`sym2vec`](nitrix-linalg-matrix/sym2vec.qmd) / [`vec2sym`](nitrix-linalg-matrix/vec2sym.qmd) / [`squareform`](nitrix-linalg-matrix/squareform.qmd) -- bijection
+  between symmetric matrices and the vec of their strict upper triangle.
+  Both carry hand-rolled `custom_vjp` rules: the backward of
+  [`sym2vec`](nitrix-linalg-matrix/sym2vec.qmd) sums diagonal entries' gradients only once, and the
+  backward of [`vec2sym`](nitrix-linalg-matrix/vec2sym.qmd) accounts for the symmetrising reflection.
+- [`delete_diagonal`](nitrix-linalg-matrix/delete_diagonal.qmd) / [`fill_diagonal`](nitrix-linalg-matrix/fill_diagonal.qmd) -- masked diagonal
+  operations.
+- [`recondition_eigenspaces`](nitrix-linalg-matrix/recondition_eigenspaces.qmd) -- stabilise differentiation through SVD
+  and symmetric eigendecomposition by perturbing zero or near-degenerate
+  eigenvalues.
+- [`toeplitz`](nitrix-linalg-matrix/toeplitz.qmd) / [`toeplitz_2d`](nitrix-linalg-matrix/toeplitz_2d.qmd) -- Toeplitz construction using a
+  vmap-over-roll recipe that is faster than scipy on GPU but degrades on
+  TPU.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `i` | *(undocumented — add to `_dimensions.yml`)* |
+| `j` | *(undocumented — add to `_dimensions.yml`)* |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `mc` | *(undocumented — add to `_dimensions.yml`)* |
+| `m` | rows of a multi-row contrast |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-linalg-matrix-symbols}
+:::

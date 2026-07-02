@@ -1,0 +1,49 @@
+---
+title: "gaussian_curvature"
+generated: true
+description: "Per-vertex Gaussian curvature $K$ via the angle-defect formula."
+---
+
+[‹ back to `nitrix.geometry.surface`](../nitrix-geometry-surface.qmd)
+
+<!-- nitrix:gen sig:gaussian_curvature -->
+```python
+gaussian_curvature(mesh: Mesh, *, area_scheme: Literal['voronoi', 'barycentric'] = 'voronoi') -> Float[Array, 'n_vertices']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:gaussian_curvature -->
+Per-vertex Gaussian curvature $K$ via the angle-defect formula.
+
+$K(v_i) = (2 \pi - \sum_j \theta_{ij}) / A_i$ where
+$\theta_{ij}$ are the interior triangle angles incident at
+$v_i$ and $A_i$ the vertex area.  The numerator (the angle
+defect) is the *integrated* Gaussian curvature, so
+$\sum_i K_i A_i = 2 \pi \chi$ exactly (discrete Gauss-Bonnet) --
+$4 \pi$ for a genus-0 surface.
+
+Assumes a **closed** mesh (the $2 \pi$ term); for a surface with
+boundary the boundary vertices would need the $\pi$ defect instead.
+The geometry suite's targets (icosphere, genus-0 cortical surfaces) are
+closed.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:gaussian_curvature -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mesh` | `Mesh` | — | — | Triangle mesh (closed). |
+| `area_scheme` | `Literal['voronoi', 'barycentric']` | — | `'voronoi'` | Vertex-area scheme for $A_i$ (`'voronoi'` default). |
+
+**Returns** `Float` — shape `n_vertices`. Per-vertex Gaussian curvature, shape `(n_vertices,)`. Pure JAX; differentiable.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:gaussian_curvature -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_vertices` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
-"""
+r"""
 Mass-univariate generalised linear models.
 
-``glm_fit`` fits the same design ``X`` (``N, p``) to every element (voxel /
+:func:`glm_fit` fits the same design ``X`` (``N, p``) to every element (voxel /
 vertex / fixel) of a response tensor ``Y`` (``V, N``) -- the mass-univariate
 "one model per element, shared design" workload behind ModelArray's ``lm`` and
 the parametric backbone of GAM (``gam.py``) and the permutation engine
@@ -14,12 +14,12 @@ Two paths, one surface
 ----------------------
 
 The fit is **IRLS-shaped**: a weighted-least-squares solve
-``(X^T W X + S) beta = X^T W z`` over a working response ``z`` and working
-weights ``W``.  OLS, WLS, and the full exponential family are then the same
-machinery at different ``(W, z)``:
+:math:`(X^{\top} W X + S) \beta = X^{\top} W z` over a working response ``z`` and
+working weights ``W``.  OLS, WLS, and the full exponential family are then the
+same machinery at different ``(W, z)``:
 
 - **Gaussian identity, no penalty** -- the dominant ``lm`` case -- takes a
-  vectorised fast path: ``X^T X`` is *shared* across elements, so a single
+  vectorised fast path: :math:`X^{\top} X` is *shared* across elements, so a single
   ``(p, p)`` inverse and a couple of matmuls fit all ``V`` elements at once
   (no per-element factorisation).
 - **Any other family** runs Penalised IRLS per element (``vmap``), reusing the
@@ -33,15 +33,15 @@ cuSOLVER custom-call, so the fit runs on the broken-cuSOLVER GPU.
 Inference
 ---------
 
-``t_contrast`` / ``f_contrast`` return the per-element effect, standard error,
-t / F statistic, and the (Student-t / F) p-value -- the ModelArray ``lm``
+:func:`t_contrast` / :func:`f_contrast` return the per-element effect, standard
+error, t / F statistic, and the (Student-t / F) p-value -- the ModelArray ``lm``
 output columns.  p-values use the regularised incomplete beta
 (``jax.scipy.special.betainc``), so they are exact and cuSOLVER-free.
-``r_squared`` / ``deviance_explained`` use the stored null-model deviance.
+:func:`r_squared` / :func:`deviance_explained` use the stored null-model deviance.
 
-The exponential family is a frozen ``Family`` value (a small record of pure
-link / variance / deviance functions); ``GAUSSIAN`` / ``BINOMIAL`` / ``POISSON``
-ship, and a custom family is just another ``Family(...)``.
+The exponential family is a frozen :class:`Family` value (a small record of pure
+link / variance / deviance functions); :data:`GAUSSIAN` / :data:`BINOMIAL` /
+:data:`POISSON` ship, and a custom family is just another ``Family(...)``.
 """
 
 from __future__ import annotations
@@ -144,19 +144,21 @@ class GLMResult:
     coef
         ``(V, p)`` fixed-effect estimates.
     cov_unscaled
-        Unscaled coefficient covariance ``(X^T W X)^{-1}``.  Shared ``(p, p)``
-        for the Gaussian-identity fast path; per-element ``(V, p, p)`` for the
-        IRLS path.  Multiply by ``dispersion`` for the covariance.
+        Unscaled coefficient covariance :math:`(X^{\\top} W X)^{-1}`.  Shared
+        ``(p, p)`` for the Gaussian-identity fast path; per-element
+        ``(V, p, p)`` for the IRLS path.  Multiply by ``dispersion`` for the
+        covariance.
     dispersion
         ``(V,)`` dispersion estimate (residual variance for Gaussian; ``1`` for
         binomial / Poisson unless overdispersion is estimated).
     deviance
         ``(V,)`` model deviance (residual sum of squares for Gaussian).
     null_deviance
-        ``(V,)`` deviance of the intercept-only model (for ``r_squared`` /
-        ``deviance_explained``).
+        ``(V,)`` deviance of the intercept-only model (used by
+        :func:`r_squared` / :func:`deviance_explained`).
     log_lik
-        ``(V,)`` maximised log-likelihood (for ``aic`` / ``bic`` / the LRT).
+        ``(V,)`` maximised log-likelihood (used by :func:`aic` / :func:`bic`
+        and the likelihood-ratio test).
     """
 
     coef: Float[Array, 'V p']
@@ -190,10 +192,34 @@ def _ols_fit(
     w: Float[Array, 'N'],
     ridge: float,
 ) -> Tuple[Float[Array, 'V p'], Float[Array, 'p p'], Float[Array, 'V']]:
-    """Vectorised Gaussian-identity WLS: one shared ``(p, p)`` inverse.
+    """Vectorised Gaussian-identity weighted least squares.
 
-    ``X^T W X`` does not depend on the element, so all ``V`` fits are a single
-    ``(p, p)`` solve plus matmuls -- no per-element factorisation.
+    Because the normal-equation matrix :math:`X^{\\top} W X` does not depend on
+    the element, all ``V`` fits reduce to a single shared ``(p, p)`` inverse
+    plus a couple of matrix multiplies, with no per-element factorisation.
+
+    Parameters
+    ----------
+    Y
+        ``(V, N)`` responses -- ``V`` elements, ``N`` observations.
+    X
+        ``(N, p)`` design matrix, shared across all elements.
+    w
+        ``(N,)`` prior observation weights (all ones for an unweighted fit).
+    ridge
+        L2 stabiliser added to the diagonal of :math:`X^{\\top} W X` before the
+        inverse.
+
+    Returns
+    -------
+    coef : Float[Array, 'V p']
+        ``(V, p)`` weighted-least-squares coefficient estimates.
+    xtwx_inv : Float[Array, 'p p']
+        Shared ``(p, p)`` inverse
+        :math:`(X^{\\top} W X + \\mathrm{ridge}\\,I)^{-1}` (the unscaled
+        coefficient covariance).
+    wrss : Float[Array, 'V']
+        ``(V,)`` weighted residual sum of squares, one per element.
     """
     p = X.shape[-1]
     Xw = X * w[:, None]
@@ -216,9 +242,41 @@ def _pirls_one(
     n_iter: int,
     ridge: float,
 ) -> Tuple[Float[Array, 'p'], Float[Array, 'p p'], Float[Array, '']]:
-    """Single-element penalised IRLS via the shared core.  Returns
-    ``(beta, cov_unscaled, deviance)``.  ``penalty`` is the ``(p, p)`` smoothing
-    penalty (zeros for a plain GLM)."""
+    """Fit a single element by penalised iteratively reweighted least squares.
+
+    Warm-starts a coefficient vector and runs penalised IRLS through the shared
+    fitting core.  A plain (unpenalised) GLM passes an all-zeros ``penalty``.
+
+    Parameters
+    ----------
+    y
+        ``(N,)`` response for this element.
+    X
+        ``(N, p)`` design matrix, shared across elements.
+    w
+        ``(N,)`` prior observation weights.
+    penalty
+        ``(p, p)`` smoothing penalty added to the normal equations (all zeros
+        for a plain GLM).
+    family
+        Exponential family and link defining the link, variance, and deviance
+        functions.
+    p
+        Number of design columns (coefficients).
+    n_iter
+        Number of IRLS iterations.
+    ridge
+        L2 stabiliser added to the normal-equation matrix.
+
+    Returns
+    -------
+    beta : Float[Array, 'p']
+        ``(p,)`` fitted coefficients for this element.
+    cov_unscaled : Float[Array, 'p p']
+        ``(p, p)`` unscaled coefficient covariance.
+    deviance : Float[Array, '']
+        Scalar model deviance for this element.
+    """
     beta0 = irls_warm_start(
         y, X, family, penalty=penalty, ridge=ridge, prior_weights=w
     )
@@ -257,8 +315,8 @@ def glm_fit(
         column -- no intercept is added).
     family
         Exponential family + link: a built-in name (``'gaussian'`` /
-        ``'binomial'`` / ``'poisson'``) or a ``Family`` instance.  Default
-        ``GAUSSIAN`` identity = OLS.
+        ``'binomial'`` / ``'poisson'``) or a :class:`Family` instance.  Default
+        :data:`GAUSSIAN` identity, i.e. ordinary least squares.
     weights
         Optional ``(N,)`` prior observation weights (WLS / known precision).
         ``None`` is unweighted.
@@ -278,8 +336,10 @@ def glm_fit(
 
     Returns
     -------
-    ``GLMResult`` (coefficients, unscaled covariance, dispersion, deviance,
-    null deviance).
+    GLMResult
+        A :class:`GLMResult` carrying the per-element coefficients, unscaled
+        covariance, dispersion, model deviance, null deviance, and maximised
+        log-likelihood.
     """
     family = resolve_family(family)
     n, p = X.shape
@@ -365,10 +425,29 @@ def predict(
     *,
     type: PredictType = 'response',
 ) -> Float[Array, 'V N']:
-    """Per-element prediction on a (new) design ``X``.
+    """Per-element prediction on a (possibly new) design.
 
-    ``type='link'`` returns the linear predictor ``eta = X beta``;
-    ``type='response'`` (default) applies the inverse link.
+    Forms the linear predictor :math:`\\eta = X \\beta` for every element and,
+    for ``type='response'``, maps it through the family's inverse link.
+
+    Parameters
+    ----------
+    result
+        A fitted :class:`GLMResult` supplying the per-element coefficients and
+        the family (for the inverse link).
+    X
+        ``(N, p)`` design matrix to predict on (need not be the design used to
+        fit; must share the coefficient layout).
+    type
+        ``'response'`` (default) applies the inverse link to return fitted
+        values on the response scale; ``'link'`` returns the linear predictor
+        :math:`\\eta = X \\beta` on the link scale.
+
+    Returns
+    -------
+    Float[Array, 'V N']
+        ``(V, N)`` predictions, one row per element over the ``N`` rows of
+        ``X``.
     """
     eta = result.coef @ X.T
     if type == 'link':
@@ -384,13 +463,41 @@ def predict(
 
 
 def _t_two_sided_sf(t: Array, df: float) -> Array:
-    """Two-sided Student-t survival ``P(|T| > |t|)`` via regularised beta."""
+    """Two-sided Student-t survival :math:`P(|T| > |t|)` via regularised beta.
+
+    Parameters
+    ----------
+    t
+        Observed t statistic(s), any shape.
+    df
+        Degrees of freedom.
+
+    Returns
+    -------
+    Array
+        Two-sided tail probability, matching the shape of ``t``.
+    """
     x = df / (df + t * t)
     return betainc(0.5 * df, 0.5, x)
 
 
 def _f_sf(f: Array, df1: float, df2: float) -> Array:
-    """F survival ``P(F > f)`` via the regularised incomplete beta."""
+    """F survival :math:`P(F > f)` via the regularised incomplete beta.
+
+    Parameters
+    ----------
+    f
+        Observed F statistic(s), any shape (clipped at zero).
+    df1
+        Numerator degrees of freedom.
+    df2
+        Denominator degrees of freedom.
+
+    Returns
+    -------
+    Array
+        Upper-tail probability, matching the shape of ``f``.
+    """
     x = df2 / (df2 + df1 * jnp.clip(f, 0.0, None))
     return betainc(0.5 * df2, 0.5 * df1, x)
 
@@ -403,17 +510,39 @@ def t_contrast(
 ) -> Tuple[
     Float[Array, 'V'], Float[Array, 'V'], Float[Array, 'V'], Float[Array, 'V']
 ]:
-    """Per-element t-test of a linear contrast ``c^T beta``.
+    r"""Per-element t-test of a linear contrast :math:`c^{\top} \beta`.
 
-    Returns ``(effect, se, t, p_value)``: the contrast estimate, its standard
-    error, the t statistic, and the two-sided p-value at ``dof_resid`` degrees
-    of freedom (ModelArray ``lm`` columns ``estimate`` / ``std.error`` /
+    Computes, for every element, the contrast estimate, its standard error, the
+    t statistic, and the two-sided p-value at ``result.dof_resid`` degrees of
+    freedom (the ModelArray ``lm`` columns ``estimate`` / ``std.error`` /
     ``statistic`` / ``p.value``).
 
-    ``cov`` overrides the coefficient covariance: pass a ``(V, p, p)`` (or shared
-    ``(p, p)``) matrix -- e.g. the robust ``sandwich_cov`` output -- to use
-    ``c^T cov c`` directly (already on the variance scale).  The default
-    (``None``) is the model-based ``dispersion * (X^T W X)^{-1}`` (unchanged).
+    Parameters
+    ----------
+    result
+        A fitted :class:`GLMResult` supplying the coefficients, unscaled
+        covariance, dispersion, and residual degrees of freedom.
+    contrast
+        ``(p,)`` contrast vector :math:`c`; the tested effect is
+        :math:`c^{\top} \beta`.
+    cov
+        Optional coefficient covariance override, either a shared ``(p, p)`` or
+        a per-element ``(V, p, p)`` matrix -- e.g. the robust output of
+        :func:`sandwich_cov`.  When given, the variance is :math:`c^{\top}
+        \Sigma\, c` taken directly (already on the variance scale).  The
+        default (``None``) uses the model-based covariance
+        :math:`\mathrm{dispersion} \cdot (X^{\top} W X)^{-1}`.
+
+    Returns
+    -------
+    effect : Float[Array, 'V']
+        ``(V,)`` contrast estimate :math:`c^{\top} \beta`.
+    se : Float[Array, 'V']
+        ``(V,)`` standard error of the contrast.
+    t : Float[Array, 'V']
+        ``(V,)`` t statistic ``effect / se``.
+    p_value : Float[Array, 'V']
+        ``(V,)`` two-sided p-value at ``result.dof_resid`` degrees of freedom.
     """
     c = jnp.asarray(contrast)
     effect = result.coef @ c  # (V,)
@@ -435,15 +564,38 @@ def f_contrast(
     *,
     cov: Optional[Float[Array, '... p p']] = None,
 ) -> Tuple[Float[Array, 'V'], Float[Array, 'V'], float, float]:
-    """Per-element F-test of a multi-row contrast ``C beta = 0``.
+    r"""Per-element F-test of a multi-row contrast :math:`C \beta = 0`.
 
-    Returns ``(F, p_value, df1, df2)`` with ``df1 = m`` (contrast rank) and
-    ``df2 = dof_resid``.
+    Forms the Wald quadratic form of the ``m`` contrast rows against the fitted
+    coefficients and returns an F statistic per element.
 
-    ``cov`` overrides the coefficient covariance (e.g. the robust
-    ``sandwich_cov`` output): the Wald quadratic form uses ``C cov C^T`` directly
-    and the statistic is ``quad / m`` (no dispersion rescale).  The default
-    (``None``) is the model-based ``dispersion * (X^T W X)^{-1}`` (unchanged).
+    Parameters
+    ----------
+    result
+        A fitted :class:`GLMResult` supplying the coefficients, unscaled
+        covariance, dispersion, and residual degrees of freedom.
+    contrast
+        ``(m, p)`` contrast matrix :math:`C`; the tested hypothesis is
+        :math:`C \beta = 0`.
+    cov
+        Optional coefficient covariance override, either a shared ``(p, p)`` or
+        a per-element ``(V, p, p)`` matrix -- e.g. the robust output of
+        :func:`sandwich_cov`.  When given, the Wald quadratic form uses
+        :math:`C \Sigma\, C^{\top}` directly and the statistic is
+        :math:`\mathrm{quad} / m` (no dispersion rescale).  The default
+        (``None``) uses the model-based covariance
+        :math:`\mathrm{dispersion} \cdot (X^{\top} W X)^{-1}`.
+
+    Returns
+    -------
+    F : Float[Array, 'V']
+        ``(V,)`` F statistic, one per element.
+    p_value : Float[Array, 'V']
+        ``(V,)`` upper-tail p-value on ``(df1, df2)`` degrees of freedom.
+    df1 : float
+        Numerator degrees of freedom, equal to the contrast rank ``m``.
+    df2 : float
+        Denominator degrees of freedom, equal to ``result.dof_resid``.
     """
     C = jnp.asarray(contrast)
     m = C.shape[0]
@@ -484,38 +636,39 @@ def sandwich_cov(
     n_groups: Optional[int] = None,
     weights: Optional[Float[Array, 'N']] = None,
 ) -> Float[Array, 'V p p']:
-    """Robust (sandwich) coefficient covariance for a fitted GLM.
+    r"""Robust (sandwich) coefficient covariance for a fitted GLM.
 
-    Returns the per-element ``(V, p, p)`` covariance
-    ``A^{-1} B A^{-1}`` with bread ``A^{-1} = (X^T W X)^{-1}`` (the fit's
-    ``cov_unscaled``) and a robust meat ``B`` built from the per-observation
-    score contributions ``u_i = x_i g_i``, ``g_i = (y_i - mu_i) (dmu_i/deta_i) /
-    V(mu_i)`` (for OLS, ``g_i`` is the raw residual ``y_i - mu_i`` -- the
-    classic Huber-White form).  cuSOLVER-free, ``vmap`` over elements; the
-    sandwich weights are data-dependent constants (not differentiated through).
+    Returns the per-element ``(V, p, p)`` covariance :math:`A^{-1} B A^{-1}`
+    with bread :math:`A^{-1} = (X^{\top} W X)^{-1}` (the fit's ``cov_unscaled``)
+    and a robust meat :math:`B` built from the per-observation score
+    contributions :math:`u_i = x_i g_i`, where :math:`g_i = (y_i - \mu_i)
+    (\mathrm{d}\mu_i / \mathrm{d}\eta_i) / V(\mu_i)` (for OLS, :math:`g_i` is
+    the raw residual :math:`y_i - \mu_i` -- the classic Huber-White form).  The
+    computation avoids cuSOLVER and maps over elements; the sandwich weights are
+    treated as data-dependent constants and are not differentiated through.
 
-    Pass the result as ``cov=`` to ``t_contrast`` / ``f_contrast``.
+    Pass the result as ``cov=`` to :func:`t_contrast` / :func:`f_contrast`.
 
     Parameters
     ----------
     result, Y, X
-        The fitted ``GLMResult`` and the data it was fit on (``X`` shared,
-        ``Y`` the ``(V, N)`` responses).
+        The fitted :class:`GLMResult` and the data it was fit on (``X`` the
+        shared ``(N, p)`` design, ``Y`` the ``(V, N)`` responses).
     kind
         Heteroscedasticity-consistent variant when ``groups`` is ``None``:
-        ``'HC0'`` (raw), ``'HC1'`` (``n/(n-p)`` correction), ``'HC2'``
-        (``/(1 - h_i)``), ``'HC3'`` (``/(1 - h_i)^2``); ``h_i`` the GLM hat
-        diagonal.  Ignored when ``groups`` is given.
+        ``'HC0'`` (raw), ``'HC1'`` (:math:`n/(n-p)` correction), ``'HC2'``
+        (:math:`/(1 - h_i)`), ``'HC3'`` (:math:`/(1 - h_i)^2`); :math:`h_i` the
+        GLM hat diagonal.  Ignored when ``groups`` is given.
     groups
         ``(N,)`` cluster labels for a **cluster-robust** covariance (one-way):
-        ``B = sum_g s_g s_g^T``, ``s_g = sum_{i in g} x_i g_i``, with the
-        ``G/(G-1) * (N-1)/(N-p)`` small-sample factor.  This is **one-way**
-        clustering -- FSL ``randomise``'s ``-e`` exchangeability-block analogue
-        (audit N6).  It is **not** a variance-group model (FSL ``-g`` / PALM
-        ``-vg``): a separate residual *variance* per group (heteroscedastic
-        two-sample / FLAME-style grouped variance) is a different estimator and
-        is not provided here -- the cluster-robust meat assumes a common model,
-        only correlating scores *within* a cluster.
+        :math:`B = \sum_g s_g s_g^{\top}`, :math:`s_g = \sum_{i \in g} x_i g_i`,
+        with the :math:`G/(G-1) \cdot (N-1)/(N-p)` small-sample factor.  This is
+        **one-way** clustering -- the analogue of FSL ``randomise``'s ``-e``
+        exchangeability blocks.  It is **not** a variance-group model (FSL
+        ``-g`` / PALM ``-vg``): a separate residual *variance* per group
+        (heteroscedastic two-sample / FLAME-style grouped variance) is a
+        different estimator and is not provided here -- the cluster-robust meat
+        assumes a common model, only correlating scores *within* a cluster.
 
         The cluster path is **eager-only** by default: the distinct-cluster count
         is found with ``jnp.unique`` (a data-dependent shape).  To trace the whole
@@ -605,22 +758,63 @@ def sandwich_cov(
 
 
 def deviance_explained(result: GLMResult) -> Float[Array, 'V']:
-    """Per-element fraction of null deviance explained: ``1 - dev / null_dev``."""
+    """Per-element fraction of null deviance explained.
+
+    Computes :math:`1 - D / D_0`, where :math:`D` is the model deviance and
+    :math:`D_0` the intercept-only (null) deviance.
+
+    Parameters
+    ----------
+    result
+        A fitted :class:`GLMResult` supplying the model and null deviances.
+
+    Returns
+    -------
+    Float[Array, 'V']
+        ``(V,)`` fraction of null deviance explained, one per element.
+    """
     return 1.0 - result.deviance / jnp.clip(result.null_deviance, _EPS, None)
 
 
 def r_squared(result: GLMResult) -> Float[Array, 'V']:
-    """Per-element ``R^2`` (Gaussian) / deviance explained (general).
+    """Per-element :math:`R^2` (Gaussian) or deviance explained (general).
 
-    For the Gaussian family ``deviance`` is the residual sum of squares and
-    ``null_deviance`` the total sum of squares, so this is the ordinary
-    ``R^2``; for other families it is the fraction of deviance explained.
+    For the Gaussian family the deviance is the residual sum of squares and the
+    null deviance the total sum of squares, so this is the ordinary coefficient
+    of determination :math:`R^2`; for other families it is the fraction of
+    deviance explained, i.e. :func:`deviance_explained`.
+
+    Parameters
+    ----------
+    result
+        A fitted :class:`GLMResult` supplying the model and null deviances.
+
+    Returns
+    -------
+    Float[Array, 'V']
+        ``(V,)`` :math:`R^2` (or deviance explained), one per element.
     """
     return deviance_explained(result)
 
 
 def adj_r_squared(result: GLMResult) -> Float[Array, 'V']:
-    """Per-element adjusted ``R^2`` (Gaussian)."""
+    """Per-element adjusted :math:`R^2` (Gaussian).
+
+    Applies the standard degrees-of-freedom adjustment to :func:`r_squared`,
+    penalising the number of fitted parameters relative to the number of
+    observations.
+
+    Parameters
+    ----------
+    result
+        A fitted :class:`GLMResult` supplying the deviances, observation count,
+        and residual degrees of freedom.
+
+    Returns
+    -------
+    Float[Array, 'V']
+        ``(V,)`` adjusted :math:`R^2`, one per element.
+    """
     n = float(result.n_obs)
     dof = result.dof_resid
     return 1.0 - (1.0 - r_squared(result)) * (n - 1.0) / jnp.clip(
@@ -629,24 +823,79 @@ def adj_r_squared(result: GLMResult) -> Float[Array, 'V']:
 
 
 def log_likelihood(result: GLMResult) -> Float[Array, 'V']:
-    """Per-element maximised log-likelihood."""
+    """Per-element maximised log-likelihood.
+
+    Parameters
+    ----------
+    result
+        A fitted :class:`GLMResult` carrying the stored maximised
+        log-likelihood.
+
+    Returns
+    -------
+    Float[Array, 'V']
+        ``(V,)`` maximised log-likelihood, one per element.
+    """
     return result.log_lik
 
 
 def aic(result: GLMResult) -> Float[Array, 'V']:
-    """Per-element Akaike information criterion ``-2 ll + 2 k``."""
+    r"""Per-element Akaike information criterion :math:`-2\ell + 2k`.
+
+    Here :math:`\ell` is the maximised log-likelihood and :math:`k` the number
+    of estimated parameters (coefficients plus a dispersion where free).
+
+    Parameters
+    ----------
+    result
+        A fitted :class:`GLMResult` supplying the log-likelihood and parameter
+        count.
+
+    Returns
+    -------
+    Float[Array, 'V']
+        ``(V,)`` Akaike information criterion, one per element.
+    """
     return -2.0 * result.log_lik + 2.0 * result.n_params
 
 
 def bic(result: GLMResult) -> Float[Array, 'V']:
-    """Per-element Bayesian information criterion ``-2 ll + k log N``."""
+    r"""Per-element Bayesian information criterion :math:`-2\ell + k \log N`.
+
+    Here :math:`\ell` is the maximised log-likelihood, :math:`k` the number of
+    estimated parameters, and :math:`N` the number of observations.
+
+    Parameters
+    ----------
+    result
+        A fitted :class:`GLMResult` supplying the log-likelihood, parameter
+        count, and observation count.
+
+    Returns
+    -------
+    Float[Array, 'V']
+        ``(V,)`` Bayesian information criterion, one per element.
+    """
     return -2.0 * result.log_lik + result.n_params * jnp.log(
         jnp.asarray(float(result.n_obs))
     )
 
 
 def _chi2_sf(x: Array, df: float) -> Array:
-    """Chi-square survival ``P(X > x)`` via the upper incomplete gamma."""
+    """Chi-square survival :math:`P(X > x)` via the upper incomplete gamma.
+
+    Parameters
+    ----------
+    x
+        Observed chi-square statistic(s), any shape (clipped at zero).
+    df
+        Degrees of freedom.
+
+    Returns
+    -------
+    Array
+        Upper-tail probability, matching the shape of ``x``.
+    """
     return gammaincc(0.5 * df, 0.5 * jnp.clip(x, 0.0, None))
 
 
@@ -659,16 +908,32 @@ def compare_models(
     *,
     test: CompareTest = 'auto',
 ) -> Tuple[Float[Array, 'V'], Float[Array, 'V']]:
-    """Per-element nested-model comparison (ModelArray ``full vs. reduced``).
+    r"""Per-element nested-model comparison (ModelArray full vs. reduced).
 
-    ``reduced`` must be nested in ``full`` (fewer parameters, same data).
-    Returns ``(statistic, p_value)``:
+    Compares a ``reduced`` model nested within a ``full`` model (fewer
+    parameters, fit on the same data) element by element, returning a test
+    statistic and its p-value.
 
-    - ``test='F'`` (or ``'auto'`` for a Gaussian family) -- the extra-sum-of-
-      squares F-test, ``F = ((D_r - D_f) / (k_f - k_r)) / (D_f / dof_f)`` on
-      ``(k_f - k_r, dof_f)`` degrees of freedom.
-    - ``test='LRT'`` (or ``'auto'`` otherwise) -- the likelihood-ratio test,
-      ``2 (ll_f - ll_r) ~ chi^2(k_f - k_r)``.
+    Parameters
+    ----------
+    full
+        The larger fitted :class:`GLMResult` (more parameters).
+    reduced
+        The nested fitted :class:`GLMResult` (fewer parameters, same data).
+    test
+        Which test to run.  ``'F'`` uses the extra-sum-of-squares F-test,
+        :math:`F = ((D_r - D_f) / (k_f - k_r)) / (D_f / \mathrm{dof}_f)` on
+        :math:`(k_f - k_r, \mathrm{dof}_f)` degrees of freedom.  ``'LRT'`` uses
+        the likelihood-ratio test, :math:`2(\ell_f - \ell_r) \sim
+        \chi^2(k_f - k_r)`.  ``'auto'`` (default) selects ``'F'`` for a
+        Gaussian family and ``'LRT'`` otherwise.
+
+    Returns
+    -------
+    statistic : Float[Array, 'V']
+        ``(V,)`` test statistic (F or likelihood-ratio), one per element.
+    p_value : Float[Array, 'V']
+        ``(V,)`` upper-tail p-value of the statistic.
     """
     d_rank = float(full.rank - reduced.rank)
     if d_rank <= 0:

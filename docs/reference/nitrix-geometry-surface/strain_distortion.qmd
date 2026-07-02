@@ -1,0 +1,56 @@
+---
+title: "strain_distortion"
+generated: true
+description: "Per-face principal stretches $( lambda_1,  lambda_2)$."
+---
+
+[‹ back to `nitrix.geometry.surface`](../nitrix-geometry-surface.qmd)
+
+<!-- nitrix:gen sig:strain_distortion -->
+```python
+strain_distortion(source: Mesh, warped: Mesh) -> Float[Array, 'n_faces 2']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:strain_distortion -->
+Per-face principal stretches $(\lambda_1, \lambda_2)$.
+
+The two principal stretches are ordered $\lambda_1 \geq \lambda_2$.
+The eigenvalues of the right Cauchy-Green tensor
+$C = G_s^{-1} G_w$ are the squared principal stretches of the
+per-triangle deformation from `source` to `warped`, where $G_s$
+and $G_w$ are the 2x2 first fundamental forms (edge Gram matrices) of
+the source / warped triangle.  Computed via the 2x2 eigenvalue closed form
+(no `eigh`, so it bypasses the cuSolver wedge):
+$\lambda^2 = (\operatorname{tr} C \pm
+\sqrt{(\operatorname{tr} C)^2 - 4 \det C}) / 2$.
+
+An isometry gives $(1, 1)$; a uniform scale $s$ gives
+$(s, s)$; an anisotropic scale $\operatorname{diag}(a, b)$
+gives $(\max(a, b), \min(a, b))$.  (The discriminant is floored at
+`1e-12` for a finite gradient at the $\lambda_1 = \lambda_2$
+crossing, so genuinely equal stretches come back split by ~`1e-6` -- an
+isometry is $(1, 1)$ only to ~`1e-6`.)  `source` and `warped`
+**must share topology**.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:strain_distortion -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `source` | `Mesh` | — | — | Triangle meshes with the same topology, before / after the warp. |
+| `warped` | `Mesh` | — | — | Triangle meshes with the same topology, before / after the warp. |
+
+**Returns** `Float` — shape `n_faces` × `2`. Per-face principal stretches, shape `(n_faces, 2)`: column 0 is $\lambda_1$ (larger stretch). Pure JAX; differentiable.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:strain_distortion -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_faces` | *(undocumented — add to `_dimensions.yml`)* |
+| `2` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

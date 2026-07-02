@@ -1,0 +1,77 @@
+---
+title: "nitrix.geometry.grid"
+generated: true
+signature-hash: 3f24b347babe1909
+description: "Regular-grid deformable-registration primitives."
+listing:
+  id: nitrix-geometry-grid-symbols
+  contents: "nitrix-geometry-grid/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.geometry.grid`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Regular-grid deformable-registration primitives.
+
+The voxelmorph-style operations needed to express dense deformation
+fields and integrate stationary velocity fields:
+
+- [`identity_grid`](nitrix-geometry-grid/identity_grid.qmd) -- the "no-op" deformation, useful as a
+  starting point for learned displacements.
+- [`spatial_transform`](nitrix-geometry-grid/spatial_transform.qmd) -- warp an image by a displacement field;
+  the sampling kernel is selectable via `method=`.
+- [`integrate_velocity_field`](nitrix-geometry-grid/integrate_velocity_field.qmd) -- scaling-and-squaring stationary
+  velocity-field integration (the diffeomorphic exponential map).
+- [`resample`](nitrix-geometry-grid/resample.qmd) -- resize to a target spatial shape; the
+  common dispatcher over the available interpolation methods.
+
+[`spatial_transform`](nitrix-geometry-grid/spatial_transform.qmd) and [`resample`](nitrix-geometry-grid/resample.qmd) share one sampler: they
+differ only in *where* the sample coordinates come from (a deformation
+field vs an align-corners resize grid).  The interpolation *kernel* is
+an orthogonal axis selected by `method=` -- an immutable
+[`Interpolator`](nitrix-geometry-grid/Interpolator.qmd) record ([`Linear`](nitrix-geometry-grid/Linear.qmd) (default),
+[`NearestNeighbour`](nitrix-geometry-grid/NearestNeighbour.qmd), [`Lanczos`](nitrix-geometry-grid/Lanczos.qmd), [`CubicBSpline`](nitrix-geometry-grid/CubicBSpline.qmd),
+[`MultiLabel`](nitrix-geometry-grid/MultiLabel.qmd)).
+
+Plus [`center_of_mass_grid`](nitrix-geometry-grid/center_of_mass_grid.qmd) for weighted centre-of-mass on a
+regular grid.
+
+Channel-last layout for images: `(..., *spatial, C)`.
+Displacement fields are channel-last with `ndim` channels (one
+per spatial axis): `(..., *spatial, ndim)`.
+
+Renamings from legacy code, for clarity:
+
+- `rescale` -> `resample`    (avoids confusion with intensity rescaling).
+- `vec_int` -> `integrate_velocity_field`.
+- `cmass_regular_grid` -> `center_of_mass_grid`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `ndim` | number of spatial dimensions |
+| `*leading` | leading batch axes preceding the spatial grid (variadic) |
+| `c` | feature channels (channels-last) |
+| `...` | anonymous leading (batch) axes |
+| `*n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d` | spatial dimension (2 or 3) |
+| `*target` | the target grid's spatial axes (variadic) |
+| `*out_spatial` | the output grid's spatial axes (variadic) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-geometry-grid-symbols}
+:::

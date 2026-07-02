@@ -4,27 +4,28 @@
 """
 Penalised spline bases for additive models.
 
-A GAM smooth term ``s(x)`` is a spline basis expansion ``f(x) = B(x) beta``
-with a roughness penalty ``beta^T S beta``; the smoothing parameter trades the
-penalty off against fit (chosen by REML in ``gam.py``).  This module builds the
-``(design, penalty)`` pair for a covariate vector and re-evaluates the design
-at new covariate values (for plotting partial effects).
+A GAM smooth term :math:`s(x)` is a spline basis expansion
+:math:`f(x) = B(x) \\beta` with a roughness penalty
+:math:`\\beta^{\\top} S \\beta`; the smoothing parameter trades the penalty
+off against fit (chosen by REML in :func:`~nitrix.stats.gam_fit`).  This module
+builds the ``(design, penalty)`` pair for a covariate vector and re-evaluates
+the design at new covariate values (for plotting partial effects).
 
 We ship the **P-spline** (Eilers & Marx): a uniform cubic B-spline design with
 a discrete difference penalty -- ``mgcv``'s ``bs='ps'`` -- because it reuses
-the uniform-B-spline machinery already validated for N4 (the closed-form weight
-evaluator here mirrors ``bias._bspline._uniform_bspline_weights``) and gives an
-exact reference to test against.
+the uniform-B-spline machinery already validated for N4 and gives an exact
+reference to test against.
 
 Identifiability
 ---------------
 
 A smooth competes with the model intercept unless it is constrained to sum to
-zero over the data (``sum_i f(x_i) = 0``, i.e. ``(1^T B) beta = 0``).  We
-absorb that single constraint by reparameterising ``beta = Z alpha`` with ``Z``
-an orthonormal basis of the constraint's null space, computed by a **single
-Householder reflection** -- no ``qr`` (cuSOLVER) -- so the construction runs on
-the broken-cuSOLVER GPU and stays differentiable.
+zero over the data (:math:`\\sum_i f(x_i) = 0`, i.e.
+:math:`(1^{\\top} B) \\beta = 0`).  We absorb that single constraint by
+reparameterising :math:`\\beta = Z \\alpha` with :math:`Z` an orthonormal basis
+of the constraint's null space, computed by a **single Householder reflection**
+-- no ``qr`` (cuSOLVER) -- so the construction runs on the broken-cuSOLVER GPU
+and stays differentiable.
 
 Everything is value -> value and cuSOLVER-free.
 """
@@ -69,14 +70,13 @@ __all__ = [
 
 
 class SmoothBasis(Protocol):
-    """Structural interface of a GAM smooth term (audit D8).
+    """Structural interface of a GAM smooth term.
 
     A smooth carries a ``design`` matrix and a coefficient count ``dim``, knows
     its own penalty blocks, and can re-evaluate its design on a covariate grid.
-    ``gam_fit`` dispatches through these members instead of an ``isinstance``
-    chain, so a **new** basis type (implementing this Protocol) needs no edit to
-    ``gam.py`` -- the open-set registry the :class:`Family` / :class:`CorrSpec`
-    surfaces already have.
+    :func:`~nitrix.stats.gam_fit` dispatches through these members instead of an
+    ``isinstance`` chain, so a **new** basis type (implementing this Protocol)
+    needs no edit to the fitting routine.
 
     The concrete bases (:class:`SplineBasis` / :class:`TensorBasis` /
     :class:`REBasis`) all conform.
@@ -90,11 +90,32 @@ class SmoothBasis(Protocol):
         ...
 
     def penalty_blocks(self) -> List[Tuple[np.ndarray, np.ndarray]]:
-        """Penalty blocks ``[(S_block, eig_block)]`` (host constants)."""
+        """Return the penalty blocks of this smooth as host constants.
+
+        Returns
+        -------
+        list of tuple of numpy.ndarray
+            One ``(S_block, eig_block)`` pair per penalty: the roughness
+            penalty matrix :math:`S` and its eigenvalues (with the unpenalised
+            null space floored to zero).
+        """
         ...
 
     def eval_design(self, x: Any) -> Float[Array, 'g k']:
-        """Re-evaluate the design on the smooth's covariate grid ``x``."""
+        """Re-evaluate the design on a fresh covariate grid.
+
+        Parameters
+        ----------
+        x
+            The grid of covariate values at which to re-evaluate the smooth.
+            The concrete shape and interpretation depend on the basis kind.
+
+        Returns
+        -------
+        Float[Array, 'g k']
+            The ``(g, k)`` design matrix at ``x``, with the same feature map
+            and identifiability constraint as the original construction.
+        """
         ...
 
 
@@ -107,9 +128,27 @@ def _bspline_design(
 ) -> Float[Array, 'n n_basis']:
     """Banded uniform-B-spline design ``B[i, a]`` at arbitrary positions ``x``.
 
-    ``x`` is mapped to the parametric coordinate ``s in [0, n_spans]`` with
-    ``n_spans = n_basis - degree``; each row has ``degree + 1`` non-zeros at
-    columns ``span .. span + degree``.
+    ``x`` is mapped to the parametric coordinate :math:`s \\in [0, n_{spans}]`
+    with :math:`n_{spans} = n_{basis} - degree`; each row has ``degree + 1``
+    non-zeros at columns ``span .. span + degree``.
+
+    Parameters
+    ----------
+    x
+        ``(n,)`` positions at which to evaluate the basis.
+    n_basis
+        Number of B-spline basis functions (columns of the design).
+    degree
+        B-spline degree (e.g. ``3`` for cubic).
+    lo, hi
+        Lower and upper bounds of the knot range that ``x`` is mapped into.
+
+    Returns
+    -------
+    Float[Array, 'n n_basis']
+        The ``(n, n_basis)`` banded design matrix, each row summing to one
+        (partition of unity), with constant boundary extrapolation outside
+        ``[lo, hi]``.
     """
     n_spans = n_basis - degree
     if n_spans < 1:
@@ -137,9 +176,20 @@ def _householder_null(
 ) -> Float[Array, 'k k_minus_1']:
     """Orthonormal basis ``Z`` (``k, k-1``) of the null space of row ``c``.
 
-    A single Householder reflection ``H`` with ``H c proportional to e_1``;
+    A single Householder reflection :math:`H` with :math:`H c \\propto e_1`;
     ``Z = H[:, 1:]`` then satisfies ``c @ Z = 0`` with orthonormal columns.
     Pure elementwise algebra -- no ``qr`` / cuSOLVER -- and differentiable.
+
+    Parameters
+    ----------
+    c
+        ``(k,)`` row vector whose null space is sought (e.g. the column sums
+        of a design for the sum-to-zero constraint).
+
+    Returns
+    -------
+    Float[Array, 'k k_minus_1']
+        The ``(k, k-1)`` orthonormal null-space basis ``Z``.
     """
     norm = jnp.linalg.norm(c)
     sign = jnp.where(c[0] >= 0, 1.0, -1.0)
@@ -183,7 +233,7 @@ class SplineBasis:
         B-spline construction parameters.
     knots, radial_transform
         TPRS re-evaluation parameters: the knot positions and the radial
-        eigen-truncation ``U_k`` (``None`` for B-splines).
+        eigen-truncation :math:`U_k` (``None`` for B-splines).
     """
 
     design: Float[Array, 'n k']
@@ -205,24 +255,44 @@ class SplineBasis:
         return self.design.shape[-1]
 
     def penalty_blocks(self) -> list:
-        """Penalty blocks ``[(S, eig)]`` (audit D8): the ``(k, k)`` roughness
-        penalty and its eigenvalues, the unpenalised null space floored to
-        zero.  ``eig`` drives only the basis-invariant ``tr(S_lambda^+ S_k)``."""
+        """Return the single roughness-penalty block of this spline smooth.
+
+        The block is the ``(k, k)`` roughness penalty and its eigenvalues, with
+        the unpenalised null space floored to zero.  The eigenvalues drive only
+        the basis-invariant trace :math:`\\operatorname{tr}(S_\\lambda^{+} S_k)`
+        used to select the smoothing parameter.
+
+        Returns
+        -------
+        list of tuple of numpy.ndarray
+            A single ``(S, eig)`` pair: the penalty matrix and its floored
+            eigenvalues.
+        """
         s = np.asarray(self.penalty)
         w, _ = np.linalg.eigh(s)
         floor = 1e-10 * max(float(w.max()), float(np.finfo(w.dtype).tiny))
         return [(s, np.where(w > floor, w, 0.0))]
 
-    def eval_design(
-        self, x: Float[Array, ' g']
-    ) -> Float[Array, 'g k']:
-        """Re-evaluate the spline design on a covariate grid ``x`` (audit D8)."""
+    def eval_design(self, x: Float[Array, ' g']) -> Float[Array, 'g k']:
+        """Re-evaluate the spline design on a covariate grid.
+
+        Parameters
+        ----------
+        x
+            ``(g,)`` covariate values at which to re-evaluate the smooth.
+
+        Returns
+        -------
+        Float[Array, 'g k']
+            The ``(g, k)`` design matrix at ``x`` (post-constraint).
+        """
         return spline_design(self, x)
 
     def tree_flatten(
         self,
     ) -> Tuple[
-        Tuple[Any, ...], Tuple[str, int, int, int, float, float, Optional[float]]
+        Tuple[Any, ...],
+        Tuple[str, int, int, int, float, float, Optional[float]],
     ]:
         children = (
             self.design,
@@ -298,7 +368,9 @@ def bspline_basis(
 
     Returns
     -------
-    ``SplineBasis`` (design, penalty, and re-evaluation parameters).
+    SplineBasis
+        The :class:`SplineBasis` holding the design, penalty, and
+        re-evaluation parameters (``kind='bspline'``).
     """
     if not 1 <= penalty_order < n_basis:
         raise ValueError(
@@ -341,7 +413,22 @@ def bspline_basis(
 def _raw_features(
     basis: SplineBasis, x: Float[Array, ' m']
 ) -> Float[Array, 'm k0']:
-    """The (nonlinear, pre-constraint) basis features at ``x`` for the kind."""
+    """The (nonlinear, pre-constraint) basis features at ``x`` for the kind.
+
+    Parameters
+    ----------
+    basis
+        The :class:`SplineBasis` whose ``kind`` selects the feature map
+        (B-spline, cyclic, thin-plate, cubic-regression, GP, HSGP, or MRF).
+    x
+        ``(m,)`` covariate values at which to evaluate the raw features.
+
+    Returns
+    -------
+    Float[Array, 'm k0']
+        The ``(m, k0)`` pre-constraint feature matrix, where ``k0`` is the
+        unconstrained basis dimension.
+    """
     x = jnp.asarray(x)
     if basis.kind == 'bspline':
         return _bspline_design(
@@ -387,10 +474,22 @@ def _raw_features(
 def spline_design(
     basis: SplineBasis, x: Float[Array, ' m']
 ) -> Float[Array, 'm k']:
-    """Re-evaluate a ``SplineBasis`` design at new covariate values ``x``.
+    """Re-evaluate a :class:`SplineBasis` design at new covariate values.
 
     Used to render a smooth's partial effect on a fresh grid.  Applies the same
     feature map and sum-to-zero constraint as the original construction.
+
+    Parameters
+    ----------
+    basis
+        The :class:`SplineBasis` to re-evaluate.
+    x
+        ``(m,)`` covariate values.
+
+    Returns
+    -------
+    Float[Array, 'm k']
+        The ``(m, k)`` design matrix at ``x`` (post-constraint).
     """
     design = _raw_features(basis, x)
     if basis.constraint is not None:
@@ -406,10 +505,22 @@ def spline_design(
 def _tps_radial(
     x: Float[Array, ' m'], knots: Float[Array, ' nk']
 ) -> Float[Array, 'm nk']:
-    """Thin-plate radial basis ``eta(|x_i - knot_j|)`` (1-D, ``m = 2``).
+    """Thin-plate radial basis :math:`\\eta(|x_i - knot_j|)` (1-D, order 2).
 
-    The 1-D order-2 thin-plate Green's function is ``|r|^3`` (the constant is
-    absorbed into the smoothing parameter).
+    The 1-D order-2 thin-plate Green's function is :math:`|r|^3` (the constant
+    is absorbed into the smoothing parameter).
+
+    Parameters
+    ----------
+    x
+        ``(m,)`` evaluation positions.
+    knots
+        ``(nk,)`` knot positions.
+
+    Returns
+    -------
+    Float[Array, 'm nk']
+        The ``(m, nk)`` radial-basis matrix :math:`|x_i - knot_j|^3`.
     """
     r = jnp.abs(x[:, None] - knots[None, :])
     return r**3
@@ -418,8 +529,27 @@ def _tps_radial(
 def _tps_poly(
     x: Float[Array, ' m'], order: int, lo: float, hi: float
 ) -> Float[Array, 'm order']:
-    """Polynomial null-space basis of the thin-plate penalty: ``[1, t, ...,
-    t^{order-1}]`` on a rescaled ``t in [0, 1]`` (the unpenalised part)."""
+    """Polynomial null-space basis of the thin-plate penalty.
+
+    Builds the unpenalised polynomial columns
+    :math:`[1, t, \\ldots, t^{order-1}]` on a rescaled coordinate
+    :math:`t \\in [0, 1]`.
+
+    Parameters
+    ----------
+    x
+        ``(m,)`` evaluation positions.
+    order
+        Number of polynomial columns (the thin-plate order :math:`M`); columns
+        run from the constant term up to :math:`t^{order-1}`.
+    lo, hi
+        Bounds used to rescale ``x`` into :math:`t \\in [0, 1]`.
+
+    Returns
+    -------
+    Float[Array, 'm order']
+        The ``(m, order)`` polynomial design.
+    """
     t = (x - lo) / (hi - lo)
     return jnp.stack([t**j for j in range(order)], axis=-1)
 
@@ -439,9 +569,15 @@ def thinplate_regression_basis(
     full thin-plate basis (one function per knot) is truncated by an
     eigendecomposition of the radial penalty matrix ``E`` -- the ``k - M``
     leading (largest-eigenvalue) wiggly components, plus the ``M = penalty_order``
-    unpenalised polynomial null-space terms (Wood 2003).  The truncation
-    ``eigh`` is a one-off host (CPU/numpy) computation -- it is data-dependent
-    but not per-trace, and avoids the cuSOLVER ``syevd`` on the broken GPU.
+    unpenalised polynomial null-space terms.  The truncation ``eigh`` is a
+    one-off host (CPU/numpy) computation -- it is data-dependent but not
+    per-trace, and avoids the cuSOLVER ``syevd`` on the broken GPU.
+
+    References
+    ----------
+    Wood, S. N. (2003). Thin plate regression splines. *Journal of the Royal
+    Statistical Society: Series B (Statistical Methodology)*, 65(1), 95-114.
+    https://doi.org/10.1111/1467-9868.00374
 
     Parameters
     ----------
@@ -454,7 +590,7 @@ def thinplate_regression_basis(
         polynomial null space has dimension ``M = m``.
     max_knots
         Cap on the number of knots (placed at quantiles of ``x`` when ``n``
-        exceeds it), bounding the ``O(n_knots^3)`` eigendecomposition.
+        exceeds it), bounding the :math:`O(n_{knots}^3)` eigendecomposition.
     bounds
         ``(lo, hi)`` for the polynomial rescaling (defaults to the data range).
     center
@@ -462,7 +598,8 @@ def thinplate_regression_basis(
 
     Returns
     -------
-    ``SplineBasis`` (``kind='tprs'``).
+    SplineBasis
+        The :class:`SplineBasis` for the thin-plate smooth (``kind='tprs'``).
     """
     x = jnp.asarray(x)
     n = x.shape[0]
@@ -545,9 +682,28 @@ def _cyclic_bspline_design(
     lo: float,
     hi: float,
 ) -> Float[Array, 'n n_basis']:
-    """Uniform *cyclic* B-spline design: the same weights as ``_bspline_design``
-    but with the parametric coordinate taken modulo the period and the column
-    indices wrapped, so the basis is periodic (``f(lo) == f(hi)``)."""
+    """Uniform *cyclic* B-spline design matrix at positions ``x``.
+
+    Uses the same B-spline weights as :func:`_bspline_design` but takes the
+    parametric coordinate modulo the period and wraps the column indices, so
+    the basis is periodic (``f(lo) == f(hi)``).
+
+    Parameters
+    ----------
+    x
+        ``(n,)`` positions at which to evaluate the basis.
+    n_basis
+        Number of cyclic basis functions (columns).
+    degree
+        B-spline degree.
+    lo, hi
+        Bounds of the period; ``hi`` is identified with ``lo``.
+
+    Returns
+    -------
+    Float[Array, 'n n_basis']
+        The ``(n, n_basis)`` periodic design matrix.
+    """
     s = jnp.mod((x - lo) / (hi - lo) * n_basis, n_basis)
     span = jnp.floor(s).astype(jnp.int32)
     frac = s - span.astype(x.dtype)
@@ -562,7 +718,26 @@ def _cyclic_bspline_design(
 def _circular_difference_penalty(
     n_basis: int, order: int, dtype: Any
 ) -> Float[Array, 'n_basis n_basis']:
-    """Circular ``order``-th difference penalty ``D^T D`` (wrap-around)."""
+    """Circular ``order``-th difference penalty :math:`D^{\\top} D`.
+
+    The difference operator ``D`` wraps around the ends so the penalty is
+    periodic.
+
+    Parameters
+    ----------
+    n_basis
+        Number of cyclic basis functions (the penalty is
+        ``(n_basis, n_basis)``).
+    order
+        Difference order (e.g. ``2`` to penalise curvature).
+    dtype
+        Output dtype of the returned penalty.
+
+    Returns
+    -------
+    Float[Array, 'n_basis n_basis']
+        The ``(n_basis, n_basis)`` circular difference penalty.
+    """
     d1 = -np.eye(n_basis) + np.roll(np.eye(n_basis), -1, axis=1)
     d = np.linalg.matrix_power(d1, order)
     return jnp.asarray(d.T @ d, dtype=dtype)
@@ -599,7 +774,8 @@ def cyclic_cubic_basis(
 
     Returns
     -------
-    ``SplineBasis`` (``kind='cyclic'``).
+    SplineBasis
+        The :class:`SplineBasis` for the cyclic smooth (``kind='cyclic'``).
     """
     if not 1 <= penalty_order < n_basis:
         raise ValueError(
@@ -643,15 +819,30 @@ def cyclic_cubic_basis(
 def _cr_construct(
     knots: np.ndarray,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """The mgcv ``cr`` construction: the ``beta -> f''`` map ``F`` and the
-    integrated-curvature penalty ``S = D^T B^{-1} D``.
+    """Build the mgcv ``cr`` construction matrices.
 
-    A natural cubic spline parameterised by its values ``beta`` at the knots.
-    With ``h_i`` the knot spacings, ``B`` (tridiagonal) and ``D`` map the knot
-    values to the interior second derivatives ``m = B^{-1} D beta`` (``f''`` is
-    zero at the ends -- the *natural* boundary); ``F`` pads ``m`` with those
-    zeros, and ``S`` is the exact ``integral f''(x)^2 dx``.  Host-side (the knots
-    are static across the mass axis).
+    Produces the coefficient-to-second-derivative map ``F`` and the
+    integrated-curvature penalty :math:`S = D^{\\top} B^{-1} D` for a natural
+    cubic spline parameterised by its values :math:`\\beta` at the knots.  With
+    :math:`h_i` the knot spacings, ``B`` (tridiagonal) and ``D`` map the knot
+    values to the interior second derivatives :math:`m = B^{-1} D \\beta`
+    (:math:`f''` is zero at the ends -- the *natural* boundary); ``F`` pads
+    :math:`m` with those zeros, and ``S`` is the exact
+    :math:`\\int f''(x)^2 \\, dx`.  Computed host-side (the knots are static
+    across the mass axis).
+
+    Parameters
+    ----------
+    knots
+        ``(k,)`` strictly increasing knot positions.
+
+    Returns
+    -------
+    F : numpy.ndarray
+        The ``(k, k)`` map from knot values to interior second derivatives
+        (padded with the natural-boundary zeros).
+    S : numpy.ndarray
+        The symmetric ``(k, k)`` integrated-curvature penalty.
     """
     k = knots.shape[0]
     h = np.diff(knots)  # (k-1,)
@@ -677,7 +868,23 @@ def _cr_design(
     knots: Float[Array, ' k'],
     fmap: Float[Array, 'k k'],
 ) -> Float[Array, 'm k']:
-    """Cardinal cubic-spline design at ``x`` (the knot-value interpolation)."""
+    """Cardinal cubic-spline design at ``x`` (the knot-value interpolation).
+
+    Parameters
+    ----------
+    x
+        ``(m,)`` evaluation positions.
+    knots
+        ``(k,)`` knot positions.
+    fmap
+        ``(k, k)`` coefficient-to-second-derivative map ``F`` from
+        :func:`_cr_construct`.
+
+    Returns
+    -------
+    Float[Array, 'm k']
+        The ``(m, k)`` design matrix interpolating the knot values.
+    """
     x = jnp.asarray(x)
     k = knots.shape[0]
     j = jnp.clip(jnp.searchsorted(knots, x) - 1, 0, k - 2)  # (m,) interval
@@ -695,7 +902,19 @@ def _cr_design(
 
 
 def _strictly_increasing(v: np.ndarray) -> np.ndarray:
-    """Nudge a sorted vector to be strictly increasing (de-duplicate knots)."""
+    """Nudge a sorted vector to be strictly increasing (de-duplicate knots).
+
+    Parameters
+    ----------
+    v
+        A sorted (non-decreasing) 1-D array, e.g. quantile knot positions.
+
+    Returns
+    -------
+    numpy.ndarray
+        A strictly increasing copy of ``v`` (as ``float64``), each repeated
+        entry bumped by a tiny fraction of the vector's span.
+    """
     out = v.astype(np.float64).copy()
     span = max(float(out[-1] - out[0]), 1.0)
     for i in range(1, out.shape[0]):
@@ -732,7 +951,9 @@ def cr_basis(
 
     Returns
     -------
-    ``SplineBasis`` (``kind='cr'``).
+    SplineBasis
+        The :class:`SplineBasis` for the cubic-regression smooth
+        (``kind='cr'``).
     """
     if n_basis < 4:
         raise ValueError(f'cr_basis: n_basis={n_basis} must be >= 4.')
@@ -777,7 +998,22 @@ def cr_basis(
 def _matern32_kernel(
     r: Float[Array, '...'], rho: float
 ) -> Float[Array, '...']:
-    """Matern-3/2 correlation ``(1 + sqrt(3) r / rho) exp(-sqrt(3) r / rho)``."""
+    """Matern-3/2 correlation
+    :math:`(1 + \\sqrt{3}\\, r / \\rho) \\exp(-\\sqrt{3}\\, r / \\rho)`.
+
+    Parameters
+    ----------
+    r
+        Non-negative distances (any shape).
+    rho
+        Correlation length (kernel range).
+
+    Returns
+    -------
+    Float[Array, '...']
+        The Matern-3/2 correlation at each distance, matching the shape of
+        ``r``.
+    """
     s = jnp.sqrt(3.0) * r / rho
     return (1.0 + s) * jnp.exp(-s)
 
@@ -794,12 +1030,13 @@ def gp_basis(
     """Build a Gaussian-process smooth (mgcv ``bs='gp'``) for covariate ``x``.
 
     A low-rank kriging smooth with a **Matern-3/2** covariance kernel of range
-    ``rho``: the smooth is ``f(x) = sum_j C(|x - z_j|) delta_j`` over knots ``z``
-    with the RKHS penalty ``delta^T C_zz delta`` (``C_zz`` the kernel Gram at the
-    knots).  Constructed like the thin-plate basis -- the radial features are
-    eigen-reparameterised so the penalty is diagonal and truncated to the
-    ``n_basis`` leading components (a one-off host ``eigh``, cuSOLVER-free on the
-    broken GPU).
+    ``rho``: the smooth is :math:`f(x) = \\sum_j C(|x - z_j|) \\delta_j` over
+    knots :math:`z` with the RKHS penalty
+    :math:`\\delta^{\\top} C_{zz} \\delta` (:math:`C_{zz}` the kernel Gram at
+    the knots).  Constructed like the thin-plate basis -- the radial features
+    are eigen-reparameterised so the penalty is diagonal and truncated to the
+    ``n_basis`` leading components (a one-off host eigendecomposition,
+    cuSOLVER-free on the broken GPU).
 
     Parameters
     ----------
@@ -810,7 +1047,8 @@ def gp_basis(
     rho
         Kernel range (correlation length).  Defaults to the data range / 2.
     max_knots
-        Cap on the number of knots (quantile-placed) bounding the ``eigh`` cost.
+        Cap on the number of knots (quantile-placed) bounding the
+        eigendecomposition cost.
     bounds
         ``(lo, hi)`` recorded for re-evaluation (defaults to the data range).
     center
@@ -818,7 +1056,8 @@ def gp_basis(
 
     Returns
     -------
-    ``SplineBasis`` (``kind='gp'``).
+    SplineBasis
+        The :class:`SplineBasis` for the kriging GP smooth (``kind='gp'``).
     """
     x = jnp.asarray(x)
     n = x.shape[0]
@@ -900,7 +1139,21 @@ _HSGP_NYQUIST_MIN = 2.4
 def _check_hsgp_resolution(
     sqrt_lambda_top: float, rho: Optional[float], n_basis: int, where: str
 ) -> None:
-    """Warn when the rank under-resolves the kernel for a *given* ``rho``."""
+    """Warn when the rank under-resolves the kernel for a *given* ``rho``.
+
+    Parameters
+    ----------
+    sqrt_lambda_top
+        The largest eigen-frequency :math:`\\sqrt{\\lambda_{top}}` of the
+        reduced-rank basis.
+    rho
+        Kernel lengthscale; ``None`` or non-positive disables the check.
+    n_basis
+        Reduced rank (number of retained eigenfunctions), used in the warning
+        message.
+    where
+        Caller label prepended to the warning message.
+    """
     if rho is None or not rho > 0:
         return
     reach = float(sqrt_lambda_top) * float(rho)
@@ -927,21 +1180,24 @@ def hsgp_basis(
 ) -> SplineBasis:
     """Build a Hilbert-space approximate GP smooth (HSGP) for covariate ``x``.
 
-    A reduced-rank stationary GP on the bounded domain ``[c - L, c + L]``
-    (``c`` the data midrange, ``L = boundary * half-range``), expanded in the
-    Dirichlet-Laplacian eigenfunctions ``phi_j(x) = sqrt(1/L) sin(sqrt(lam_j)
-    (x - c + L))`` with ``sqrt(lam_j) = j pi / (2 L)``.  The kernel enters
-    **only** through the spectral density weights ``s_j = S_theta(sqrt(lam_j))``
-    (:func:`~nitrix.linalg.kernel.spectral_density`): the whitened design is
-    ``Psi = [sqrt(s_j) phi_j(x)]`` with an **identity penalty**, so the basis is
-    a drop-in smooth for :func:`gam_fit` and the Fellner-Schall smoothing
-    parameter ``lambda = 1 / sigma_f**2`` is the GP amplitude.
+    A reduced-rank stationary GP on the bounded domain :math:`[c - L, c + L]`
+    (:math:`c` the data midrange, :math:`L = boundary \\cdot \\text{half-range}`),
+    expanded in the Dirichlet-Laplacian eigenfunctions
+    :math:`\\phi_j(x) = \\sqrt{1/L} \\sin(\\sqrt{\\lambda_j}\\,(x - c + L))` with
+    :math:`\\sqrt{\\lambda_j} = j \\pi / (2 L)`.  The kernel enters **only**
+    through the spectral density weights
+    :math:`s_j = S_\\theta(\\sqrt{\\lambda_j})`
+    (:func:`~nitrix.linalg.spectral_density`): the whitened design is
+    :math:`\\Psi = [\\sqrt{s_j}\\, \\phi_j(x)]` with an **identity penalty**, so
+    the basis is a drop-in smooth for :func:`~nitrix.stats.gam_fit` and the
+    Fellner-Schall smoothing parameter :math:`\\lambda = 1 / \\sigma_f^2` is the
+    GP amplitude.
 
     Unlike the kriging :func:`gp_basis`, the eigenfunctions are independent of
     the kernel hyperparameters, so the lengthscale ``rho`` enters as a diagonal
-    reweighting of a fixed design -- the basis for ``eigh``-free ``rho``
-    estimation (the standalone ``gp_fit``; not this constructor, which fixes
-    ``rho``).
+    reweighting of a fixed design -- the basis for eigendecomposition-free
+    lengthscale estimation (the standalone :func:`~nitrix.stats.gp_fit`; not
+    this constructor, which fixes ``rho``).
 
     Parameters
     ----------
@@ -952,13 +1208,15 @@ def hsgp_basis(
     kernel
         Stationary kernel: ``'matern12'`` / ``'matern32'`` / ``'matern52'`` /
         ``'rbf'`` (squared-exponential).  See
-        :func:`~nitrix.linalg.kernel.spectral_density`.
+        :func:`~nitrix.linalg.spectral_density`.
     rho
         Kernel lengthscale.  Defaults to the data half-range (a sane fixed
-        value; lengthscale *estimation* is the standalone ``gp_fit``).
+        value; lengthscale *estimation* is the standalone
+        :func:`~nitrix.stats.gp_fit`).
     amplitude
         Kernel amplitude folded into the weights; keep ``1.0`` when fitting via
-        ``gam_fit`` (the smoothing parameter carries the amplitude).
+        :func:`~nitrix.stats.gam_fit` (the smoothing parameter carries the
+        amplitude).
     boundary
         Domain-extension factor ``L / half-range`` (``>= 1``; default ``1.5``).
         Larger values reduce boundary bias; small ``rho`` needs larger
@@ -970,7 +1228,8 @@ def hsgp_basis(
 
     Returns
     -------
-    ``SplineBasis`` (``kind='hsgp'``).
+    SplineBasis
+        The :class:`SplineBasis` for the HSGP smooth (``kind='hsgp'``).
     """
     if not 1 <= n_basis:
         raise ValueError(f'hsgp_basis: n_basis={n_basis} must be >= 1.')
@@ -995,12 +1254,13 @@ def hsgp_basis(
     # phase_j), phase_j = sqrt(lam_j)(L - c).
     j = np.arange(1, n_basis + 1, dtype=np.float64)
     sqrt_lambda = j * np.pi / (2.0 * L)  # (m,)
-    _check_hsgp_resolution(
-        float(sqrt_lambda[-1]), rho, n_basis, 'hsgp_basis'
-    )
+    _check_hsgp_resolution(float(sqrt_lambda[-1]), rho, n_basis, 'hsgp_basis')
     s = np.asarray(
         spectral_density(
-            jnp.asarray(sqrt_lambda), kernel=kernel, rho=rho_v, amplitude=amplitude
+            jnp.asarray(sqrt_lambda),
+            kernel=kernel,
+            rho=rho_v,
+            amplitude=amplitude,
         ),
         dtype=np.float64,
     )
@@ -1053,18 +1313,20 @@ def hsgp_basis(
 @jax.tree_util.register_pytree_node_class
 @dataclass(frozen=True)
 class _FactorGPBasis:
-    """A factor-smooth GP interaction: a separate GP curve per factor level, all
-    sharing **one** smoothing parameter (mgcv ``bs="fs"`` with a GP marginal).
+    """A factor-smooth GP interaction sharing one smoothing parameter.
 
-    The whitened HSGP design ``Psi`` (at a fixed ``rho``) is replicated per group
-    -- level ``g``'s columns are ``Psi`` on its own rows, zero elsewhere -- and the
-    penalty is the **identity**, so the single Fellner-Schall smoothing parameter
-    on this block **is** the shared group precision ``1 / sigma_grp^2`` (the
-    penalty<->variance-component identity, exactly as :class:`REBasis` but with the
-    GP basis in place of the one-hot).  Pair it with a population
-    :func:`hsgp_basis` of the same ``rho`` (plus the intercept) in ``gam_fit`` for
-    the "GS" hierarchical GP at fixed ``rho`` -- the basis counterpart of
-    :func:`~nitrix.stats.hgp.hgp_fit` (which additionally estimates ``rho``).
+    A separate GP curve per factor level, all sharing **one** smoothing
+    parameter (mgcv ``bs="fs"`` with a GP marginal).  The whitened HSGP design
+    :math:`\\Psi` (at a fixed ``rho``) is replicated per group -- level
+    :math:`g`'s columns are :math:`\\Psi` on its own rows, zero elsewhere --
+    and the penalty is the **identity**, so the single Fellner-Schall smoothing
+    parameter on this block **is** the shared group precision
+    :math:`1 / \\sigma_{grp}^2` (the penalty-versus-variance-component identity,
+    exactly as :class:`REBasis` but with the GP basis in place of the one-hot).
+    Pair it with a population :func:`hsgp_basis` of the same ``rho`` (plus the
+    intercept) in :func:`~nitrix.stats.gam_fit` for the "GS" hierarchical GP at
+    fixed ``rho`` -- the basis counterpart of :func:`~nitrix.stats.hgp_fit`
+    (which additionally estimates ``rho``).
 
     Attributes
     ----------
@@ -1089,16 +1351,37 @@ class _FactorGPBasis:
         return self.design.shape[-1]
 
     def penalty_blocks(self) -> List[Tuple[np.ndarray, np.ndarray]]:
-        """Penalty blocks ``[(I, 1)]``: the identity ridge (full rank, eigenvalues
-        one -- a single shared smoothing parameter across all groups)."""
+        """Return the single identity-ridge penalty block.
+
+        The block is the identity ridge (full rank, all eigenvalues one), so a
+        single shared smoothing parameter is applied across all groups.
+
+        Returns
+        -------
+        list of tuple of numpy.ndarray
+            A single ``(I, 1)`` pair: the identity penalty and its all-ones
+            eigenvalues.
+        """
         return [(np.asarray(self.penalty), np.ones(self.dim))]
 
-    def eval_design(
-        self, x: Any
-    ) -> Float[Array, 'g Lm']:
-        """Re-evaluate at new ``(x_vals, group)`` (a tuple, the by-factor
-        convention): the whitened GP design at ``x_vals`` placed in each
-        observation's group block."""
+    def eval_design(self, x: Any) -> Float[Array, 'g Lm']:
+        """Re-evaluate the factor-smooth design at new points.
+
+        The whitened GP design at ``x_vals`` is placed in each observation's
+        group block, leaving the other blocks zero.
+
+        Parameters
+        ----------
+        x
+            A ``(x_vals, group)`` tuple (the by-factor convention): ``x_vals``
+            the ``(g,)`` covariate grid and ``group`` the ``(g,)`` integer
+            level labels.
+
+        Returns
+        -------
+        Float[Array, 'g Lm']
+            The ``(g, L*m)`` factor-smooth design at the requested points.
+        """
         x_vals, group = x
         psi = spline_design(self.base, jnp.asarray(x_vals))  # (g, m)
         group = jnp.asarray(group).astype(jnp.int32)
@@ -1141,9 +1424,10 @@ def gp_factor_smooth(
     sharing **one** smoothing parameter (so the per-group curves are random
     deviations with a common amplitude -- partial pooling).  This is the
     **fixed-``rho``** building block of the hierarchical GP: drop it into
-    ``gam_fit`` alongside a population :func:`hsgp_basis` of the same ``rho`` (and
-    the intercept) for the "GS" hierarchical GP.  For *estimated* ``rho`` and the
-    full variance-component report, use :func:`~nitrix.stats.hgp.hgp_fit`.
+    :func:`~nitrix.stats.gam_fit` alongside a population :func:`hsgp_basis` of
+    the same ``rho`` (and the intercept) for the "GS" hierarchical GP.  For
+    *estimated* ``rho`` and the full variance-component report, use
+    :func:`~nitrix.stats.hgp_fit`.
 
     Parameters
     ----------
@@ -1156,7 +1440,8 @@ def gp_factor_smooth(
         wide, so a smaller rank than :func:`hsgp_basis` is usual).
     kernel, rho, amplitude, boundary, bounds
         HSGP marginal parameters (see :func:`hsgp_basis`); ``rho`` defaults to the
-        data half-range (a fixed value -- lengthscale estimation is ``hgp_fit``).
+        data half-range (a fixed value -- lengthscale estimation is
+        :func:`~nitrix.stats.hgp_fit`).
     center
         Sum-to-zero each group's smooth (default ``False`` -- the group curves
         carry their own level, the usual factor-smooth; set ``True`` to pair with
@@ -1167,13 +1452,21 @@ def gp_factor_smooth(
 
     Returns
     -------
-    ``_FactorGPBasis`` (a :data:`SmoothBasis`) for ``gam_fit``; the single
-    Fellner-Schall smoothing parameter on this block is the shared group
-    precision ``1 / sigma_grp^2``.
+    _FactorGPBasis
+        A factor-smooth GP basis (a :class:`SmoothBasis`) for
+        :func:`~nitrix.stats.gam_fit`; the single Fellner-Schall smoothing
+        parameter on this block is the shared group precision
+        :math:`1 / \\sigma_{grp}^2`.
     """
     base = hsgp_basis(
-        x, n_basis, kernel=kernel, rho=rho, amplitude=amplitude,
-        boundary=boundary, bounds=bounds, center=center,
+        x,
+        n_basis,
+        kernel=kernel,
+        rho=rho,
+        amplitude=amplitude,
+        boundary=boundary,
+        bounds=bounds,
+        center=center,
     )
     group = jnp.asarray(group)
     L = int(n_levels) if n_levels is not None else int(jnp.max(group)) + 1
@@ -1203,9 +1496,30 @@ def _hsgp_nd_raw(
     inv_sqrt_L: Float[Array, ' D'],
     sqrt_s: Float[Array, ' M'],
 ) -> Float[Array, 'g M']:
-    """Whitened tensor-product eigenfunction design (pre-constraint): for mode
-    ``m`` and point ``x``, ``sqrt(s_m) * prod_d sqrt(1/L_d) sin(w_{m,d} x_d +
-    phase_{m,d})``."""
+    """Whitened tensor-product eigenfunction design (pre-constraint).
+
+    For mode :math:`m` and point :math:`x`, the design entry is
+    :math:`\\sqrt{s_m} \\prod_d \\sqrt{1/L_d}
+    \\sin(w_{m,d} x_d + phase_{m,d})`.
+
+    Parameters
+    ----------
+    X
+        ``(g, D)`` evaluation points.
+    freqs
+        ``(M, D)`` per-mode per-dimension eigen-frequencies.
+    phase
+        ``(M, D)`` per-mode per-dimension phases (folding in the domain centre).
+    inv_sqrt_L
+        ``(D,)`` per-dimension :math:`\\sqrt{1/L_d}` amplitudes.
+    sqrt_s
+        ``(M,)`` per-mode spectral-weight square roots.
+
+    Returns
+    -------
+    Float[Array, 'g M']
+        The ``(g, M)`` whitened tensor-product design.
+    """
     X = jnp.asarray(X)
     arg = freqs[None, :, :] * X[:, None, :] + phase[None, :, :]  # (g, M, D)
     terms = inv_sqrt_L[None, None, :] * jnp.sin(arg)
@@ -1219,16 +1533,19 @@ class _HSGPndBasis:
     """A multi-dimensional Hilbert-space approximate GP smooth (tensor-product).
 
     The ``D``-dimensional analogue of :func:`hsgp_basis`: a reduced-rank GP on a
-    box domain, expanded in the **tensor-product** Laplace-Dirichlet eigenfunctions
-    ``phi_{j_1..j_D}(x) = prod_d phi_{j_d}(x_d)`` (eigenvalue ``sum_d lambda_{j_d}``),
-    with the kernel entering only through the spectral-density weights of the mode
-    frequency magnitude.  Whitened design, identity penalty -- a drop-in
-    ``gam_fit`` smooth (the Fellner-Schall parameter is the GP amplitude).
+    box domain, expanded in the **tensor-product** Laplace-Dirichlet
+    eigenfunctions
+    :math:`\\phi_{j_1 \\ldots j_D}(x) = \\prod_d \\phi_{j_d}(x_d)` (eigenvalue
+    :math:`\\sum_d \\lambda_{j_d}`), with the kernel entering only through the
+    spectral-density weights of the mode frequency magnitude.  Whitened design,
+    identity penalty -- a drop-in :func:`~nitrix.stats.gam_fit` smooth (the
+    Fellner-Schall parameter is the GP amplitude).
 
     Attributes
     ----------
     design
-        ``(n, M)`` whitened design (``M = prod_d m_d`` modes, post-constraint).
+        ``(n, M)`` whitened design (:math:`M = \\prod_d m_d` modes,
+        post-constraint).
     penalty
         ``(M, M)`` identity penalty (post-constraint).
     constraint
@@ -1237,7 +1554,7 @@ class _HSGPndBasis:
         ``(M0, D)`` per-mode per-dimension eigen-frequency and phase (pre-
         constraint ``M0``).
     inv_sqrt_L
-        ``(D,)`` per-dimension ``sqrt(1/L_d)`` amplitude.
+        ``(D,)`` per-dimension :math:`\\sqrt{1/L_d}` amplitude.
     sqrt_s
         ``(M0,)`` per-mode spectral-weight square roots.
     n_dim
@@ -1259,16 +1576,41 @@ class _HSGPndBasis:
         return self.design.shape[-1]
 
     def penalty_blocks(self) -> List[Tuple[np.ndarray, np.ndarray]]:
-        """Penalty blocks ``[(S, eig)]`` (identity ridge; one smoothing param)."""
+        """Return the single identity-ridge penalty block.
+
+        The block is the identity ridge (one smoothing parameter across all
+        modes) together with its eigenvalues, the null space floored to zero.
+
+        Returns
+        -------
+        list of tuple of numpy.ndarray
+            A single ``(S, eig)`` pair: the penalty matrix and its floored
+            eigenvalues.
+        """
         s = np.asarray(self.penalty)
         w, _ = np.linalg.eigh(s)
         floor = 1e-10 * max(float(w.max()), float(np.finfo(w.dtype).tiny))
         return [(s, np.where(w > floor, w, 0.0))]
 
     def eval_design(self, x: Float[Array, 'g D']) -> Float[Array, 'g M']:
-        """Re-evaluate the tensor-product design at new points ``x`` (``(g, D)``)."""
+        """Re-evaluate the tensor-product design at new points.
+
+        Parameters
+        ----------
+        x
+            ``(g, D)`` evaluation points.
+
+        Returns
+        -------
+        Float[Array, 'g M']
+            The ``(g, M)`` design matrix at ``x`` (post-constraint).
+        """
         raw = _hsgp_nd_raw(
-            jnp.asarray(x), self.freqs, self.phase, self.inv_sqrt_L, self.sqrt_s
+            jnp.asarray(x),
+            self.freqs,
+            self.phase,
+            self.inv_sqrt_L,
+            self.sqrt_s,
         )
         if self.constraint is not None:
             raw = raw @ self.constraint
@@ -1279,8 +1621,13 @@ class _HSGPndBasis:
     ) -> Tuple[Tuple[Any, ...], Tuple[int]]:
         return (
             (
-                self.design, self.penalty, self.constraint,
-                self.freqs, self.phase, self.inv_sqrt_L, self.sqrt_s,
+                self.design,
+                self.penalty,
+                self.constraint,
+                self.freqs,
+                self.phase,
+                self.inv_sqrt_L,
+                self.sqrt_s,
             ),
             (self.n_dim,),
         )
@@ -1289,11 +1636,18 @@ class _HSGPndBasis:
     def tree_unflatten(
         cls, aux: Tuple[int], children: Tuple[Any, ...]
     ) -> '_HSGPndBasis':
-        (design, penalty, constraint, freqs, phase, inv_sqrt_L, sqrt_s) = children
+        (design, penalty, constraint, freqs, phase, inv_sqrt_L, sqrt_s) = (
+            children
+        )
         (n_dim,) = aux
         return cls(
-            design=design, penalty=penalty, constraint=constraint,
-            freqs=freqs, phase=phase, inv_sqrt_L=inv_sqrt_L, sqrt_s=sqrt_s,
+            design=design,
+            penalty=penalty,
+            constraint=constraint,
+            freqs=freqs,
+            phase=phase,
+            inv_sqrt_L=inv_sqrt_L,
+            sqrt_s=sqrt_s,
             n_dim=n_dim,
         )
 
@@ -1322,9 +1676,9 @@ def hsgp_basis_nd(
         ``(n, D)`` covariates (``D >= 1`` columns).
     n_basis
         Per-dimension rank: an int (the same ``m`` for every dimension) or a
-        length-``D`` sequence ``[m_1, ..., m_D]``.  The total rank is the product
-        ``M = prod_d m_d`` (it grows fast with ``D`` -- keep ``m`` modest for
-        ``D >= 2``).
+        length-``D`` sequence :math:`[m_1, \\ldots, m_D]`.  The total rank is
+        the product :math:`M = \\prod_d m_d` (it grows fast with ``D`` -- keep
+        ``m`` modest for ``D >= 2``).
     kernel
         Stationary kernel: ``'matern52'`` (default) / ``'matern32'`` /
         ``'matern12'`` / ``'rbf'``.
@@ -1335,20 +1689,26 @@ def hsgp_basis_nd(
         ``None`` (default) is isotropic with ``rho`` the mean per-dimension
         half-range.
     amplitude
-        Kernel amplitude folded into the weights; keep ``1.0`` for ``gam_fit``.
+        Kernel amplitude folded into the weights; keep ``1.0`` for
+        :func:`~nitrix.stats.gam_fit`.
     boundary
-        Domain-extension factor ``L_d / half-range_d`` (``>= 1``; default ``1.5``).
+        Domain-extension factor :math:`L_d / \\text{half-range}_d` (``>= 1``;
+        default ``1.5``).
     center
         Apply the sum-to-zero identifiability constraint (default ``True``).
 
     Returns
     -------
-    ``_HSGPndBasis`` (a :data:`SmoothBasis`) for ``gam_fit``; its
-    ``eval_design`` takes new ``(g, D)`` points.
+    _HSGPndBasis
+        A multi-dimensional HSGP basis (a :class:`SmoothBasis`) for
+        :func:`~nitrix.stats.gam_fit`; its ``eval_design`` takes new
+        ``(g, D)`` points.
     """
     X = jnp.asarray(X)
     if X.ndim != 2:
-        raise ValueError(f'hsgp_basis_nd: X must be (n, D); got shape {X.shape}.')
+        raise ValueError(
+            f'hsgp_basis_nd: X must be (n, D); got shape {X.shape}.'
+        )
     n, d_in = X.shape
     if not boundary >= 1.0:
         raise ValueError(f'hsgp_basis_nd: boundary={boundary} must be >= 1.0.')
@@ -1364,7 +1724,9 @@ def hsgp_basis_nd(
                 f'D={d_in}.'
             )
     if any(mm < 1 for mm in m_per):
-        raise ValueError('hsgp_basis_nd: every per-dimension rank must be >= 1.')
+        raise ValueError(
+            'hsgp_basis_nd: every per-dimension rank must be >= 1.'
+        )
 
     lo = x_np.min(axis=0)
     hi = x_np.max(axis=0)
@@ -1391,7 +1753,9 @@ def hsgp_basis_nd(
         if len(rho_per) == d_in:
             for d in range(d_in):
                 _check_hsgp_resolution(
-                    float(sqrt_lams[d][-1]), rho_per[d], m_per[d],
+                    float(sqrt_lams[d][-1]),
+                    rho_per[d],
+                    m_per[d],
                     f'hsgp_basis_nd[axis {d}]',
                 )
 
@@ -1402,14 +1766,20 @@ def hsgp_basis_nd(
         s = np.asarray(
             spectral_density(
                 jnp.asarray(np.sqrt((freqs_np**2).sum(axis=1))),
-                kernel=kernel, rho=rho_iso, amplitude=amplitude, dim=d_in,
+                kernel=kernel,
+                rho=rho_iso,
+                amplitude=amplitude,
+                dim=d_in,
             )
         )
     elif isinstance(rho, (int, float, np.floating, np.integer)):
         s = np.asarray(
             spectral_density(
                 jnp.asarray(np.sqrt((freqs_np**2).sum(axis=1))),
-                kernel=kernel, rho=float(rho), amplitude=amplitude, dim=d_in,
+                kernel=kernel,
+                rho=float(rho),
+                amplitude=amplitude,
+                dim=d_in,
             )
         )
     else:
@@ -1423,8 +1793,11 @@ def hsgp_basis_nd(
         for d in range(d_in):
             s = s * np.asarray(
                 spectral_density(
-                    jnp.asarray(freqs_np[:, d]), kernel=kernel,
-                    rho=rho_seq[d], amplitude=amplitude, dim=1,
+                    jnp.asarray(freqs_np[:, d]),
+                    kernel=kernel,
+                    rho=rho_seq[d],
+                    amplitude=amplitude,
+                    dim=1,
                 )
             )
     sqrt_s = np.sqrt(np.clip(s, 1e-30, None))
@@ -1469,14 +1842,15 @@ def mrf_smooth(
     center: bool = True,
 ) -> SplineBasis:
     """Build a Markov-random-field smooth (mgcv ``bs='mrf'``) over a region
-    adjacency -- the natural smoother on a parcel / vertex graph.
+    adjacency.
 
-    Each observation carries an integer region ``label`` in ``0 .. R-1``; the
-    smooth is a per-region effect (design = region indicator) penalised by the
-    **combinatorial graph Laplacian** ``L = D - A`` of the region adjacency
-    (``beta^T L beta = sum_{i~j} (beta_i - beta_j)^2`` -- neighbouring regions are
-    shrunk together).  The penalty is ``nitrix.graph.laplacian`` -- a direct
-    substrate reuse.
+    The natural smoother on a parcel / vertex graph.  Each observation carries
+    an integer region ``label`` in ``0 .. R-1``; the smooth is a per-region
+    effect (design = region indicator) penalised by the **combinatorial graph
+    Laplacian** :math:`L = D - A` of the region adjacency
+    (:math:`\\beta^{\\top} L \\beta = \\sum_{i \\sim j} (\\beta_i - \\beta_j)^2`
+    -- neighbouring regions are shrunk together).  The penalty is built with
+    :func:`~nitrix.graph.laplacian` -- a direct substrate reuse.
 
     Parameters
     ----------
@@ -1490,7 +1864,9 @@ def mrf_smooth(
 
     Returns
     -------
-    ``SplineBasis`` (``kind='mrf'``); ``n_basis = R``.
+    SplineBasis
+        The :class:`SplineBasis` for the MRF smooth (``kind='mrf'``, with
+        ``n_basis = R``).
     """
     labels = jnp.asarray(labels)
     a = jnp.asarray(neighbours)
@@ -1538,6 +1914,17 @@ def _row_kron(designs: Tuple[np.ndarray, ...]) -> np.ndarray:
     For designs ``[A (n, k1), B (n, k2), ...]`` the result is ``(n, k1*k2*...)``
     whose row ``i`` is the flattened outer product of the marginal rows -- the
     tensor-product basis evaluated at the matched covariate tuple of row ``i``.
+
+    Parameters
+    ----------
+    designs
+        A tuple of marginal designs, each ``(n, k_j)`` and sharing the row
+        count ``n``.
+
+    Returns
+    -------
+    numpy.ndarray
+        The ``(n, k1*k2*...)`` row-wise Kronecker product.
     """
     out = designs[0]
     for d in designs[1:]:
@@ -1550,23 +1937,27 @@ def _row_kron(designs: Tuple[np.ndarray, ...]) -> np.ndarray:
 @jax.tree_util.register_pytree_node_class
 @dataclass(frozen=True)
 class TensorBasis:
-    """An anisotropic tensor-product interaction smooth ``f(x_1, ..., x_d)``.
+    """An anisotropic tensor-product interaction smooth
+    :math:`f(x_1, \\ldots, x_d)`.
 
     Built from ``d`` marginal :class:`SplineBasis` (already sum-to-zero
     constrained) by the **row-wise tensor product** of their designs and the
-    Kronecker-sum of per-margin penalties ``S_j = I (x) ... P_j ... (x) I`` --
-    so each margin keeps its own smoothing parameter (selected jointly by the
-    GAM Fellner-Schall loop, which handles ``> 1`` penalty per smooth).  This is
-    mgcv's tensor **interaction** (``ti``): the marginal centring removes the
+    Kronecker-sum of per-margin penalties
+    :math:`S_j = I \\otimes \\cdots P_j \\cdots \\otimes I` -- so each margin
+    keeps its own smoothing parameter (selected jointly by the GAM
+    Fellner-Schall loop, which handles more than one penalty per smooth).  This
+    is mgcv's tensor **interaction** (``ti``): the marginal centring removes the
     main effects, so the term models the *interaction* and stays identifiable
-    against the intercept; add marginal ``s(x_j)`` smooths for a full ``te``.
+    against the intercept; add marginal :math:`s(x_j)` smooths for a full
+    ``te``.
 
     The marginal penalties commute (Kronecker structure), so they are
-    **simultaneously diagonalisable**: ``pen_eig[j]`` is penalty ``j`` in the
-    joint eigenbasis (``U_1 (x) ... (x) U_d``), which the GAM engine uses to
-    evaluate the smoothing-parameter trace ``tr(S_lambda^+ S_j)`` as an
-    elementwise sum -- cuSOLVER-free, no per-iteration pseudo-inverse -- while
-    the fit itself keeps the original (non-rotated) tensor basis.
+    **simultaneously diagonalisable**: ``pen_eig[j]`` is penalty :math:`j` in
+    the joint eigenbasis (:math:`U_1 \\otimes \\cdots \\otimes U_d`), which the
+    GAM engine uses to evaluate the smoothing-parameter trace
+    :math:`\\operatorname{tr}(S_\\lambda^{+} S_j)` as an elementwise sum --
+    cuSOLVER-free, no per-iteration pseudo-inverse -- while the fit itself keeps
+    the original (non-rotated) tensor basis.
 
     Attributes
     ----------
@@ -1595,8 +1986,16 @@ class TensorBasis:
         return self.design.shape[-1]
 
     def penalty_blocks(self) -> list:
-        """Penalty blocks ``[(S_j, eig_j)]`` (audit D8): one per margin -- the
-        Kronecker-embedded penalty and its joint-eigenbasis eigenvalues."""
+        """Return the per-margin penalty blocks.
+
+        One block per margin: the Kronecker-embedded penalty and its
+        joint-eigenbasis eigenvalues.
+
+        Returns
+        -------
+        list of tuple of numpy.ndarray
+            One ``(S_j, eig_j)`` pair per margin.
+        """
         pens = np.asarray(self.penalties)
         eigs = np.asarray(self.pen_eig)
         return [(pens[j], eigs[j]) for j in range(pens.shape[0])]
@@ -1604,8 +2003,19 @@ class TensorBasis:
     def eval_design(
         self, x: Tuple[Float[Array, ' g'], ...]
     ) -> Float[Array, 'g K']:
-        """Re-evaluate the tensor design on matched per-margin grids ``x``
-        (audit D8): pass one length-``g`` grid per margin."""
+        """Re-evaluate the tensor design on matched per-margin grids.
+
+        Parameters
+        ----------
+        x
+            A tuple of one length-``g`` grid per margin; point ``t`` has
+            covariate tuple ``(x[0][t], ..., x[d-1][t])``.
+
+        Returns
+        -------
+        Float[Array, 'g K']
+            The ``(g, K)`` tensor design along the matched path.
+        """
         return tensor_product_design(self, tuple(x))
 
     def tree_flatten(
@@ -1649,7 +2059,9 @@ def tensor_product_basis(
 
     Returns
     -------
-    ``TensorBasis`` (design ``(n, prod k_j)`` and the per-margin penalties).
+    TensorBasis
+        The :class:`TensorBasis` with the ``(n, prod_j k_j)`` design and the
+        per-margin penalties.
     """
     if len(margins) < 2:
         raise ValueError(
@@ -1710,12 +2122,23 @@ def tensor_product_basis(
 def tensor_product_design(
     basis: TensorBasis, xs: Tuple[Float[Array, ' g'], ...]
 ) -> Float[Array, 'g K']:
-    """Re-evaluate a ``TensorBasis`` on a matched covariate grid.
+    """Re-evaluate a :class:`TensorBasis` on a matched covariate grid.
 
     ``xs`` is one grid per margin (all length ``g``); point ``t`` has covariate
-    tuple ``(xs[0][t], ..., xs[d-1][t])``.  Returns the ``(g, K)`` tensor design
-    -- ``@`` the fitted tensor coefficients renders the interaction surface
-    along that path.
+    tuple ``(xs[0][t], ..., xs[d-1][t])``.  Matrix-multiplying the result by the
+    fitted tensor coefficients renders the interaction surface along that path.
+
+    Parameters
+    ----------
+    basis
+        The :class:`TensorBasis` to re-evaluate.
+    xs
+        A tuple of one length-``g`` grid per margin.
+
+    Returns
+    -------
+    Float[Array, 'g K']
+        The ``(g, K)`` tensor design at the matched grid points.
     """
     if len(xs) != len(basis.margins):
         raise ValueError(
@@ -1743,11 +2166,11 @@ class REBasis:
     design is the one-hot indicator (intercept) or one-hot times a covariate
     (slope) over the factor levels, and the penalty is the **identity** (a
     ridge).  The single smoothing parameter the Fellner-Schall loop selects
-    **is** the random-effect precision ``lambda = 1 / sigma_b^2`` -- the v1
-    "penalised GLM == variance-components REML" identity, now reachable.  It is a
-    third :data:`Smooth` variant alongside :class:`SplineBasis` /
-    :class:`TensorBasis`, so it slots straight into ``gam_fit`` with **no new
-    solver work** (a random effect is just one more penalty block).
+    **is** the random-effect precision :math:`\\lambda = 1 / \\sigma_b^2` -- the
+    "penalised GLM equals variance-components REML" identity.  It is a third
+    smooth-term variant alongside :class:`SplineBasis` / :class:`TensorBasis`,
+    so it slots straight into :func:`~nitrix.stats.gam_fit` with **no new solver
+    work** (a random effect is just one more penalty block).
 
     Unlike a spline, an RE has no continuous covariate to re-evaluate, so it
     carries only ``(design, penalty, levels)`` -- not the spline construction
@@ -1774,15 +2197,33 @@ class REBasis:
         return self.design.shape[-1]
 
     def penalty_blocks(self) -> list:
-        """Penalty blocks ``[(I, 1)]`` (audit D8): the identity ridge (full rank
-        ``q``, eigenvalues exactly one -- no host eigh)."""
+        """Return the single identity-ridge penalty block.
+
+        The block is the identity ridge (full rank ``q``, all eigenvalues
+        exactly one -- no host eigendecomposition needed).
+
+        Returns
+        -------
+        list of tuple of numpy.ndarray
+            A single ``(I, 1)`` pair: the identity penalty and its all-ones
+            eigenvalues.
+        """
         return [(np.asarray(self.penalty), np.ones(self.dim))]
 
-    def eval_design(
-        self, x: Float[Array, ' g']
-    ) -> Float[Array, 'g q']:
-        """Re-evaluate as the one-hot of the requested level indices ``x``
-        (audit D8): the per-level random effect at those levels."""
+    def eval_design(self, x: Float[Array, ' g']) -> Float[Array, 'g q']:
+        """Re-evaluate as the one-hot of the requested level indices.
+
+        Parameters
+        ----------
+        x
+            ``(g,)`` integer level indices at which to read off the per-level
+            random effect.
+
+        Returns
+        -------
+        Float[Array, 'g q']
+            The ``(g, q)`` one-hot design of the requested levels.
+        """
         levels = jnp.asarray(x).astype(jnp.int32)
         return jax.nn.one_hot(levels, self.dim, dtype=self.design.dtype)
 
@@ -1823,9 +2264,11 @@ def re_smooth(
 
     Returns
     -------
-    ``REBasis`` (a :data:`Smooth` variant) for ``gam_fit``.  The Fellner-Schall
-    smoothing parameter on this block is the random-effect precision
-    ``1 / sigma_b^2``; the fitted block coefficients are the BLUPs.
+    REBasis
+        The :class:`REBasis` smooth-term block for
+        :func:`~nitrix.stats.gam_fit`.  The Fellner-Schall smoothing parameter
+        on this block is the random-effect precision
+        :math:`1 / \\sigma_b^2`; the fitted block coefficients are the BLUPs.
     """
     g = jnp.asarray(g)
     q = int(n_levels) if n_levels is not None else int(jnp.max(g)) + 1
@@ -1857,16 +2300,17 @@ def by_factor_smooth(
     mgcv's ``s(x, by=f)`` for a **factor** ``f``: a *separate* penalised smooth
     of ``x`` for each level of ``f``, each with its **own** smoothing parameter.
     Returns a tuple of ``len == n_levels`` :class:`SplineBasis` blocks; splat it
-    into ``gam_fit``'s ``smooths=`` (each block is an independent smooth, so the
-    Fellner-Schall loop selects a per-level ``lambda``).
+    into the ``smooths=`` argument of :func:`~nitrix.stats.gam_fit` (each block
+    is an independent smooth, so the Fellner-Schall loop selects a per-level
+    smoothing parameter).
 
     Construction: a single marginal P-spline of ``x`` (shared knots / penalty /
     centering), then level ``l``'s design is that marginal design with the rows
     where ``f != l`` zeroed -- so level ``l``'s coefficients load only on its own
     observations.  Because the per-level designs have disjoint nonzero rows, the
-    blocks are orthogonal in ``X^T W X`` (each level is fit on its own data).
-    Pair with a parametric factor main effect to carry the per-level mean (the
-    smooths are sum-to-zero when ``center=True``, as in mgcv).
+    blocks are orthogonal in :math:`X^{\\top} W X` (each level is fit on its own
+    data).  Pair with a parametric factor main effect to carry the per-level
+    mean (the smooths are sum-to-zero when ``center=True``, as in mgcv).
 
     Parameters
     ----------
@@ -1914,9 +2358,10 @@ def varying_coefficient_smooth(
     """Varying-coefficient smooth ``s(x, by=z)`` for a **continuous** ``z``.
 
     mgcv's ``s(x, by=z)`` with a numeric ``by``: the smooth term is
-    ``z * f(x)`` -- a coefficient on ``z`` that varies smoothly with ``x``.  The
-    design is the marginal P-spline of ``x`` scaled row-wise by ``z``; the
-    penalty is unchanged.  A single :class:`SplineBasis` for ``gam_fit``.
+    :math:`z\\, f(x)` -- a coefficient on ``z`` that varies smoothly with ``x``.
+    The design is the marginal P-spline of ``x`` scaled row-wise by ``z``; the
+    penalty is unchanged.  A single :class:`SplineBasis` for
+    :func:`~nitrix.stats.gam_fit`.
 
     Parameters
     ----------
@@ -1926,6 +2371,12 @@ def varying_coefficient_smooth(
         ``(n,)`` continuous covariate the smooth multiplies.
     n_basis, degree, penalty_order, bounds, center
         Marginal P-spline parameters (see :func:`bspline_basis`).
+
+    Returns
+    -------
+    SplineBasis
+        The :class:`SplineBasis` whose design is the marginal P-spline scaled
+        row-wise by ``by``.
     """
     base = bspline_basis(
         x,

@@ -1,0 +1,52 @@
+---
+title: "conjunction"
+generated: true
+description: "Minimum-statistic conjunction across `k` contrasts."
+---
+
+[‹ back to `nitrix.stats.inference.multiple_comparisons`](../nitrix-stats-inference-multiple_comparisons.qmd)
+
+<!-- nitrix:gen sig:conjunction -->
+```python
+conjunction(stats: Float[Array, 'k *spatial']) -> Float[Array, '*spatial']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:conjunction -->
+Minimum-statistic conjunction across `k` contrasts.
+
+Returns the per-element minimum statistic over the `k` contrasts, the valid
+statistic for the conjunction null *"at least one of the `k` effects is
+null"*: an element survives a threshold only where every contrast clears it,
+which is exactly where the minimum clears it. This is the correct conjunction;
+the common "all-effects-null" intersection of separately-thresholded maps
+tests a different (global) null and does not control the conjunction error.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:conjunction -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `stats` | `Float` | `k` × `*spatial` | — | The `k` per-contrast statistic maps stacked on the leading axis, each of shape `*spatial`. |
+
+**Returns** `Float` — shape `*spatial`. The per-element minimum statistic over the `k` contrasts.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:conjunction -->
+### References
+
+Nichols, T., Brett, M., Andersson, J., Wager, T., & Poline, J.-B. (2005).
+Valid conjunction inference with the minimum statistic. NeuroImage, 25(3),
+653-660. https://doi.org/10.1016/j.neuroimage.2004.12.005
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:conjunction -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `k` | kernel or basis components |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

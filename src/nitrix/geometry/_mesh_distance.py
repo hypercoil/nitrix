@@ -1,28 +1,28 @@
 # -*- coding: utf-8 -*-
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
-"""
+r"""
 Differentiable dense geometric distance kernels for mesh losses.
 
 The pure-JAX, ``grad``-through-vertices distance primitives a mesh
 training loss is built from -- the geometry substrate underneath a
 chamfer / self-intersection / proximity penalty, with the loss *reduction*
-(the symmetric mean, the hinge) left to the consumer (SPEC §5):
+(the symmetric mean, the hinge) left to the consumer:
 
 - :func:`segment_segment_sq_dist` -- the clamped segment-to-segment squared
   distance (Ericson), the proximity core of an edge-edge self-intersection
   penalty.
 - :func:`point_set_nearest_sq_dist` -- per-query nearest squared distance to
-  a reference point set, the chamfer core; chunked to bound the ``n x m``
-  intermediate.
+  a reference point set, the chamfer core; chunked to bound the
+  :math:`n \times m` intermediate.
 
-Distinct from ``_triangle_distance.nearest_surface_distance`` -- that is the
-**host-side, non-differentiable** point-to-*triangle-mesh* distance (with a
-uniform-grid broad phase) used by ``cortical_thickness`` / ``mesh_to_sdf``.
-These are **traced, differentiable** dense kernels over point / segment sets;
-the exact spatial index that would accelerate them is tracked separately
+Distinct from :func:`nearest_surface_distance` -- that is the **host-side,
+non-differentiable** point-to-*triangle-mesh* distance (with a uniform-grid
+broad phase) used by :func:`cortical_thickness` / :func:`mesh_to_sdf`.  These
+are **traced, differentiable** dense kernels over point / segment sets; the
+exact spatial index that would accelerate them is tracked separately
 (``docs/feature-requests/mesh-spatial-acceleration.md``), so the broad phase
-here is dense (``O(n.m)`` / pairwise).
+here is dense (:math:`O(n m)` / pairwise).
 """
 
 from __future__ import annotations
@@ -50,13 +50,15 @@ def segment_segment_sq_dist(
     p2: Float[Array, '*batch 3'],
     q2: Float[Array, '*batch 3'],
 ) -> Float[Array, '*batch']:
-    """Clamped segment-to-segment squared distance (Ericson).
+    r"""Clamped segment-to-segment squared distance (Ericson).
 
     The squared Euclidean distance between the closest points of segment
     ``[p1, q1]`` and segment ``[p2, q2]`` -- the branchless, vectorised form
     of Ericson's ``ClosestPtSegmentSegment`` (*Real-Time Collision
-    Detection* §5.1.9): minimise ``||(p1 + s d1) - (p2 + t d2)||^2`` over
-    ``(s, t) in [0, 1]^2`` with the parameters clamped to the unit square.
+    Detection*, section 5.1.9): minimise
+    :math:`\|(p_1 + s d_1) - (p_2 + t d_2)\|^2` over
+    :math:`(s, t) \in [0, 1]^2` with the parameters clamped to the unit
+    square.
 
     The proximity core of an edge-edge mesh self-intersection penalty: two
     mesh edges intersect (or nearly so) iff this distance is ~0.  Inputs
@@ -127,7 +129,24 @@ def segment_segment_sq_dist(
 def _block_min_sq_dist(
     block: Float[Array, 'c d'], refs: Float[Array, 'm d']
 ) -> Float[Array, ' c']:
-    """Per-row nearest squared distance from ``block`` rows to ``refs``."""
+    """Per-row nearest squared distance from ``block`` rows to ``refs``.
+
+    Forms the full pairwise squared-distance matrix between the two point
+    sets and reduces it along the reference axis.
+
+    Parameters
+    ----------
+    block
+        ``(c, d)`` block of query points.
+    refs
+        ``(m, d)`` reference points.
+
+    Returns
+    -------
+    Float[Array, ' c']
+        ``(c,)`` array whose ``i``-th entry is the minimum squared Euclidean
+        distance from ``block[i]`` to any row of ``refs``.
+    """
     d2 = jnp.sum((block[:, None, :] - refs[None, :, :]) ** 2, axis=-1)
     return jnp.min(d2, axis=-1)
 
@@ -138,14 +157,14 @@ def point_set_nearest_sq_dist(
     *,
     chunk_size: Optional[int] = None,
 ) -> Float[Array, ' n']:
-    """Per-query nearest squared distance to a reference point set.
+    r"""Per-query nearest squared distance to a reference point set.
 
     For each row of ``queries``, the minimum squared Euclidean distance to
     any row of ``refs`` -- the (one-directional) **chamfer core**.  The
     chamfer *distance* is the symmetric, reduced quantity
-    ``mean(nearest(A->B)) + mean(nearest(B->A))``; that reduction is the
-    consumer's (SPEC §5), so this returns the **unreduced** per-query
-    distances, value -> value.
+    :math:`\operatorname{mean}(\text{nearest}(A \to B)) +
+    \operatorname{mean}(\text{nearest}(B \to A))`; that reduction is left to
+    the consumer, so this returns the **unreduced** per-query distances.
 
     Parameters
     ----------
@@ -170,7 +189,7 @@ def point_set_nearest_sq_dist(
     Notes
     -----
     Squared distance (no ``sqrt``), the chamfer convention.  The broad phase
-    is dense (``O(n.m)``); an exact spatial index is the separate, gated
+    is dense (:math:`O(n m)`); an exact spatial index is the separate, gated
     ``mesh-spatial-acceleration`` request.
     """
     if refs.shape[0] == 0:

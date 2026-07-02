@@ -1,0 +1,81 @@
+---
+title: "correlation_ratio"
+generated: true
+description: "Roche's correlation ratio $ eta^2( mathrm{moving}  mid  mathrm{fixed})$."
+---
+
+[‹ back to `nitrix.metrics.information`](../nitrix-metrics-information.qmd)
+
+<!-- nitrix:gen sig:correlation_ratio -->
+```python
+correlation_ratio(moving: Float[Array, '...'], fixed: Float[Array, '...'], *, bins: int = 32, range_fixed: Optional[tuple[float, float]] = None, eps: float = 1e-10, mask: Optional[Float[Array, '...']] = None) -> Float[Array, '']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:correlation_ratio -->
+Roche's correlation ratio $\eta^2(\mathrm{moving} \mid \mathrm{fixed})$.
+
+Soft-bins `fixed` into `bins` groups and measures how much of the
+variance of `moving` is explained by the (soft) group means:
+
+$$
+\eta^2 = \frac{\sum_k n_k (\mu_k - \mu)^2}{\sum (m - \mu)^2}.
+$$
+
+Lies in `[0, 1]`: it is `1` when `moving` is a deterministic function
+of `fixed` (any functional relationship, not just affine), and `0` when
+the two are unrelated. The FSL `mcflirt` cost is $1 - \eta^2$. It is
+asymmetric by construction (`fixed` is the explanatory variable).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:correlation_ratio -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `moving` | `Float` | `...` | — | Images of identical shape. `moving` is the response and `fixed` the explanatory variable partitioned into groups. |
+| `fixed` | `Float` | `...` | — | Images of identical shape. `moving` is the response and `fixed` the explanatory variable partitioned into groups. |
+| `bins` | `int` | — | `32` | Number of groups into which `fixed` is soft-binned (default 32). |
+| `range_fixed` | `Optional[tuple[float, float]]` | — | `None` | Optional `(lo, hi)` intensity range for `fixed`, controlling its binning. `None` (default) uses the data min / max. |
+| `eps` | `float` | — | `1e-10` | Small constant guarding the group-count and total-variance denominators (default `1e-10`). |
+| `mask` | `Optional[Float[Array, '...']]` | — | `None` | Optional non-negative per-voxel weight (same shape as the images) gating the per-group scatter **and** the global mean / total variance, so an out-of-mask voxel is excluded from $\eta^2$. |
+
+**Returns** `Float` — shape —. Scalar correlation ratio $\eta^2$ in `[0, 1]`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:correlation_ratio -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **3.82 ms** (median, L4); up to **20.87× faster** than `numpy.cr`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_CORRELATION_RATIO.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| correlation_ratio | jax-cuda12 | shape=[128, 128, 128] | `cupy.cr` | ok | 7.92 ms / 7.93 ms | 228.62 ms | 16.78 MB (hbm) | ✓ 4.1e-05×tol | 2.08x vs nitrix-jax |
+| correlation_ratio | jax-cuda12 | shape=[128, 128, 128] | `nitrix-jax` | ok | 3.81 ms / 3.82 ms | 606.23 ms | 100.66 MB (hbm) | ✓ 0.011×tol | 1.00x vs nitrix-jax |
+| correlation_ratio | jax-cuda12 | shape=[128, 128, 128] | `numpy.cr` | ok | 79.53 ms / 80.55 ms | 80.65 ms | 16.78 MB (hbm) | ✓ 0×tol | 20.87x vs nitrix-jax |
+| correlation_ratio | jax-cuda12 | shape=[64, 64, 64] | `cupy.cr` | ok | 1.54 ms / 1.56 ms | 1.356 s | 2.10 MB (hbm) | ✓ 0.00012×tol | 3.00x vs nitrix-jax |
+| correlation_ratio | jax-cuda12 | shape=[64, 64, 64] | `nitrix-jax` | ok | 513.2 µs / 525.5 µs | 559.88 ms | 85.98 MB (hbm) | ✓ 0.0045×tol | 1.00x vs nitrix-jax |
+| correlation_ratio | jax-cuda12 | shape=[64, 64, 64] | `numpy.cr` | ok | 7.98 ms / 8.12 ms | 8.28 ms | 2.10 MB (hbm) | ✓ 0×tol | 15.54x vs nitrix-jax |
+:::
+
+*source: bench `02d1a5d9` · nitrix `a0769766`*
+::::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:correlation_ratio -->
+::: {.callout-note}
+FSL / Roche lineage; SimpleITK's registration framework ships no
+correlation-ratio metric, so there is no domain co-oracle (a NumPy fp64
+reimplementation is the only reference). Uses the same linear soft binning
+as [`joint_histogram`](../nitrix-metrics-information/joint_histogram.qmd) (differentiable).
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:correlation_ratio -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

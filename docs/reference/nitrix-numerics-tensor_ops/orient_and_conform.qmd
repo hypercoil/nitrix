@@ -1,0 +1,39 @@
+---
+title: "orient_and_conform"
+generated: true
+description: "Orient an input tensor along a set of axes, and conform its overall dimension to equal that of a reference."
+---
+
+[‹ back to `nitrix.numerics.tensor_ops`](../nitrix-numerics-tensor_ops.qmd)
+
+*Re-exported here; defined in `nitrix._internal.util`.*
+
+<!-- nitrix:gen sig:orient_and_conform -->
+```python
+orient_and_conform(input: Shaped[Array, ...], axis: Union[int, Sequence[int]], reference: Optional[Shaped[Array, ...]] = None, dim: Optional[int] = None) -> Shaped[Array, ...]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:orient_and_conform -->
+Orient an input tensor along a set of axes, and conform its overall
+dimension to equal that of a reference.
+
+::: {.callout-warning}
+If both `reference` and `dim` are provided, then `dim` takes
+precedence.
+::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:orient_and_conform -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `input` | `Shaped[Array, ...]` | — | — | Input tensor. |
+| `axis` | `Union[int, Sequence[int]]` | — | — | Output axes along which the tensor's input dimensions should be reoriented. This should be an n-tuple, where n is the number of axes in the input tensor. If these axes are not in the same order in the input tensor, the input is transposed before being oriented. |
+| `reference` | `Optional[Shaped[Array, ...]]` | — | `None` | Reference tensor. The output is unsqueezed so that its total dimension equals that of the reference. Either a reference or an explicit output dimension (`dim`) must be provided. |
+| `dim` | `Optional[int]` | — | `None` | Number of tensor axes in the desired output. |
+
+**Returns** `Shaped[Array, ...]`. Reoriented tensor with singleton axes appended to conform with the reference number of axes.
+<!-- nitrix:/gen -->
+

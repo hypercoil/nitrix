@@ -1,0 +1,42 @@
+---
+title: "susan_emulator"
+generated: true
+description: "SUSAN-style edge-preserving smoothing."
+---
+
+[‹ back to `nitrix.smoothing.susan`](../nitrix-smoothing-susan.qmd)
+
+<!-- nitrix:gen sig:susan_emulator -->
+```python
+susan_emulator(image: Float[Array, '... *spatial'], *, sigma_space: float, sigma_intensity: float, use_median: bool = True, bthresh: Optional[float] = None, half: int = 1) -> Float[Array, '... *spatial']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:susan_emulator -->
+SUSAN-style edge-preserving smoothing.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:susan_emulator -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `image` | `Float` | `...` × `*spatial` | — | Input image, `(..., *spatial)`. All trailing dims are treated as spatial; leading batch dims (if any) are handled by re-running the pipeline per batch element. For large batches use `jax.vmap`. |
+| `sigma_space` | `float` | — | — | Spatial-distance `sigma` (in voxel units). |
+| `sigma_intensity` | `float` | — | — | Intensity-distance `sigma` (in image-value units). Set large to ignore intensity (recovers a pure spatial Gaussian); set small to aggressively preserve edges. |
+| `use_median` | `bool` | — | `True` | If `True` (default), apply a `3`-cube `median_filter` pre-pass before the bilateral. Suppresses impulse noise that the bilateral's Gaussian weighting cannot handle cleanly. |
+| `bthresh` | `Optional[float]` | — | `None` | Optional bilateral weight threshold. Currently advisory: per-edge weights below this are not zeroed but the parameter is accepted for FSL-SUSAN API compatibility. |
+| `half` | `int` | — | `1` | Half-width of the spatial neighbourhood cube. Default `1` (3-cube: 27 neighbours in 3D). |
+
+**Returns** `Float` — shape `...` × `*spatial`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:susan_emulator -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

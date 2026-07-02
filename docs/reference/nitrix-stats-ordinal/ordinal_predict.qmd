@@ -1,0 +1,51 @@
+---
+title: "ordinal_predict"
+generated: true
+description: "Per-element ordinal prediction on a (new) design `X`."
+---
+
+[‹ back to `nitrix.stats.ordinal`](../nitrix-stats-ordinal.qmd)
+
+<!-- nitrix:gen sig:ordinal_predict -->
+```python
+ordinal_predict(result: OrdinalResult, X: Float[Array, 'N p'], *, type: Literal['class_prob', 'cum_prob', 'class'] = 'class_prob') -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:ordinal_predict -->
+Per-element ordinal prediction on a (new) design `X`.
+
+Applies the fitted cumulative-link model $P(y \le j) =
+F(\theta_j - X \beta)$ (with $F$ the CDF stored in `result.link`) at
+the new design and returns, per `type`:
+
+- `'class_prob'` (default): the per-class simplex `P(y = k)`, shape
+  `(V, N, K)` -- the diff of the cumulative probabilities.
+- `'cum_prob'`: the cumulative probabilities `P(y <= j)` for the
+  `K - 1` interior thresholds, shape `(V, N, K - 1)`.
+- `'class'`: the arg-max class label, shape `(V, N)` (**non**
+  -differentiable -- a hard label).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:ordinal_predict -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `result` | `OrdinalResult` | — | — | An [`OrdinalResult`](../nitrix-stats-ordinal/OrdinalResult.qmd) from [`ordinal_fit`](../nitrix-stats-ordinal/ordinal_fit.qmd). |
+| `X` | `Float` | `N` × `p` | — | `(N, p)` design (no intercept column, as at fit -- the thresholds absorb it). |
+| `type` | `Literal['class_prob', 'cum_prob', 'class']` | — | `'class_prob'` | Output kind (see above). |
+
+**Returns** `Float` — shape `...`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:ordinal_predict -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `N` | observations — time points, subjects, or sampled points |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

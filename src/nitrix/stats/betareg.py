@@ -2,41 +2,56 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Beta regression for proportions in ``(0, 1)`` (v3 §4).
+Beta regression for proportions in :math:`(0, 1)`.
 
 Bounded continuous responses -- tissue fractions, fMRI fractional occupancy,
-any proportion -- are modelled as ``y ~ Beta(mu phi, (1 - mu) phi)`` with mean
-``mu = logit^{-1}(X beta)`` and a **precision** ``phi`` (larger ``phi`` = less
-dispersion).  This is *not* a standard exponential-family GLM: the score is
-**digamma**-based, not the ``mu_eta^2 / V`` IRLS weight, and the precision is a
-second parameter estimated jointly with the mean -- so it gets its own fitter
-rather than slotting into the :class:`~nitrix.stats._family.Family` / ``glm_fit``
-core.
+any proportion -- are modelled as
+:math:`y \\sim \\operatorname{Beta}(\\mu\\phi,\\, (1 - \\mu)\\phi)` with mean
+:math:`\\mu = \\operatorname{logit}^{-1}(X\\beta)` and a **precision**
+:math:`\\phi` (larger :math:`\\phi` = less dispersion).  This is *not* a
+standard exponential-family GLM: the score is **digamma**-based, not the
+:math:`\\mu_\\eta^2 / V` IRLS weight, and the precision is a second parameter
+estimated jointly with the mean -- so it gets its own fitter rather than
+slotting into a standard GLM core.
 
-Estimator (Ferrari & Cribari-Neto 2004).  Fisher scoring alternates a
-reweighted-least-squares step for ``beta`` and a Newton step for ``log phi``,
-to a fixed iteration budget (``vmap``-clean over voxels):
+The estimator is the Ferrari & Cribari-Neto Fisher-scoring scheme, which
+alternates a reweighted-least-squares step for :math:`\\beta` and a Newton step
+for :math:`\\log\\phi`, to a fixed iteration budget (``vmap``-clean over
+voxels):
 
-    y*   = logit(y),   mu*  = psi(mu phi) - psi((1 - mu) phi)
-    nu   = psi'(mu phi) + psi'((1 - mu) phi)          # trigamma sum
-    W    = diag(phi^2 (dmu/deta)^2 nu),   z = eta + (y* - mu*) / (phi (dmu/deta) nu)
-    beta <- (X^T W X)^{-1} X^T W z
+.. math::
+
+    y^{*} &= \\operatorname{logit}(y), \\quad
+    \\mu^{*} = \\psi(\\mu\\phi) - \\psi((1 - \\mu)\\phi) \\\\
+    \\nu &= \\psi'(\\mu\\phi) + \\psi'((1 - \\mu)\\phi) \\\\
+    W &= \\operatorname{diag}\\!\\left(\\phi^2
+        (\\mathrm{d}\\mu / \\mathrm{d}\\eta)^2 \\nu\\right), \\quad
+    z = \\eta + \\frac{y^{*} - \\mu^{*}}
+        {\\phi \\, (\\mathrm{d}\\mu / \\mathrm{d}\\eta) \\, \\nu} \\\\
+    \\beta &\\leftarrow (X^{\\top} W X)^{-1} X^{\\top} W z
 
 with the precision score / information
 
-    U_phi = sum mu(y* - mu*) + log(1 - y) - psi((1-mu)phi) + psi(phi)
-    K_phi = sum mu^2 psi'(mu phi) + (1-mu)^2 psi'((1-mu)phi) - psi'(phi),
+.. math::
 
-stepped as ``log phi <- log phi + U_phi / (phi K_phi)``.  The fixed-effect
-covariance is the ``beta`` block of the **joint** ``(beta, phi)`` Fisher
-information inverse (so standard errors account for estimating ``phi``).  Every
-solve is the cuSOLVER-free ``small_inv_logdet``; ``digamma`` / ``polygamma`` are
+    U_\\phi &= \\sum \\mu(y^{*} - \\mu^{*}) + \\log(1 - y)
+        - \\psi((1 - \\mu)\\phi) + \\psi(\\phi) \\\\
+    K_\\phi &= \\sum \\mu^2 \\psi'(\\mu\\phi)
+        + (1 - \\mu)^2 \\psi'((1 - \\mu)\\phi) - \\psi'(\\phi),
+
+stepped as
+:math:`\\log\\phi \\leftarrow \\log\\phi + U_\\phi / (\\phi K_\\phi)`.  The
+fixed-effect covariance is the :math:`\\beta` block of the **joint**
+:math:`(\\beta, \\phi)` Fisher information inverse (so standard errors account
+for estimating :math:`\\phi`).  Every solve is a cuSOLVER-free small dense
+inverse; :math:`\\psi` (digamma) and its derivatives (polygamma) come from
 ``jax.scipy.special``.
 
 References
 ----------
 - Ferrari, S. & Cribari-Neto, F. (2004). Beta regression for modelling rates and
-  proportions.  J. Applied Statistics 31, 799-815.
+  proportions.  Journal of Applied Statistics, 31(7), 799-815.
+  https://doi.org/10.1080/0266476042000214501
 """
 
 from __future__ import annotations
@@ -69,20 +84,29 @@ _EPS = 1e-8
 class BetaResult:
     """Per-element beta-regression fit output.
 
+    Frozen container of the fitted mean-model coefficients, precision,
+    coefficient covariance, and maximised log-likelihood for every element of a
+    mass-univariate beta regression, together with the observation count.  Each
+    of the ``V`` elements (voxels, vertices, ...) is fitted independently and
+    shares the single design matrix passed to :func:`beta_fit`.
+
     Attributes
     ----------
-    coef
-        ``(V, p)`` mean-model coefficients (logit link).
-    precision
-        ``(V,)`` precision ``phi`` (``Var(y) = mu(1-mu)/(1+phi)``).
-    cov_unscaled
-        ``(V, p, p)`` ``Cov(beta_hat)`` -- the ``beta`` block of the joint
-        ``(beta, phi)`` Fisher-information inverse (SEs account for estimating
-        ``phi``).
-    log_lik
-        ``(V,)`` maximised beta log-likelihood (for ``aic`` / the LRT).
-    n_obs
-        Number of observations ``N``.
+    coef : Float[Array, 'V p']
+        ``(V, p)`` mean-model coefficients :math:`\\beta` under the logit link.
+    precision : Float[Array, 'V']
+        ``(V,)`` precision :math:`\\phi`, so that
+        :math:`\\operatorname{Var}(y) = \\mu(1 - \\mu) / (1 + \\phi)`.
+    cov_unscaled : Float[Array, 'V p p']
+        ``(V, p, p)`` coefficient covariance
+        :math:`\\operatorname{Cov}(\\hat\\beta)` -- the :math:`\\beta` block of
+        the joint :math:`(\\beta, \\phi)` Fisher-information inverse (standard
+        errors thus account for estimating :math:`\\phi`).
+    log_lik : Float[Array, 'V']
+        ``(V,)`` maximised beta log-likelihood (for :func:`~nitrix.stats.aic`
+        or a likelihood-ratio test).
+    n_obs : int
+        Number of observations :math:`N`.
     """
 
     coef: Float[Array, 'V p']
@@ -109,9 +133,44 @@ def _beta_fit_one(
 ) -> Tuple[
     Float[Array, 'p'], Float[Array, ''], Float[Array, 'p p'], Float[Array, '']
 ]:
-    """Single-element beta-regression fit (Ferrari-Cribari-Neto Fisher scoring).
+    """Single-element beta-regression fit by Ferrari-Cribari-Neto Fisher scoring.
 
-    Returns ``(beta, phi, cov_beta, log_lik)``.
+    Runs the fixed-budget Fisher-scoring loop for one response vector: a logit-
+    OLS warm start for :math:`\\beta` (with precision initialised at
+    :math:`\\phi = 1`), then ``n_iter`` alternations of a reweighted-least-
+    squares update for :math:`\\beta` and a Newton step for :math:`\\log\\phi`.
+    Responses are clipped into :math:`[\\varepsilon, 1 - \\varepsilon]` before
+    the logit transform.  After convergence it forms the joint
+    :math:`(\\beta, \\phi)` Fisher information, extracts the :math:`\\beta`
+    covariance block, and evaluates the beta log-likelihood.
+
+    Parameters
+    ----------
+    y : Float[Array, 'N']
+        ``(N,)`` response vector; entries should lie in :math:`(0, 1)` and are
+        clipped off the boundary before fitting.
+    X : Float[Array, 'N p']
+        ``(N, p)`` design matrix (include your own intercept column).
+    p : int
+        Number of design columns, matching ``X.shape[1]``; the static width of
+        the linear solves.
+    n_iter : int
+        Number of Fisher-scoring iterations to run.
+    ridge : float
+        Small ridge added to the diagonal of every normal-equation and
+        information matrix for numerical stability.
+
+    Returns
+    -------
+    beta : Float[Array, 'p']
+        ``(p,)`` fitted mean-model coefficients.
+    phi : Float[Array, '']
+        Scalar fitted precision :math:`\\phi`.
+    cov_beta : Float[Array, 'p p']
+        ``(p, p)`` coefficient covariance -- the :math:`\\beta` block of the
+        joint :math:`(\\beta, \\phi)` Fisher-information inverse.
+    log_lik : Float[Array, '']
+        Scalar maximised beta log-likelihood.
     """
     n = y.shape[0]
     yc = jnp.clip(y, _EPS, 1.0 - _EPS)
@@ -207,29 +266,39 @@ def beta_fit(
 ) -> BetaResult:
     """Mass-univariate beta regression (logit link, estimated precision).
 
-    Fits, per element, ``y_v ~ Beta(mu phi, (1 - mu) phi)`` with ``mu =
-    logit^{-1}(X beta_v)`` and a per-element precision ``phi_v``, by
-    Ferrari-Cribari-Neto Fisher scoring.  Responses must lie strictly in
-    ``(0, 1)`` (values are clipped off the boundary by ``1e-8``).
+    Fits, per element,
+    :math:`y_v \\sim \\operatorname{Beta}(\\mu\\phi,\\, (1 - \\mu)\\phi)` with
+    :math:`\\mu = \\operatorname{logit}^{-1}(X\\beta_v)` and a per-element
+    precision :math:`\\phi_v`, by Ferrari-Cribari-Neto Fisher scoring.
+    Responses must lie strictly in :math:`(0, 1)`; values are clipped off the
+    boundary by ``1e-8`` (and a host-side warning is raised for out-of-range
+    inputs when not tracing).
 
     Parameters
     ----------
-    Y
-        ``(V, N)`` responses in ``(0, 1)``.
-    X
-        ``(N, p)`` shared design (include your own intercept).
-    n_iter
-        Fisher-scoring iterations (default ``50``).
-    ridge
-        Small stabiliser on the normal equations.
-    block
-        Optional element-block size bounding peak memory.
+    Y : Float[Array, 'V N']
+        ``(V, N)`` responses, each in :math:`(0, 1)`; one row per element.
+    X : Float[Array, 'N p']
+        ``(N, p)`` design matrix shared across elements (include your own
+        intercept column).
+    n_iter : int, optional
+        Number of Fisher-scoring iterations (default ``50``).
+    ridge : float, optional
+        Small stabiliser added to the diagonal of the normal equations and the
+        Fisher information (default ``1e-8``).
+    block : int, optional
+        Optional element-block size bounding peak memory; ``None`` processes
+        all elements in one ``vmap``.
 
     Returns
     -------
-    ``BetaResult`` -- ``coef``, ``precision``, ``cov_unscaled``
-    (``Cov(beta_hat)``), ``log_lik``.  A fixed-effect contrast is
-    ``c^T beta_hat`` with SE ``sqrt(c^T cov_unscaled c)`` on ``N - p`` df.
+    BetaResult
+        A :class:`BetaResult` with fields ``coef``, ``precision``,
+        ``cov_unscaled`` (the coefficient covariance
+        :math:`\\operatorname{Cov}(\\hat\\beta)`), ``log_lik``, and ``n_obs``.
+        A fixed-effect contrast is :math:`c^{\\top}\\hat\\beta` with standard
+        error :math:`\\sqrt{c^{\\top}\\,\\mathtt{cov\\_unscaled}\\,c}` on
+        :math:`N - p` degrees of freedom.
     """
     n, p = X.shape
     if Y.shape[-1] != n:

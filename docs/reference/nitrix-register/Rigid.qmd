@@ -1,0 +1,74 @@
+---
+title: "Rigid"
+generated: true
+description: "Rigid (rotation + translation) transform on `SE(2)` / `SE(3)`."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._model`.*
+
+<!-- nitrix:gen sig:Rigid -->
+```python
+class Rigid
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:Rigid -->
+Rigid (rotation + translation) transform on `SE(2)` / `SE(3)`.
+
+The parameter vector is an axis-angle rotation followed by a
+translation: in 2-D $(\theta, t_x, t_y)$ (3 entries) and in
+3-D $(\omega_x, \omega_y, \omega_z, t_x, t_y, t_z)$
+(6 entries). The exponential map is closed-form (Rodrigues' formula)
+and GPU-native.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:Rigid.n_params -->
+```python
+n_params(ndim: int) -> int
+```
+<!-- nitrix:/gen -->
+
+Parameter count: one rotation angle plus `ndim`
+translations in 2-D, or three axis-angle rotations plus
+`ndim` translations in 3-D.
+
+<!-- nitrix:gen sig:Rigid.exp -->
+```python
+exp(params: Float[Array, '... p'], *, ndim: int) -> Float[Array, '... d1 d1']
+```
+<!-- nitrix:/gen -->
+
+Closed-form rigid exponential map via [`rigid_exp`](../nitrix-geometry-transform/rigid_exp.qmd),
+returning the homogeneous
+$(\text{ndim} + 1, \text{ndim} + 1)$ transform.
+
+<!-- nitrix:gen sig:Rigid.rescale_to_grid -->
+```python
+rescale_to_grid(params: Float[Array, ' p'], ratio: Float[Array, ' d']) -> Float[Array, ' p']
+```
+<!-- nitrix:/gen -->
+
+Rescale to a finer grid by scaling the trailing translation
+block by `ratio`; the rotation parameters are grid-invariant
+and left unchanged.
+
+<!-- nitrix:gen sig:Rigid.__init__ -->
+```python
+__init__() -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:Rigid -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->

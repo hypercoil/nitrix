@@ -1,0 +1,52 @@
+---
+title: "sectioned_semiring_ell_rmatvec"
+generated: true
+description: "Sectioned-ELL adjoint (transpose) matvec: $Y = A^{ top} X$."
+---
+
+[‹ back to `nitrix.sparse.ell_sectioned`](../nitrix-sparse-ell_sectioned.qmd)
+
+<!-- nitrix:gen sig:sectioned_semiring_ell_rmatvec -->
+```python
+sectioned_semiring_ell_rmatvec(sectioned: SectionedELL, X: Num[Array, 'n_rows ncol'], *, semiring: Semiring[Any] = REAL) -> Num[Array, 'n_cols ncol']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:sectioned_semiring_ell_rmatvec -->
+Sectioned-ELL adjoint (transpose) matvec: $Y = A^{\top} X$.
+
+The transpose companion of [`sectioned_semiring_ell_matmul`](../nitrix-sparse-ell_sectioned/sectioned_semiring_ell_matmul.qmd).  Where
+the forward gathers `B` (indexed by `n_cols`) and scatter-*sets*
+each bucket's rows back to original order, the adjoint gathers `X`
+(indexed by the original `n_rows`) at each bucket's source rows,
+runs the per-bucket [`semiring_ell_rmatvec`](../nitrix-semiring.qmd) scatter
+into the shared `n_cols` axis, and *sums* the bucket contributions.
+
+Composing forward + adjoint gives the symmetric-part matvec
+$\tfrac{1}{2}(A X + A^{\top} X)$ over a [`SectionedELL`](../nitrix-sparse-ell_sectioned/SectionedELL.qmd) --
+used by the spectral solvers on bucketed adjacencies whose construction did
+not preserve symmetry.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:sectioned_semiring_ell_rmatvec -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `sectioned` | `SectionedELL` | — | — | The bucketed adjacency. |
+| `X` | `Num` | `n_rows` × `ncol` | — | Dense operand indexed by the original row axis, `(n_rows, ncol)`. |
+| `semiring` | `Semiring[Any]` | — | `REAL` | Algebra to reduce under. **REAL only** (the additive scatter adjoint; see [`semiring_ell_rmatvec`](../nitrix-semiring.qmd)); other algebras raise. |
+
+**Returns** `Num` — shape `n_cols` × `ncol`. The dense adjoint result, shape `(n_cols, ncol)`, summed over all bucket contributions.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:sectioned_semiring_ell_rmatvec -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_rows` | *(undocumented — add to `_dimensions.yml`)* |
+| `ncol` | *(undocumented — add to `_dimensions.yml`)* |
+| `n_cols` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

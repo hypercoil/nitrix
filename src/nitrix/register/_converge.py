@@ -2,23 +2,24 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Shared iteration driver with optional windowed-slope early-exit (C7 / A3).
+Shared iteration driver with optional windowed-slope early-exit.
 
 The ANTs-style convergence criterion -- stop when the least-squares-line slope
 over the last ``window`` per-iteration costs, normalised by the mean cost, drops
-below ``threshold`` -- factored out of the matrix inverse-compositional path
-(``_inverse_compositional._ic_level_converge``) so the dense-field SVF drivers
-(``_svf``) share one implementation (followup C7; A3 is its first SVF consumer).
+below ``threshold`` -- is factored out of the matrix inverse-compositional path
+so that the dense-field stationary-velocity-field drivers share one
+implementation.
 
-``run_iterations`` runs a per-iteration ``step`` either as a fixed-length
+:func:`run_iterations` runs a per-iteration ``step`` either as a fixed-length
 ``lax.scan`` (the default; reproducible and ``vmap``-batchable) or, when a
 :class:`Convergence` is supplied, as a ``lax.while_loop`` that early-exits.  The
 early-exit is offered **single-pair**: a ``vmap``-ed ``while_loop`` *does* batch
 -- it runs to the **all-lanes** exit, the slowest lane setting the trip count
-(``volreg`` uses exactly that batch-aggregate form) -- but the per-pair
+(volume registration uses exactly that batch-aggregate form) -- but the per-pair
 early-exit advantage then degrades to the cohort's slowest pair.  It is
 differentiable only through the implicit path (a ``while_loop`` has no reverse
-rule), so use ``implicit_*`` for gradients, not the unrolled trajectory.
+rule), so use the implicit-function entry points for gradients, not the
+unrolled trajectory.
 """
 
 from __future__ import annotations
@@ -48,9 +49,9 @@ class Convergence:
     plateaued -- a least-squares-line fit over the last ``window`` per-iteration
     costs whose normalised slope falls below ``threshold`` -- or the level's
     iteration count (the hard cap) is reached.  It is **inert** under
-    ``mode='fixed'`` (the fixed ``lax.scan``); the two are orthogonal fields
-    (B2), so a spec always carries a concrete :class:`Convergence`, used only
-    when ``mode='early_exit'``.
+    ``mode='fixed'`` (the fixed ``lax.scan``); the mode and this criterion are
+    orthogonal, so a spec always carries a concrete :class:`Convergence`, used
+    only when ``mode='early_exit'``.
 
     Attributes
     ----------
@@ -72,12 +73,21 @@ class Convergence:
     window: int = 10
 
 
-# The iteration strategy (B2), orthogonal to the :class:`Convergence`
+# The iteration strategy, orthogonal to the :class:`Convergence`
 # parameters: ``'fixed'`` is the reproducible, reverse-differentiable,
 # ``vmap``-batchable ``lax.scan``; ``'early_exit'`` is the windowed-slope
 # ``lax.while_loop`` (single-pair; not reverse-differentiable).  Eligibility is
 # checked in the one ``resolve_convergence_mode`` gate below.
 ConvergenceMode = Literal['fixed', 'early_exit']
+"""The iteration strategy selecting how :func:`run_iterations` loops.
+
+``'fixed'`` runs a fixed-length ``lax.scan``: reproducible,
+reverse-differentiable, and ``vmap``-batchable.  ``'early_exit'`` runs a
+windowed cost-slope ``lax.while_loop`` (see :class:`Convergence`) that stops
+once the cost has plateaued; it is offered single-pair and is not
+reverse-differentiable.  This mode is orthogonal to the :class:`Convergence`
+threshold/window pair, which is consulted only when ``'early_exit'`` is chosen.
+"""
 
 
 def resolve_convergence_mode(
@@ -87,17 +97,45 @@ def resolve_convergence_mode(
     supports_early_exit: bool,
     path: str,
 ) -> Optional[Convergence]:
-    """The single B2 eligibility gate: ``(mode, convergence)`` -> run-time control.
+    """Resolve ``(mode, convergence)`` into the run-time iteration control.
 
-    Returns the concrete :class:`Convergence` to drive an early-exit
-    ``lax.while_loop`` (``mode='early_exit'``), or ``None`` for the fixed
-    ``lax.scan`` (``mode='fixed'`` -- the default, reproducible and
-    reverse-differentiable on every path).  ``mode='early_exit'`` on a path that
-    cannot honour a data-dependent trip count (``supports_early_exit=False`` --
-    the scalar/BFGS forward optimiser is monolithic) raises a loud, actionable
-    error naming ``path`` rather than failing obscurely downstream.  This is the
-    one place the polysemy used to live (three sentinel meanings at three sites);
-    every recipe now routes its mode decision through here.
+    The single eligibility gate mapping a requested iteration ``mode`` onto the
+    concrete criterion :func:`run_iterations` consumes.  ``mode='early_exit'``
+    on a path that cannot honour a data-dependent trip count
+    (``supports_early_exit=False`` -- for example a monolithic scalar/BFGS
+    forward optimiser) raises a loud, actionable error naming ``path`` rather
+    than failing obscurely downstream.  Every recipe routes its mode decision
+    through here.
+
+    Parameters
+    ----------
+    mode
+        Requested iteration strategy: ``'fixed'`` for the reproducible,
+        reverse-differentiable fixed-length ``lax.scan``, or ``'early_exit'``
+        for the windowed cost-slope ``lax.while_loop``.
+    convergence
+        The threshold/window criterion to apply under ``'early_exit'``.  Always
+        carried, but inert (returned only) when it is used.
+    supports_early_exit
+        Whether the calling path can honour a data-dependent trip count.  If
+        ``False``, requesting ``'early_exit'`` raises rather than proceeding.
+    path
+        Human-readable name of the calling recipe, embedded in the error message
+        when ``'early_exit'`` is unsupported.
+
+    Returns
+    -------
+    Optional[Convergence]
+        The concrete :class:`Convergence` to drive an early-exit
+        ``lax.while_loop`` when ``mode='early_exit'``, or ``None`` for the fixed
+        ``lax.scan`` when ``mode='fixed'``.
+
+    Raises
+    ------
+    ValueError
+        If ``mode`` is neither ``'fixed'`` nor ``'early_exit'``, or if
+        ``mode='early_exit'`` is requested where ``supports_early_exit`` is
+        ``False``.
     """
     if mode not in ('fixed', 'early_exit'):
         raise ValueError(
@@ -113,6 +151,7 @@ def resolve_convergence_mode(
             'least-squares metric such as SSD), which do.'
         )
     return convergence
+
 
 _EARLY_EXIT_NO_REVERSE = (
     'reverse-mode differentiation through an early-exit (lax.while_loop) '
@@ -131,9 +170,20 @@ def _early_exit_barrier(state: Any) -> Any:
 
     Applied to the ``while_loop`` early-exit output so that a ``jax.grad``
     through the early-exit path raises the registration-specific contract error
-    (above) -- the "loud fallbacks" tenet -- instead of JAX's generic
-    while_loop-no-reverse error.  ``convergence=None`` (the ``lax.scan`` path)
-    never goes through the barrier, so it stays reverse-differentiable.
+    instead of JAX's generic while-loop-has-no-reverse-rule error.  The
+    ``convergence=None`` (``lax.scan``) path never passes through the barrier,
+    so it stays reverse-differentiable.
+
+    Parameters
+    ----------
+    state
+        The differentiable early-exit result (for example the estimated matrix
+        or velocity field) carried out of the ``lax.while_loop``.
+
+    Returns
+    -------
+    Any
+        The same ``state``, unchanged, on the forward pass.
     """
     return state
 
@@ -161,23 +211,53 @@ def run_iterations(
     convergence: Optional[Convergence],
     dtype: Any,
 ) -> Tuple[Any, Array]:
-    """Run ``step_fn`` for ``iterations``, or until the cost slope converges.
+    """Run ``step_fn`` for a fixed count, or until the cost slope converges.
 
-    ``step_fn(state, _) -> (state, cost)`` (a scalar per-iteration cost).  With
-    ``convergence=None`` (default) this is exactly ``lax.scan`` over a fixed
-    ``iterations``.  With a :class:`Convergence` it runs a ``lax.while_loop``
-    that stops once the windowed normalised cost slope drops below
-    ``threshold`` (or the ``iterations`` hard cap is hit), returning a
-    ``(iterations,)`` ``costs`` trace whose unrun tail is padded with the final
-    cost -- so ``cost_history`` keeps its shape either way.
+    With ``convergence=None`` (the default) this is exactly ``lax.scan`` over a
+    fixed ``iterations``.  With a :class:`Convergence` it runs a
+    ``lax.while_loop`` that stops once the windowed normalised cost slope drops
+    below ``threshold`` (or the ``iterations`` hard cap is hit), returning a
+    cost trace of length ``iterations`` whose unrun tail is padded with the
+    final cost -- so the history keeps its shape either way.
 
-    The fixed-``scan`` body is wrapped in ``jax.checkpoint`` (E3): reverse-mode
+    The fixed-``scan`` body is wrapped in ``jax.checkpoint``: reverse-mode
     through the unrolled trajectory then rematerialises each step in the backward
-    pass instead of storing every iterate, so ``grad`` memory is ``O(state)`` +
-    recompute rather than ``O(iterations * state)`` (the dense-field SVF carry is
-    large).  ``checkpoint`` is a no-op on the forward pass, so the (common,
-    grad-free) forward result and its compile are byte-unchanged; only reverse
-    mode trades the recompute for the memory.
+    pass instead of storing every iterate, so ``grad`` memory scales with the
+    size of a single ``state`` plus recompute, rather than with
+    ``iterations`` times the size of ``state`` (the dense-field
+    stationary-velocity-field carry is large).  ``checkpoint`` is a no-op on the
+    forward pass, so the (common, grad-free) forward result and its compile are
+    byte-unchanged; only reverse mode trades the recompute for the memory.
+
+    Parameters
+    ----------
+    step_fn
+        Per-iteration body with the ``lax.scan`` signature
+        ``step_fn(state, _) -> (state, cost)``, where ``cost`` is a scalar array
+        giving the per-iteration cost.  The second argument is ignored (there
+        are no scanned inputs).
+    init_state
+        Initial carry state (an arbitrary PyTree), threaded through every
+        iteration.
+    iterations
+        Number of iterations for the fixed ``lax.scan``, or the hard cap on the
+        early-exit ``lax.while_loop``.
+    convergence
+        If ``None``, use the fixed ``lax.scan``.  Otherwise, the threshold/window
+        criterion driving the early-exit ``lax.while_loop``.
+    dtype
+        Floating-point dtype for the internal slope-fit time axis, cost buffer,
+        and cost history.
+
+    Returns
+    -------
+    state : Any
+        The final carry state after the last iteration (same PyTree structure as
+        ``init_state``).  On the early-exit path it is routed through an identity
+        barrier that raises on reverse-mode differentiation.
+    costs : Array
+        The per-iteration cost trace, shape ``(iterations,)``.  On the early-exit
+        path the entries after convergence are padded with the final cost.
     """
     if convergence is None:
         # remat the body so grad through the unrolled scan stays memory-bounded.

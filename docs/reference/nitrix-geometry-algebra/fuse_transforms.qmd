@@ -1,0 +1,53 @@
+---
+title: "fuse_transforms"
+generated: true
+description: "Fuse a chain of transforms into ONE displacement field on `shape`."
+---
+
+[‹ back to `nitrix.geometry.algebra`](../nitrix-geometry-algebra.qmd)
+
+<!-- nitrix:gen sig:fuse_transforms -->
+```python
+fuse_transforms(transforms: Sequence[Union[Float[Array, 'd1 d1'], Float[Array, '*spatial ndim']]], shape: tuple[int, ...], *, mode: BoundaryMode = 'nearest') -> Float[Array, '*spatial ndim']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:fuse_transforms -->
+Fuse a chain of transforms into ONE displacement field on `shape`.
+
+The stages are applied to the moving image **in order** (`transforms[0]`
+first, as a rigid then affine then deformable pipeline does); each is a
+homogeneous matrix `(ndim+1, ndim+1)` (applied about the grid centre, the
+registration convention) or a displacement field on `shape`, of shape
+`(*shape, ndim)`.  The single returned displacement `d` is the one for
+which `spatial_transform(moving, identity_grid + d)` reproduces warping the
+moving image through the **whole** chain -- **one** interpolation instead of
+`N` (a quality win, since there is no compounded resampling blur, and a
+throughput win, since it is a single gather).
+
+The stages compose on the sampling grid in reverse (the last stage maps the
+output grid first, the first stage maps into the moving image last):
+$g = T_1(T_2(\dots T_N(x)))$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:fuse_transforms -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `transforms` | `Sequence[Union[Float[Array, 'd1 d1'], Float[Array, '*spatial ndim']]]` | — | — | Ordered sequence of transform stages, applied to the moving image with `transforms[0]` first. Each element is either a homogeneous matrix of shape `(ndim+1, ndim+1)` (applied about the grid centre) or a displacement field of shape `(*shape, ndim)`. Must be non-empty. |
+| `shape` | `tuple[int, ...]` | — | — | Spatial shape of the output grid on which the fused displacement is defined; its length is the spatial rank `ndim`. |
+| `mode` | `BoundaryMode` | — | `'nearest'` | Boundary handling used when a displacement-field stage is itself sampled onto the running grid, one of `'constant'`, `'nearest'`, `'wrap'`, `'mirror'` or `'reflect'`. Defaults to `'nearest'`. |
+
+**Returns** `Float` — shape `*spatial` × `ndim`. The fused displacement field, of shape `(*shape, ndim)`: adding it to [`identity_grid`](../nitrix-geometry-grid/identity_grid.qmd) yields the absolute sample coordinates that warp the moving image through the whole chain in a single resampling.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:fuse_transforms -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->

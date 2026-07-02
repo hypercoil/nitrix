@@ -1,0 +1,41 @@
+---
+title: "find_self_intersections"
+generated: true
+description: "Find genuinely intersecting (non-adjacent) triangle pairs."
+---
+
+[‹ back to `nitrix.geometry.intersection`](../nitrix-geometry-intersection.qmd)
+
+<!-- nitrix:gen sig:find_self_intersections -->
+```python
+find_self_intersections(mesh: Mesh) -> Int[Array, 'n_pairs 2']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:find_self_intersections -->
+Find genuinely intersecting (non-adjacent) triangle pairs.
+
+Uniform-grid broad phase + segment-triangle narrow phase.  Face pairs that
+share a vertex (adjacent faces, which always meet at the shared feature)
+are excluded -- only true self-intersections are reported.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:find_self_intersections -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mesh` | `Mesh` | — | — | Triangle mesh to inspect. |
+
+**Returns** `Int` — shape `n_pairs` × `2`. Integer array of intersecting face-index pairs (`i < j` per row); empty (shape `(0, 2)`) if the mesh is intersection-free. Host-side; not differentiable.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:find_self_intersections -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_pairs` | *(undocumented — add to `_dimensions.yml`)* |
+| `2` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

@@ -1,0 +1,41 @@
+---
+title: "demean"
+generated: true
+description: "Subtract the (weighted) mean along `axis`."
+---
+
+[‹ back to `nitrix.numerics.normalize`](../nitrix-numerics-normalize.qmd)
+
+<!-- nitrix:gen sig:demean -->
+```python
+demean(x: Num[Array, '...'], *, axis: _AxisArg = -1, weights: Optional[Num[Array, '...']] = None) -> Num[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:demean -->
+Subtract the (weighted) mean along `axis`.
+
+Centres `x` so that its (optionally weighted) mean along
+`axis` is zero, leaving the scale unchanged.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:demean -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Num` | `...` | — | Input tensor. |
+| `axis` | `_AxisArg` | — | `-1` | Axis (or axes) over which the mean is reduced. Default `-1` (the trailing observation axis). |
+| `weights` | `Optional[Num[Array, '...']]` | — | `None` | Optional non-negative weights broadcastable against `x`. When given, a weighted mean is subtracted; when `None`, the unweighted mean is used. |
+
+**Returns** `Num` — shape `...`. `x` with the (weighted) mean removed along `axis`, same shape as `x`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:demean -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

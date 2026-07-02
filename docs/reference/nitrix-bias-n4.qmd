@@ -1,0 +1,82 @@
+---
+title: "nitrix.bias.n4"
+generated: true
+signature-hash: f6cbddd536b47a1e
+description: "N4 bias-field correction, GPU-accelerated in pure JAX."
+listing:
+  id: nitrix-bias-n4-symbols
+  contents: "nitrix-bias-n4/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.bias.n4`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+N4 bias-field correction, GPU-accelerated in pure JAX.
+
+N4 estimates and removes the smooth, low-frequency multiplicative
+intensity inhomogeneity ("bias field") that corrupts MRI.  It is the
+improved ("N4ITK") successor to N3; the improvements over N3 are (a) a
+B-spline *approximation* of the field instead of N3's smoothing spline and
+(b) a multi-resolution fitting hierarchy.  This module follows the ITK /
+ANTs `N4BiasFieldCorrectionImageFilter` algorithm and default parameters,
+reformulated for the accelerator:
+
+- The per-iteration histogram **sharpening** is the N3 Wiener
+  deconvolution ([`sharpen_histogram`](nitrix-bias/sharpen_histogram.qmd)) -- 1-D FFTs, cheap.
+- The field **smoothing** is the Lee--Wolberg--Shin multilevel B-spline
+  approximation, specialised to the regular image grid so it becomes
+  separable dense per-axis contractions -- no gather, no scatter, lowers to
+  XLA `dot` / tensor cores.
+- The **iteration** is a `lax.while_loop` with ITK's coefficient-of-
+  variation convergence test; the **multi-resolution** hierarchy is a
+  static outer loop doubling the B-spline mesh per level.
+
+[`n4_bias_field_correction`](nitrix-bias-n4/n4_bias_field_correction.qmd) is, deliberately, *exactly N4* -- the MBA
+fit, validated to ITK/ANTs parity.  Higher-accuracy field estimators
+(least-squares, P-splines) are a *different* algorithm and live behind
+[`bias_field_correction`](nitrix-bias-correction/bias_field_correction.qmd) (via its `method` argument), not here;
+conflating them with the N4 name would mislabel non-N4 output.
+
+Why no fused accelerator kernel: the heavy ops are dense small-matrix
+contractions and 1-D FFTs, which XLA already schedules near-optimally on
+GPU/TPU, so N4 ships pure-JAX.
+
+Differentiability: the B-spline smoothing is differentiable; the histogram
+sharpening is not (piecewise-constant binning).  Efficient end-to-end
+differentiability is a plus, not a requirement.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### References
+
+.. [Tustison2010] N. J. Tustison, B. B. Avants, P. A. Cook, Y. Zheng,
+   A. Egan, P. A. Yushkevich, and J. C. Gee (2010). N4ITK: improved N3 bias
+   correction. *IEEE Transactions on Medical Imaging*, 29(6), 1310-1320.
+   `10.1109/TMI.2010.2046908`
+.. [Sled1998] J. G. Sled, A. P. Zijdenbos, and A. C. Evans (1998). A
+   nonparametric method for automatic correction of intensity nonuniformity
+   in MRI data. *IEEE Transactions on Medical Imaging*, 17(1), 87-97.
+   `10.1109/42.668698`
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-bias-n4-symbols}
+:::

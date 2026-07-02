@@ -1,0 +1,49 @@
+---
+title: "Objective"
+generated: true
+description: "Scalar / least-squares objective over the transform parameters."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._objective`.*
+
+<!-- nitrix:gen sig:Objective -->
+```python
+class Objective(Protocol)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:Objective -->
+Scalar / least-squares objective over the transform parameters.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:Objective.cost -->
+```python
+cost(params: Float[Array, ' p']) -> Float[Array, '']
+```
+<!-- nitrix:/gen -->
+
+Scalar minimisation cost at `params` (lower is better).
+
+<!-- nitrix:gen sig:Objective.residual -->
+```python
+residual(params: Float[Array, ' p']) -> Float[Array, ' m']
+```
+<!-- nitrix:/gen -->
+
+Least-squares residual at `params`.
+
+Defined only when `is_least_squares` is `True`, in which case
+the cost equals half the squared Euclidean norm of this residual.
+
+
+<!-- nitrix:gen dims:Objective -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

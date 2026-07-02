@@ -1,0 +1,63 @@
+---
+title: "partial_residualise"
+generated: true
+description: "Non-aggressive (ICA-AROMA) partial residualisation of `Y`."
+---
+
+[‹ back to `nitrix.linalg.residual`](../nitrix-linalg-residual.qmd)
+
+<!-- nitrix:gen sig:partial_residualise -->
+```python
+partial_residualise(Y: Num[Array, '... C_Y obs'], *, signal: Num[Array, '... C_S obs'], noise: Num[Array, '... C_N obs'], l2: float = 0.0, rowvar: bool = True, method: Method = 'cholesky', shrinkage: Shrinkage = 'none') -> Num[Array, '... C_Y obs']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:partial_residualise -->
+Non-aggressive (ICA-AROMA) partial residualisation of `Y`.
+
+Fit `Y` jointly against `[signal | noise]` and remove **only** the
+fitted noise component `noise @ beta_noise`, leaving the signal component
+*and the variance shared between signal and noise* intact.  This is the
+ICA-AROMA "non-aggressive" denoising: the standard aggressive residualisation
+(`residualise(Y, noise)`) regresses noise out marginally and so also strips
+any signal that happens to correlate with the noise regressors; the joint fit
+here attributes shared variance to `signal` and removes only the
+noise-unique part.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:partial_residualise -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `Y` | `Num` | `...` × `C_Y` × `obs` | — | Target tensor, default layout `(..., C_Y, obs)` (obs on the last axis; set `rowvar=False` to flip). |
+| `signal` | `Num` | `...` × `C_S` × `obs` | — | Regressors to **retain** (e.g. the AROMA signal components), same layout as `Y`; the observation axis must match. |
+| `noise` | `Num` | `...` × `C_N` × `obs` | — | Regressors to **remove** (e.g. the AROMA motion components), same layout. |
+| `l2` | `float` | — | `0.0` | Ridge added to the joint Gram (`0` = OLS). Recommended if `[signal \| noise]` may be near-collinear -- the ridge-shrunk ("soft") partial residualisation. |
+| `rowvar` | `bool` | — | `True` | `True` (default): observation axis is the last axis; `False`: the penultimate axis. |
+| `method` | `Method` | — | `'cholesky'` | `"cholesky"` (default, cuSOLVER-free) or `"svd"` -- as in [`residualise`](../nitrix-linalg-residual/residualise.qmd). |
+| `shrinkage` | `Shrinkage` | — | `'none'` | `"none"` (default) or `"james-stein"` -- positive-part James-Stein shrinkage of the (joint-fit) **noise** projection toward zero before it is removed, as in [`residualise`](../nitrix-linalg-residual/residualise.qmd); the soft variant for a large / collinear noise set ($\sigma^2$ taken from the full-fit residual, $k$ = number of noise regressors). |
+
+**Returns** `Num` — shape `...` × `C_Y` × `obs`. Denoised tensor, same shape as `Y`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:partial_residualise -->
+::: {.callout-note}
+With an empty `signal` ($C_S = 0$) this reduces exactly to
+`residualise(Y, noise)` (aggressive); with an empty `noise` it returns
+`Y` unchanged.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:partial_residualise -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `C_Y` | *(undocumented — add to `_dimensions.yml`)* |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+| `C_S` | *(undocumented — add to `_dimensions.yml`)* |
+| `C_N` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

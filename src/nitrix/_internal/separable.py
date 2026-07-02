@@ -5,22 +5,22 @@
 Separable 1-D cross-correlation along a single axis.
 
 The shared engine behind several separable spatial operators:
-``geometry.spatial_gradient`` (derivative + Sobel/Scharr smoothing taps)
-and ``nitrix.metrics`` LNCC (windowed box sums) both lower onto
-``correlate1d``.  Factored here so the boundary-mode mapping and the
-pad -> moveaxis -> VALID ``conv_general_dilated`` -> moveaxis-back
-pattern live in exactly one place rather than being copied per operator.
+:func:`~nitrix.geometry.spatial_gradient` (derivative plus Sobel/Scharr
+smoothing taps) and the local normalised cross-correlation of
+:mod:`nitrix.metrics` (windowed box sums) both lower onto
+:func:`correlate1d`.  It is factored here so that the boundary-mode
+mapping and the pad -> moveaxis -> VALID ``conv_general_dilated`` ->
+moveaxis-back pattern live in exactly one place rather than being copied
+per operator.
 
-Relationship to ``smoothing.gaussian._conv_1d_along_axis``: that helper
-is a near-sibling specialised for the *even-kernel half-pixel-shift*
-case -- it uses an asymmetric ``(K // 2 - 1, K // 2)`` pad to realise
-the documented half-pixel output shift for even Gaussian kernels.  This
-engine uses the symmetric ``((K - 1) // 2, K // 2)`` pad, which is
-identical for odd kernels (the only kind ``spatial_gradient`` and the
-LNCC box sums use).  The two are deliberately kept separate so the
-Gaussian even-kernel semantics are not perturbed; converging them (this
-engine plus an explicit-pad override) is a possible future cleanup, not
-a correctness need.
+The near-sibling Gaussian smoothing convolution helper is specialised
+for the *even-kernel half-pixel-shift* case: it uses an asymmetric
+``(K // 2 - 1, K // 2)`` pad to realise the documented half-pixel output
+shift for even Gaussian kernels.  This engine instead uses the symmetric
+``((K - 1) // 2, K // 2)`` pad, which is identical for odd kernels (the
+only kind that :func:`~nitrix.geometry.spatial_gradient` and the local
+cross-correlation box sums use).  The two are deliberately kept separate
+so that the Gaussian even-kernel semantics are not perturbed.
 """
 
 from __future__ import annotations
@@ -59,11 +59,37 @@ def correlate1d(
 ) -> Array:
     """Cross-correlate ``x`` with a 1-D ``kernel`` along ``axis``.
 
-    Pads ``x`` along ``axis`` per ``mode`` and runs a VALID, same-size
-    cross-correlation.  ``lax.conv_general_dilated`` does **not** flip
-    the kernel, so tap ``k`` maps to offset ``k - (K - 1) // 2`` -- i.e.
-    ``out[i] = Σ_k kernel[k] * x[i + k - (K - 1) // 2]``.  The kernel is
-    cast to ``x``'s dtype; all other axes are carried as batch.
+    Pads ``x`` along ``axis`` according to ``mode`` and runs a VALID,
+    same-size cross-correlation.  ``lax.conv_general_dilated`` does
+    **not** flip the kernel, so tap :math:`k` maps to offset
+    :math:`k - (K - 1) // 2`; that is,
+    :math:`\\mathrm{out}[i] = \\sum_k \\mathrm{kernel}[k] \\,
+    x[i + k - (K - 1) // 2]`, where :math:`K` is the kernel length.
+    The kernel is cast to the
+    dtype of ``x``, and all axes other than ``axis`` are carried as
+    batch dimensions.
+
+    Parameters
+    ----------
+    x : Array
+        Input array of arbitrary rank.  The correlation is applied along
+        ``axis`` and every other axis is treated as an independent batch
+        dimension.
+    kernel : Array
+        One-dimensional correlation kernel of length :math:`K`.  It is
+        cast to the dtype of ``x`` before use.
+    axis : int
+        Axis of ``x`` along which to correlate.
+    mode : SeparableBoundaryMode
+        Boundary-handling convention used to pad ``x`` before the VALID
+        correlation, one of ``'nearest'``, ``'reflect'``, ``'mirror'``,
+        ``'wrap'`` or ``'constant'`` (the last pads with zeros).
+
+    Returns
+    -------
+    Array
+        Array of the same shape and dtype as ``x`` holding the
+        cross-correlation of ``x`` with ``kernel`` along ``axis``.
     """
     k_size = int(kernel.shape[0])
     half_l = (k_size - 1) // 2

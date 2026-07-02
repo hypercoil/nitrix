@@ -1,0 +1,101 @@
+---
+title: "relaxed_modularity"
+generated: true
+description: "Relaxed (differentiable) modularity for a (soft) community assignment."
+---
+
+[‹ back to `nitrix.graph.community`](../nitrix-graph-community.qmd)
+
+<!-- nitrix:gen sig:relaxed_modularity -->
+```python
+relaxed_modularity(A: _GraphInput, C: Num[Array, '... n k'], *, C_other: Optional[Num[Array, '... n k']] = None, bridge: Optional[Num[Array, '... k k']] = None, gamma: float = 1.0, null: _NullModel = girvan_newman_null, normalise_modularity: bool = True, normalise_coaffiliation: bool = True, exclude_diag: bool = True, directed: bool = False, sign: Optional[Literal['+', '-']] = '+') -> Num[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:relaxed_modularity -->
+Relaxed (differentiable) modularity for a (soft) community assignment.
+
+Computes $Q = \sum_{i,j} B_{ij}\,(CC^{\top})_{ij}$, where
+$B$ is the modularity matrix.  For a one-hot assignment `C`
+this reduces to the standard Newman modularity; for soft or
+overlapping assignments it is a smooth, differentiable relaxation
+suitable as an optimisation objective.
+
+The implementation dispatches on the type of `A`:
+
+- **Dense** `A`: materialises $B$ and $CC^{\top}$ and
+  sums.  Easy to read; quadratic in $n$ for both memory and
+  compute.
+- [`ELL`](../nitrix-sparse.qmd) / [`SectionedELL`](../nitrix-sparse.qmd)
+  `A`: factorised path.  Computes
+  $Q = \operatorname{tr}(A\,CC^{\top}) - (\gamma / 2m)\,
+  \lVert C^{\top} k\rVert^2$ with sparse matrix-vector products and
+  never materialises the dense $B$.  Cost is
+  $O(\mathrm{nnz}\cdot k)$, where $\mathrm{nnz}$ is the
+  non-zero count and $k$ the community count.
+
+For `A` larger than roughly 5k nodes the sparse path is preferable;
+for small dense graphs the readable dense path is fine.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:relaxed_modularity -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `A` | `_GraphInput` | — | — | (Weighted) adjacency, dense or sparse, batched over leading axes. |
+| `C` | `Num` | `...` × `n` × `k` | — | Community-assignment matrix over `k` communities; one-hot for a hard partition, otherwise a soft or overlapping assignment. |
+| `C_other` | `Optional[Num[Array, '... n k']]` | — | `None` | Optional second assignment for asymmetric or bipartite cases. Defaults to `C`. |
+| `bridge` | `Optional[Num[Array, '... k k']]` | — | `None` | Optional mapping between community indices, giving the coaffiliation $C\,\mathrm{bridge}\,C_{\mathrm{other}}^{\top}$. |
+| `gamma` | `float` | — | `1.0` | Resolution parameter. Larger values favour smaller communities. Default `1.0`. |
+| `null` | `_NullModel` | — | `girvan_newman_null` | Null-model factory used on the dense path. Default [`girvan_newman_null`](../nitrix-graph-community/girvan_newman_null.qmd). (The sparse path uses the equivalent rank-1 degree-based correction directly.) |
+| `normalise_modularity` | `bool` | — | `True` | If `True` (default), normalise the modularity by the total edge weight $2m$. |
+| `normalise_coaffiliation` | `bool` | — | `True` | If `True` (default), normalise `C` (and `C_other`) by their maximum value before forming the coaffiliation. |
+| `exclude_diag` | `bool` | — | `True` | If `True` (default), drop the diagonal of the coaffiliation so a node's trivial self-affiliation does not bias the score. |
+| `directed` | `bool` | — | `False` | If `False` (default), halve the score to correct for counting each undirected edge twice; if `True`, return the raw sum. |
+| `sign` | `Optional[Literal['+', '-']]` | — | `'+'` | Weight handling on the dense path, forwarded to [`modularity_matrix`](../nitrix-graph-community/modularity_matrix.qmd). `'+'` (default) clips negative weights; `'-'` clips positive weights; `None` uses the raw input. Ignored on the sparse path. |
+
+**Returns** `Num` — shape `...`. The scalar relaxed modularity per batch element.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:relaxed_modularity -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **139.3 µs** (median, L4); up to **373.56× faster** than `networkx.modularity`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_RELAXED_MODULARITY.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| relaxed_modularity | jax-cpu | n=128 | `cupy.relaxed_modularity` | skipped | — | — | — | — | — |
+| relaxed_modularity | jax-cpu | n=128 | `networkx.modularity` | ok | 2.79 ms / 2.90 ms | 732.96 ms | 706 MB (rss) | ✓ 3.8e-14×tol | 63.95x vs nitrix-jax |
+| relaxed_modularity | jax-cpu | n=128 | `nitrix-jax` | ok | 43.6 µs / 45.3 µs | 152.56 ms | 706 MB (rss) | ✓ 5.6e-05×tol | 1.00x vs nitrix-jax |
+| relaxed_modularity | jax-cuda12 | n=128 | `cupy.relaxed_modularity` | ok | 223.6 µs / 234.1 µs | 358.80 ms | 0.07 MB (hbm) | ✓ 2.1e-05×tol | 1.88x vs nitrix-jax |
+| relaxed_modularity | jax-cuda12 | n=128 | `networkx.modularity` | ok | 3.10 ms / 4.36 ms | 508.84 ms | 0.07 MB (hbm) | ✓ 3.8e-14×tol | 26.11x vs nitrix-jax |
+| relaxed_modularity | jax-cuda12 | n=128 | `nitrix-jax` | ok | 118.8 µs / 139.3 µs | 552.92 ms | 71.50 MB (hbm) | ✓ 2.4e-05×tol | 1.00x vs nitrix-jax |
+| relaxed_modularity | jax-cpu | n=256 | `cupy.relaxed_modularity` | skipped | — | — | — | — | — |
+| relaxed_modularity | jax-cpu | n=256 | `networkx.modularity` | ok | 12.75 ms / 15.90 ms | 569.98 ms | 706 MB (rss) | ✓ 1.1e-13×tol | 91.70x vs nitrix-jax |
+| relaxed_modularity | jax-cpu | n=256 | `nitrix-jax` | ok | 139.1 µs / 194.0 µs | 205.36 ms | 706 MB (rss) | ✓ 6.2e-05×tol | 1.00x vs nitrix-jax |
+| relaxed_modularity | jax-cuda12 | n=256 | `cupy.relaxed_modularity` | ok | 227.6 µs / 239.1 µs | 271.95 ms | 0.27 MB (hbm) | ✓ 5e-05×tol | 1.56x vs nitrix-jax |
+| relaxed_modularity | jax-cuda12 | n=256 | `networkx.modularity` | ok | 11.12 ms / 12.96 ms | 518.56 ms | 0.27 MB (hbm) | ✓ 1.1e-13×tol | 76.40x vs nitrix-jax |
+| relaxed_modularity | jax-cuda12 | n=256 | `nitrix-jax` | ok | 145.5 µs / 147.8 µs | 726.29 ms | 134.49 MB (hbm) | ✓ 4.3e-06×tol | 1.00x vs nitrix-jax |
+| relaxed_modularity | jax-cpu | n=512 | `cupy.relaxed_modularity` | skipped | — | — | — | — | — |
+| relaxed_modularity | jax-cpu | n=512 | `networkx.modularity` | ok | 53.28 ms / 65.59 ms | 554.99 ms | 706 MB (rss) | ✓ 3e-14×tol | 192.14x vs nitrix-jax |
+| relaxed_modularity | jax-cpu | n=512 | `nitrix-jax` | ok | 277.3 µs / 365.1 µs | 199.70 ms | 706 MB (rss) | ✓ 7e-06×tol | 1.00x vs nitrix-jax |
+| relaxed_modularity | jax-cuda12 | n=512 | `cupy.relaxed_modularity` | ok | 222.3 µs / 244.9 µs | 265.86 ms | 1.06 MB (hbm) | ✓ 1.4e-05×tol | 1.83x vs nitrix-jax |
+| relaxed_modularity | jax-cuda12 | n=512 | `networkx.modularity` | ok | 45.35 ms / 48.64 ms | 548.32 ms | 1.06 MB (hbm) | ✓ 3e-14×tol | 373.56x vs nitrix-jax |
+| relaxed_modularity | jax-cuda12 | n=512 | `nitrix-jax` | ok | 121.4 µs / 134.9 µs | 771.25 ms | 135.29 MB (hbm) | ✓ 1.8e-05×tol | 1.00x vs nitrix-jax |
+:::
+
+*source: bench `8157e508` · nitrix `32fd5ab9`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:relaxed_modularity -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `k` | kernel or basis components |
+<!-- nitrix:/gen -->

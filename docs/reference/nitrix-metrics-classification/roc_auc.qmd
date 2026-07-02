@@ -1,0 +1,51 @@
+---
+title: "roc_auc"
+generated: true
+description: "Area under the ROC curve (rank / Mann-Whitney form, tie-corrected)."
+---
+
+[‹ back to `nitrix.metrics.classification`](../nitrix-metrics-classification.qmd)
+
+<!-- nitrix:gen sig:roc_auc -->
+```python
+roc_auc(scores: Float[Array, 'N'] | Float[Array, 'N C'], labels: Int[Array, 'N'], *, average: Average = 'macro') -> Float[Array, ''] | Float[Array, 'C']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:roc_auc -->
+Area under the ROC curve (rank / Mann-Whitney form, tie-corrected).
+
+1-D `scores` is the binary case (positive class = label `1`).  2-D
+`scores` `(N, C)` is multiclass one-vs-rest: column `c` scores
+"class `c` vs the rest" against `labels == c`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:roc_auc -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `scores` | `Float` | `N` × `C` | — | Decision scores: `(N,)` (binary) or `(N, C)` (per-class, OvR). |
+| `labels` | `Int` | `N` | — | Integer labels `(N,)`: `{0, 1}` binary, `{0, ..., C-1}` multiclass. |
+| `average` | `Average` | — | `'macro'` | Multiclass pooling of the per-class OvR AUCs (ignored for 1-D scores): `'macro'` (unweighted mean, default), `'micro'` (one AUC over the pooled one-hot scores/labels), or `'none'` (the per-class `(C,)` vector). |
+
+**Returns** `Float` — shape `C`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:roc_auc -->
+::: {.callout-note}
+**Global statistic, not batch-meanable.**  Score on the gathered
+`(scores, labels)` accumulated across all batches; a mean of
+per-batch AUCs is not the AUC.  Non-differentiable (rank-based).
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:roc_auc -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `N` | observations — time points, subjects, or sampled points |
+| `C` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

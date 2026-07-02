@@ -1,0 +1,86 @@
+---
+title: "surface_resample"
+generated: true
+description: "Resample a per-vertex field between two registered spherical meshes."
+---
+
+[‹ back to `nitrix.geometry.sphere`](../nitrix-geometry-sphere.qmd)
+
+<!-- nitrix:gen sig:surface_resample -->
+```python
+surface_resample(source_sphere: 'Mesh', source_vals: Float[Array, 'n_source ...'], target_sphere: 'Mesh', *, method: Literal['adap_bary_area', 'barycentric'] = 'adap_bary_area', source_area: Optional[Float[Array, 'n_source']] = None, target_area: Optional[Float[Array, 'n_target']] = None, semiring: Any = None) -> tuple['ELL', Array]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:surface_resample -->
+Resample a per-vertex field between two registered spherical meshes.
+
+The `wb_command -metric-resample` analogue and the fsaverage<->fs_LR (or
+cross-resolution) bridge: `source_sphere` and `target_sphere` are two
+tessellations of the **same** registered sphere (radius-independent -- both
+are normalised to unit vectors for the search), and `source_vals` is
+carried to the target tessellation.  Returns `(operator, resampled)` --
+the resampling `ELL` (host-side construction) **and**
+the field after applying it through the differentiable apply-seam; reuse
+the operator for further fields of the same (source, target) pair.
+
+Two methods, matching the two Workbench modes:
+
+- `method='barycentric'` -- forward gather: each target vertex takes the
+  barycentric interpolation of the source triangle it falls in.  The
+  operator is **row-stochastic**, so constants are preserved exactly; best
+  for smooth features and up-sampling.
+- `method='adap_bary_area'` (default) -- *adaptive barycentric, area
+  weighted*: each source vertex scatters its (anatomical) vertex area into
+  the target triangle it falls in, and each target row is normalised by the
+  target vertex area.  This **conserves the area-weighted integral exactly**
+  ($\sum_t A^{\mathrm{target}}_t \, \mathrm{out}_t = \sum_s
+  A^{\mathrm{source}}_s \, \mathrm{in}_s$) whenever
+  every target vertex receives source mass (the down-sampling / matched
+  regime); target vertices that receive none (up-sampling holes) fall back
+  to the barycentric gather, where conservation becomes approximate.  This
+  is the faithful Workbench behaviour and the documented divergence: pick
+  `'barycentric'` when exact constant-preservation matters more than the
+  integral.
+
+The `*_area` arrays are the **anatomical** vertex areas to weight by
+(the Workbench `-area-metrics`); default to the spheres' own vertex areas
+(`vertex_areas`), which conserve the
+*sphere*-area-weighted integral.  The conserved inner product is always
+w.r.t. the **supplied** `source_area` / `target_area` (i.e.
+$\sum_t \mathrm{target\_area}_t \, \mathrm{out}_t = \sum_s
+\mathrm{source\_area}_s \, \mathrm{in}_s$): if you override them, measure
+conservation against the same arrays, not the sphere
+`vertex_areas`.
+
+Host-side construction (the spherical search emits a plain `ELL`, the
+HOST-CTOR class); the *application* is pure-JAX and differentiable w.r.t.
+`source_vals`.  The search is `O(n_query * n_faces)` (a uniform-bucket
+broad-phase is a profile-gated follow-up).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:surface_resample -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `source_sphere` | `'Mesh'` | — | — | Source spherical mesh (any radius; normalised internally). |
+| `source_vals` | `Float` | `n_source` × `...` | — | Per-source-vertex field, `(n_source,)` or `(n_source, c)`. |
+| `target_sphere` | `'Mesh'` | — | — | Target spherical mesh, registered to `source_sphere` (any radius; normalised internally). |
+| `method` | `Literal['adap_bary_area', 'barycentric']` | — | `'adap_bary_area'` | `'adap_bary_area'` (default) or `'barycentric'`. |
+| `source_area` | `Optional[Float[Array, 'n_source']]` | — | `None` | Optional anatomical vertex areas (`adap_bary_area` only); default to the spheres' `vertex_areas`. |
+| `target_area` | `Optional[Float[Array, 'n_target']]` | — | `None` | Optional anatomical vertex areas (`adap_bary_area` only); default to the spheres' `vertex_areas`. |
+| `semiring` | `Any` | — | `None` | Optional semiring for the apply (default `REAL`). |
+
+**Returns** `tuple['ELL', Array]`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:surface_resample -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_source` | *(undocumented — add to `_dimensions.yml`)* |
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

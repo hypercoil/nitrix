@@ -1,0 +1,77 @@
+---
+title: "robust_zscore_normalize"
+generated: true
+description: "Median / MAD-based robust z-score normalisation."
+---
+
+[‹ back to `nitrix.numerics.normalize`](../nitrix-numerics-normalize.qmd)
+
+<!-- nitrix:gen sig:robust_zscore_normalize -->
+```python
+robust_zscore_normalize(x: Num[Array, '...'], *, axis: _AxisArg = -1, eps: float = 1e-12) -> Num[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:robust_zscore_normalize -->
+Median / MAD-based robust z-score normalisation.
+
+Computes $(x - \operatorname{median}) /
+(1.4826 \operatorname{MAD} + \epsilon)$ along `axis`, using
+the median and median-absolute-deviation in place of the mean
+and standard deviation.  This is less sensitive to outliers
+than [`zscore_normalize`](../nitrix-numerics-normalize/zscore_normalize.qmd).  The factor 1.4826 makes the MAD
+a consistent estimator of the standard deviation for Gaussian
+inputs.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:robust_zscore_normalize -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Num` | `...` | — | Input tensor. |
+| `axis` | `_AxisArg` | — | `-1` | Axis (or axes) over which the median and MAD are reduced. Default `-1` (the trailing observation axis). |
+| `eps` | `float` | — | `1e-12` | Denominator stabiliser guarding a zero MAD. |
+
+**Returns** `Num` — shape `...`. Robustly z-scored tensor, same shape as `x`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:robust_zscore_normalize -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **1.42 ms** (median, L4); up to **73.6× faster** than `numpy.robust_zscore`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_ROBUST_ZSCORE_NORMALIZE.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| robust_zscore_normalize | jax-cpu | n=2048 | `cupy.robust_zscore_normalize` | skipped | — | — | — | — | — |
+| robust_zscore_normalize | jax-cpu | n=2048 | `nitrix-jax` | ok | 1.178 s / 1.183 s | 1.448 s | 1280 MB (rss) | ✓ 0.00043×tol | 1.00x vs nitrix-jax |
+| robust_zscore_normalize | jax-cpu | n=2048 | `numpy.robust_zscore` | ok | 102.51 ms / 103.90 ms | 139.87 ms | 1280 MB (rss) | ✓ 0.00043×tol | 0.09x vs nitrix-jax |
+| robust_zscore_normalize | jax-cuda12 | n=2048 | `cupy.robust_zscore_normalize` | ok | 17.98 ms / 18.01 ms | 4.951 s | 16.78 MB (hbm) | ✓ 0.00043×tol | 12.84x vs nitrix-jax |
+| robust_zscore_normalize | jax-cuda12 | n=2048 | `nitrix-jax` | ok | 1.40 ms / 1.42 ms | 1.280 s | 83.89 MB (hbm) | ✓ 0.00043×tol | 1.00x vs nitrix-jax |
+| robust_zscore_normalize | jax-cuda12 | n=2048 | `numpy.robust_zscore` | ok | 101.89 ms / 103.54 ms | 139.33 ms | 16.78 MB (hbm) | ✓ 0.00043×tol | 72.77x vs nitrix-jax |
+| robust_zscore_normalize | jax-cpu | n=4096 | `cupy.robust_zscore_normalize` | skipped | — | — | — | — | — |
+| robust_zscore_normalize | jax-cpu | n=4096 | `nitrix-jax` | ok | 5.245 s / 5.252 s | 5.711 s | 1280 MB (rss) | ✓ 0.00042×tol | 1.00x vs nitrix-jax |
+| robust_zscore_normalize | jax-cpu | n=4096 | `numpy.robust_zscore` | ok | 603.49 ms / 620.27 ms | 606.46 ms | 1280 MB (rss) | ✓ 0.00042×tol | 0.12x vs nitrix-jax |
+| robust_zscore_normalize | jax-cuda12 | n=4096 | `cupy.robust_zscore_normalize` | ok | 73.93 ms / 74.01 ms | 312.10 ms | 67.11 MB (hbm) | ✓ 0.00042×tol | 9.16x vs nitrix-jax |
+| robust_zscore_normalize | jax-cuda12 | n=4096 | `nitrix-jax` | ok | 8.07 ms / 8.66 ms | 1.360 s | 335.54 MB (hbm) | ✓ 0.00042×tol | 1.00x vs nitrix-jax |
+| robust_zscore_normalize | jax-cuda12 | n=4096 | `numpy.robust_zscore` | ok | 594.26 ms / 598.39 ms | 603.80 ms | 67.11 MB (hbm) | ✓ 0.00042×tol | 73.60x vs nitrix-jax |
+| robust_zscore_normalize | jax-cpu | n=512 | `cupy.robust_zscore_normalize` | skipped | — | — | — | — | — |
+| robust_zscore_normalize | jax-cpu | n=512 | `nitrix-jax` | ok | 60.88 ms / 61.65 ms | 223.51 ms | 1280 MB (rss) | ✓ 0.00045×tol | 1.00x vs nitrix-jax |
+| robust_zscore_normalize | jax-cpu | n=512 | `numpy.robust_zscore` | ok | 6.45 ms / 6.57 ms | 6.76 ms | 1280 MB (rss) | ✓ 0.00045×tol | 0.11x vs nitrix-jax |
+| robust_zscore_normalize | jax-cuda12 | n=512 | `cupy.robust_zscore_normalize` | ok | 511.8 µs / 513.3 µs | 6.259 s | 1.05 MB (hbm) | ✓ 0.00045×tol | 2.84x vs nitrix-jax |
+| robust_zscore_normalize | jax-cuda12 | n=512 | `nitrix-jax` | ok | 180.2 µs / 190.0 µs | 986.94 ms | 68.16 MB (hbm) | ✓ 0.00045×tol | 1.00x vs nitrix-jax |
+| robust_zscore_normalize | jax-cuda12 | n=512 | `numpy.robust_zscore` | ok | 6.83 ms / 7.03 ms | 6.95 ms | 1.05 MB (hbm) | ✓ 0.00045×tol | 37.90x vs nitrix-jax |
+:::
+
+*source: bench `3ebfa0ef` · nitrix `f42e7ff8`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:robust_zscore_normalize -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

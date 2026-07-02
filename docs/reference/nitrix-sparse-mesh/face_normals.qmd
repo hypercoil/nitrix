@@ -1,0 +1,49 @@
+---
+title: "face_normals"
+generated: true
+description: "Unit per-face normals of a triangle mesh."
+---
+
+[‹ back to `nitrix.sparse.mesh`](../nitrix-sparse-mesh.qmd)
+
+<!-- nitrix:gen sig:face_normals -->
+```python
+face_normals(vertices: Float[Array, 'n_vertices 3'], faces: Int[Array, 'n_faces 3']) -> Float[Array, 'n_faces 3']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:face_normals -->
+Unit per-face normals of a triangle mesh.
+
+The normalised edge cross product
+$(v_1 - v_0) \times (v_2 - v_0) / \lVert \cdot \rVert$ for
+each face, oriented by the face's vertex winding.  Distinct from the
+un-normalised, area-weighted face cross product
+[`compute_vertex_normals`](../nitrix-sparse-mesh/compute_vertex_normals.qmd) accumulates onto vertices: here each
+face normal is **unit** length, so it is the per-face surface
+direction
+(e.g. for a face-normal-consistency regulariser or a flat-shading
+normal), not an area weight.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:face_normals -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `vertices` | `Float` | `n_vertices` × `3` | — | `(n_vertices, 3)` coordinates. |
+| `faces` | `Int` | `n_faces` × `3` | — | `(n_faces, 3)` vertex indices. |
+
+**Returns** `Float` — shape `n_faces` × `3`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:face_normals -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_vertices` | *(undocumented — add to `_dimensions.yml`)* |
+| `3` | *(undocumented — add to `_dimensions.yml`)* |
+| `n_faces` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

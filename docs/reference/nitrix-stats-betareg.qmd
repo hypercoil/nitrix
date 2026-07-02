@@ -1,37 +1,93 @@
 ---
 title: "nitrix.stats.betareg"
 generated: true
-signature-hash: 55c7148fb8ea016a
+signature-hash: e1bbec463cd8d264
+description: "Beta regression for proportions in $(0, 1)$."
+listing:
+  id: nitrix-stats-betareg-symbols
+  contents: "nitrix-stats-betareg/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
-Auto-generated scaffold for `nitrix.stats.betareg` (signatures only). Replace the
-skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
-`check_reference_staleness.py` flags this page if the underlying
-signatures drift from this stub.
+Auto-generated scaffold for `nitrix.stats.betareg`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
 
-## `BetaResult` {#BetaResult}
+<!-- nitrix:gen overview:__module__ -->
+Beta regression for proportions in $(0, 1)$.
 
-*decorated:* `@register_result(children=('coef', 'precision', 'cov_unscaled', 'log_lik'), aux=('n_obs',))`, `@dataclass(frozen=True)`
+Bounded continuous responses -- tissue fractions, fMRI fractional occupancy,
+any proportion -- are modelled as
+$y \sim \operatorname{Beta}(\mu\phi,\, (1 - \mu)\phi)$ with mean
+$\mu = \operatorname{logit}^{-1}(X\beta)$ and a **precision**
+$\phi$ (larger $\phi$ = less dispersion).  This is *not* a
+standard exponential-family GLM: the score is **digamma**-based, not the
+$\mu_\eta^2 / V$ IRLS weight, and the precision is a second parameter
+estimated jointly with the mean -- so it gets its own fitter rather than
+slotting into a standard GLM core.
 
-```python
-class BetaResult
-```
+The estimator is the Ferrari & Cribari-Neto Fisher-scoring scheme, which
+alternates a reweighted-least-squares step for $\beta$ and a Newton step
+for $\log\phi$, to a fixed iteration budget (`vmap`-clean over
+voxels):
 
-Per-element beta-regression fit output.
+$$
+\begin{aligned}
+y^{*} &= \operatorname{logit}(y), \quad
+\mu^{*} = \psi(\mu\phi) - \psi((1 - \mu)\phi) \\
+\nu &= \psi'(\mu\phi) + \psi'((1 - \mu)\phi) \\
+W &= \operatorname{diag}\!\left(\phi^2
+    (\mathrm{d}\mu / \mathrm{d}\eta)^2 \nu\right), \quad
+z = \eta + \frac{y^{*} - \mu^{*}}
+    {\phi \, (\mathrm{d}\mu / \mathrm{d}\eta) \, \nu} \\
+\beta &\leftarrow (X^{\top} W X)^{-1} X^{\top} W z
+\end{aligned}
+$$
 
-*TODO: class overview.*
+with the precision score / information
 
-## `beta_fit` {#beta_fit}
+$$
+\begin{aligned}
+U_\phi &= \sum \mu(y^{*} - \mu^{*}) + \log(1 - y)
+    - \psi((1 - \mu)\phi) + \psi(\phi) \\
+K_\phi &= \sum \mu^2 \psi'(\mu\phi)
+    + (1 - \mu)^2 \psi'((1 - \mu)\phi) - \psi'(\phi),
+\end{aligned}
+$$
 
-```python
-beta_fit(Y: Float[Array, 'V N'], X: Float[Array, 'N p'], *, n_iter: int=50, ridge: float=1e-08, block: Optional[int]=None) -> BetaResult
-```
+stepped as
+$\log\phi \leftarrow \log\phi + U_\phi / (\phi K_\phi)$.  The
+fixed-effect covariance is the $\beta$ block of the **joint**
+$(\beta, \phi)$ Fisher information inverse (so standard errors account
+for estimating $\phi$).  Every solve is a cuSOLVER-free small dense
+inverse; $\psi$ (digamma) and its derivatives (polygamma) come from
+`jax.scipy.special`.
+<!-- nitrix:/gen -->
 
-Mass-univariate beta regression (logit link, estimated precision).
+<!-- nitrix:gen sections:__module__ -->
+### References
 
-**Parameters** — *TODO: document each parameter.*
+- Ferrari, S. & Cribari-Neto, F. (2004). Beta regression for modelling rates and
+  proportions.  Journal of Applied Statistics, 31(7), 799-815.
+  https://doi.org/10.1080/0266476042000214501
+<!-- nitrix:/gen -->
 
-**Returns** — *TODO.*
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
 
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `N` | observations — time points, subjects, or sampled points |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-stats-betareg-symbols}
+:::

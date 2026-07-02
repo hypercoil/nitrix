@@ -1,0 +1,98 @@
+---
+title: "residualise"
+generated: true
+description: "Project `Y` orthogonally to the span of `X` (OLS)."
+---
+
+[‹ back to `nitrix.linalg.residual`](../nitrix-linalg-residual.qmd)
+
+<!-- nitrix:gen sig:residualise -->
+```python
+residualise(Y: Num[Array, '... C_Y obs'], X: Num[Array, '... C_X obs'], *, weights: Optional[Float[Array, '... obs']] = None, l2: float = 0.0, rowvar: bool = True, return_mode: ReturnMode = 'residual', method: Method = 'cholesky', shrinkage: Shrinkage = 'none') -> Num[Array, '... C_Y obs']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:residualise -->
+Project `Y` orthogonally to the span of `X` (OLS).
+
+For each observation channel of `Y`, regress against the
+columns of `X` and return the residual (or projection, per
+`return_mode`).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:residualise -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `Y` | `Num` | `...` × `C_Y` × `obs` | — | Target tensor. Default layout `(..., C_Y, obs)` -- last axis is the observation axis. Set `rowvar=False` to flip. |
+| `X` | `Num` | `...` × `C_X` × `obs` | — | Regressor tensor. Same layout convention as `Y`. Number of observations along the obs axis must match. |
+| `weights` | `Optional[Float[Array, '... obs']]` | — | `None` | Optional per-observation weights, `(..., obs)`. When given, performs weighted least squares with the named weights as the diagonal of the weight matrix W. `None` (default) is unweighted (W = I). |
+| `l2` | `float` | — | `0.0` | Ridge regularisation strength. `0` (default) is OLS; `l2 > 0` adds an `l2 * I` to the normal-equation matrix. Bounds the condition number of the augmented system at $1 / \sqrt{l_2}$; recommended whenever `X` might be near-collinear. This *is* the **ridge-shrunk ("soft") residualisation**: a shrunk nuisance fit for an ill-conditioned confound set. |
+| `rowvar` | `bool` | — | `True` | `True` (default): observation axis is the *last* axis of `Y` / `X`. `False`: observation axis is the *penultimate* axis (variables are last). |
+| `return_mode` | `ReturnMode` | — | `'residual'` | `"residual"` (default) -- `Y - proj`. `"projection"` -- the OLS prediction `X @ betas`. |
+| `method` | `Method` | — | `'cholesky'` | `"cholesky"` (default) -- fast normal-equations path via a rolled, cuSOLVER-free Cholesky of $X^{\top} X + l_2 I$ (~2x faster on tall systems; runs on the broken-cuSOLVER GPU). Recommended for well-conditioned `X` or whenever `l2 > 0`. For rank-deficient `X` -- more regressors than observations (`p > obs`) or exactly collinear columns -- the modified- Cholesky pivot floor keeps the factor **finite** (a regularised solution) rather than NaN, but the coefficients are then not uniquely meaningful; regularise with `l2 > 0` or switch to `"svd"` for the principled min-norm projection. `"svd"` -- SVD-based least squares (`jnp.linalg.lstsq`), robust for rank-deficient / ill-conditioned `X`. When the OLS solution is non-unique (rank-deficient `X` with `l2 == 0`) it returns the **minimum-norm** least-squares solution: the coefficient vector of smallest `\|\|beta\|\|_2` among all minimisers. The *coefficients* are thus not uniquely interpretable under rank deficiency, but the **projection** `X @ beta` -- and hence the residual -- *is* unique: it is the orthogonal projection of `Y` onto `col(X)`, which is why `residual + projection == Y` stays exact as `p -> obs` and beyond. Use when `X` may be near-collinear and `l2 == 0`. Pitfall: `lstsq` (`rcond=None`) zeros singular values below a relative cutoff (`~ max(obs, p) * eps * sigma_max`), so for *near*-collinear `X` (small but non-zero singular values) the effective column space -- exactly which directions get residualised out -- depends on that threshold and can flip for borderline directions. If you need a deterministic, smoothly-shrinking treatment of weak directions, prefer `l2 > 0` (which makes the system full-rank, so the solve is the unique ridge estimate rather than a min-norm truncation) over relying on the SVD cutoff. |
+| `shrinkage` | `Shrinkage` | — | `'none'` | `"none"` (default) -- the raw projection is removed. `"james-stein"` -- positive-part James-Stein shrinkage of the per-channel nuisance projection toward zero (the other "soft" variant): the projection is scaled by $c = \left(1 - (k-2)\,\sigma^2 / \lVert \mathrm{proj} \rVert^2 \right)_+$ before being subtracted, so confounds that explain a channel only weakly remove correspondingly less -- protecting real signal variance a high-dimensional / collinear confound set would otherwise strip. A James-Stein shrinkage heuristic (a plug-in analogue of the $k \geq 3$ dominance result, not the strict theorem); a no-op for $k \leq 2$. Composes with `l2` (shrinks whatever ridge / OLS projection was fit). Note the residual is then no longer exactly orthogonal to `X` -- the intended bias-variance trade of a soft removal. |
+
+**Returns** `Num` — shape `...` × `C_Y` × `obs`. Residual or projection (per `return_mode`), same shape as `Y`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:residualise -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **177.8 µs** (median, L4); up to **312.03× faster** than `nilearn.signal_clean`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_RESIDUALISE.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| residualise | jax-cpu | V=1000,N=400,K=24 | `cupy.linalg.lstsq` | skipped | — | — | — | — | — |
+| residualise | jax-cpu | V=1000,N=400,K=24 | `nilearn.signal_clean` | ok | 20.02 ms / 125.52 ms | 285.61 ms | 2171 MB (rss) | ✓ 0.0045×tol | 22.79x vs nitrix-jax |
+| residualise | jax-cpu | V=1000,N=400,K=24 | `nitrix-jax` | ok | 878.3 µs / 1.02 ms | 292.00 ms | 2171 MB (rss) | ✓ 0.0038×tol | 1.00x vs nitrix-jax |
+| residualise | jax-cpu | V=1000,N=400,K=24 | `numpy.linalg.lstsq` | ok | 7.46 ms / 10.86 ms | 9.54 ms | 2171 MB (rss) | ✓ 0.0017×tol | 8.49x vs nitrix-jax |
+| residualise | jax-cuda12 | V=1000,N=400,K=24 | `cupy.linalg.lstsq` | ok | 1.92 ms / 1.96 ms | 764.43 ms | 2.10 MB (hbm) | ✓ 0.0078×tol | 11.16x vs nitrix-jax |
+| residualise | jax-cuda12 | V=1000,N=400,K=24 | `nilearn.signal_clean` | ok | 23.56 ms / 60.96 ms | 249.19 ms | 2.10 MB (hbm) | ✓ 0.0045×tol | 137.08x vs nitrix-jax |
+| residualise | jax-cuda12 | V=1000,N=400,K=24 | `nitrix-jax` | ok | 171.8 µs / 177.8 µs | 650.65 ms | 76.60 MB (hbm) | ✓ 0.0032×tol | 1.00x vs nitrix-jax |
+| residualise | jax-cuda12 | V=1000,N=400,K=24 | `numpy.linalg.lstsq` | ok | 7.93 ms / 28.06 ms | 57.20 ms | 2.10 MB (hbm) | ✓ 0.0017×tol | 46.14x vs nitrix-jax |
+| residualise | jax-cpu | V=10000,N=400,K=24 | `cupy.linalg.lstsq` | skipped | — | — | — | — | — |
+| residualise | jax-cpu | V=10000,N=400,K=24 | `nilearn.signal_clean` | ok | 68.46 ms / 138.47 ms | 259.27 ms | 2171 MB (rss) | ✓ 0.0054×tol | 9.52x vs nitrix-jax |
+| residualise | jax-cpu | V=10000,N=400,K=24 | `nitrix-jax` | ok | 7.19 ms / 36.95 ms | 609.52 ms | 2171 MB (rss) | ✓ 0.0061×tol | 1.00x vs nitrix-jax |
+| residualise | jax-cpu | V=10000,N=400,K=24 | `numpy.linalg.lstsq` | ok | 90.13 ms / 143.85 ms | 1.156 s | 2171 MB (rss) | ✓ 0.0022×tol | 12.53x vs nitrix-jax |
+| residualise | jax-cuda12 | V=10000,N=400,K=24 | `cupy.linalg.lstsq` | ok | 2.34 ms / 2.38 ms | 278.55 ms | 16.82 MB (hbm) | ✓ 0.0098×tol | 7.04x vs nitrix-jax |
+| residualise | jax-cuda12 | V=10000,N=400,K=24 | `nilearn.signal_clean` | ok | 103.77 ms / 169.64 ms | 326.54 ms | 16.82 MB (hbm) | ✓ 0.0054×tol | 312.03x vs nitrix-jax |
+| residualise | jax-cuda12 | V=10000,N=400,K=24 | `nitrix-jax` | ok | 332.5 µs / 341.2 µs | 978.26 ms | 120.12 MB (hbm) | ✓ 0.0041×tol | 1.00x vs nitrix-jax |
+| residualise | jax-cuda12 | V=10000,N=400,K=24 | `numpy.linalg.lstsq` | ok | 88.77 ms / 90.10 ms | 91.90 ms | 16.82 MB (hbm) | ✓ 0.0022×tol | 266.95x vs nitrix-jax |
+| residualise | jax-cpu | V=100000,N=400,K=24 | `cupy.linalg.lstsq` | skipped | — | — | — | — | — |
+| residualise | jax-cpu | V=100000,N=400,K=24 | `nilearn.signal_clean` | ok | 421.74 ms / 434.80 ms | 596.46 ms | 2171 MB (rss) | ✓ 0.0062×tol | 2.01x vs nitrix-jax |
+| residualise | jax-cpu | V=100000,N=400,K=24 | `nitrix-jax` | ok | 210.26 ms / 224.71 ms | 457.54 ms | 2171 MB (rss) | ✓ 0.0071×tol | 1.00x vs nitrix-jax |
+| residualise | jax-cpu | V=100000,N=400,K=24 | `numpy.linalg.lstsq` | ok | 1.957 s / 3.791 s | 2.851 s | 2171 MB (rss) | ✓ 0.0025×tol | 9.31x vs nitrix-jax |
+| residualise | jax-cuda12 | V=100000,N=400,K=24 | `cupy.linalg.lstsq` | ok | 13.07 ms / 13.51 ms | 359.12 ms | 268.47 MB (hbm) | ✓ 0.012×tol | 2.34x vs nitrix-jax |
+| residualise | jax-cuda12 | V=100000,N=400,K=24 | `nilearn.signal_clean` | ok | 420.92 ms / 430.81 ms | 622.06 ms | 268.47 MB (hbm) | ✓ 0.0062×tol | 75.39x vs nitrix-jax |
+| residualise | jax-cuda12 | V=100000,N=400,K=24 | `nitrix-jax` | ok | 5.58 ms / 5.66 ms | 960.67 ms | 861.14 MB (hbm) | ✓ 0.0089×tol | 1.00x vs nitrix-jax |
+| residualise | jax-cuda12 | V=100000,N=400,K=24 | `numpy.linalg.lstsq` | ok | 1.636 s / 3.671 s | 3.105 s | 268.47 MB (hbm) | ✓ 0.0025×tol | 293.05x vs nitrix-jax |
+:::
+
+*source: bench `5e5d31ee` · nitrix `8259a204`*
+::::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:residualise -->
+::: {.callout-note}
+The legacy `hypercoil.functional.resid.residualise` always
+used SVD via `lstsq`; the Cholesky default here is ~2× faster
+on tall systems.  Behaviour matches SVD to within
+machine-precision when the system is well-conditioned (see
+the `test_residualise_cholesky_vs_svd_parity_at_fp64` test
+for the verified bound).
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:residualise -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `C_Y` | *(undocumented — add to `_dimensions.yml`)* |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+| `C_X` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

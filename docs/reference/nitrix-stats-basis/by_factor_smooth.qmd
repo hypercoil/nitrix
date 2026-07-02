@@ -1,0 +1,58 @@
+---
+title: "by_factor_smooth"
+generated: true
+description: "By-variable factor smooths `s(x, by=f)` -- one smooth of `x` per level."
+---
+
+[‹ back to `nitrix.stats.basis`](../nitrix-stats-basis.qmd)
+
+<!-- nitrix:gen sig:by_factor_smooth -->
+```python
+by_factor_smooth(x: Float[Array, ' n'], by: Int[Array, ' n'], n_basis: int = 10, *, degree: int = 3, penalty_order: int = 2, bounds: Optional[Tuple[float, float]] = None, center: bool = True, n_levels: Optional[int] = None) -> Tuple[SplineBasis, ...]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:by_factor_smooth -->
+By-variable factor smooths `s(x, by=f)` -- one smooth of `x` per level.
+
+mgcv's `s(x, by=f)` for a **factor** `f`: a *separate* penalised smooth
+of `x` for each level of `f`, each with its **own** smoothing parameter.
+Returns a tuple of `len == n_levels` [`SplineBasis`](../nitrix-stats-basis/SplineBasis.qmd) blocks; splat it
+into the `smooths=` argument of [`gam_fit`](../nitrix-stats.qmd) (each block
+is an independent smooth, so the Fellner-Schall loop selects a per-level
+smoothing parameter).
+
+Construction: a single marginal P-spline of `x` (shared knots / penalty /
+centering), then level `l`'s design is that marginal design with the rows
+where `f != l` zeroed -- so level `l`'s coefficients load only on its own
+observations.  Because the per-level designs have disjoint nonzero rows, the
+blocks are orthogonal in $X^{\top} W X$ (each level is fit on its own
+data).  Pair with a parametric factor main effect to carry the per-level
+mean (the smooths are sum-to-zero when `center=True`, as in mgcv).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:by_factor_smooth -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Float` | `n` | — | `(n,)` covariate. |
+| `by` | `Int` | `n` | — | `(n,)` integer factor labels in `0 .. L-1`. |
+| `n_basis` | `int` | — | `10` | Marginal P-spline parameters (see [`bspline_basis`](../nitrix-stats-basis/bspline_basis.qmd)). |
+| `degree` | `int` | — | `3` | Marginal P-spline parameters (see [`bspline_basis`](../nitrix-stats-basis/bspline_basis.qmd)). |
+| `penalty_order` | `int` | — | `2` | Marginal P-spline parameters (see [`bspline_basis`](../nitrix-stats-basis/bspline_basis.qmd)). |
+| `bounds` | `Optional[Tuple[float, float]]` | — | `None` | Marginal P-spline parameters (see [`bspline_basis`](../nitrix-stats-basis/bspline_basis.qmd)). |
+| `center` | `bool` | — | `True` | Marginal P-spline parameters (see [`bspline_basis`](../nitrix-stats-basis/bspline_basis.qmd)). |
+| `n_levels` | `Optional[int]` | — | `None` | Number of levels `L` (defaults to `int(by.max()) + 1`); pass it when a level is absent from this sample so the returned tuple length is stable. |
+
+**Returns** `Tuple[SplineBasis, ...]`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:by_factor_smooth -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

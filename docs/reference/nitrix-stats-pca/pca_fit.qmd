@@ -1,0 +1,43 @@
+---
+title: "pca_fit"
+generated: true
+description: "Fit a PCA basis to `X` (rows = samples, columns = features)."
+---
+
+[‹ back to `nitrix.stats.pca`](../nitrix-stats-pca.qmd)
+
+<!-- nitrix:gen sig:pca_fit -->
+```python
+pca_fit(X: Float[Array, 'n d'], *, n_components: Optional[int] = None, center: bool = True, solver: Solver = 'full', n_oversamples: int = 10, n_power_iterations: int = 2, key: Optional[Array] = None) -> PCAResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:pca_fit -->
+Fit a PCA basis to `X` (rows = samples, columns = features).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:pca_fit -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X` | `Float` | `n` × `d` | — | Data matrix `(n_samples, n_features)`. |
+| `n_components` | `Optional[int]` | — | `None` | Number of components to keep. `None` (default) keeps `min(n_samples, n_features)` -- the components with potentially non-zero variance. Must be a static (Python) `int` so the output shape is known at trace time. |
+| `center` | `bool` | — | `True` | Subtract the feature mean before fitting (default `True`). When `False` the returned `mean` is zeros and the decomposition is of the uncentred second-moment matrix. |
+| `solver` | `Solver` | — | `'full'` | `"full"` (default) -- exact covariance eigendecomposition; `"gram"` -- exact, via the `(n, n)` Gram (cheap when `n < d`); `"randomized"` -- randomised range finder (top `k` only, cheap when `k << d`); `"auto"` -- `"gram"` if `n < d` else `"full"`. |
+| `n_oversamples` | `int` | — | `10` | Randomised-solver controls: the oversampling `p` (sketch width `k + p`) and the number of power iterations `q` (more `q` sharpens the spectral separation, improving accuracy on slowly decaying spectra). Ignored for `solver="full"`. |
+| `n_power_iterations` | `int` | — | `2` | Randomised-solver controls: the oversampling `p` (sketch width `k + p`) and the number of power iterations `q` (more `q` sharpens the spectral separation, improving accuracy on slowly decaying spectra). Ignored for `solver="full"`. |
+| `key` | `Optional[Array]` | — | `None` | PRNG key. Required for `solver="randomized"`; ignored otherwise. |
+
+**Returns** `PCAResult`. `components` `(k, d)`, `mean` `(d,)`, `explained_variance` `(k,)`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:pca_fit -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->

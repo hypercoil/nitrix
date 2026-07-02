@@ -74,8 +74,26 @@ def _move_axes_to_front(
 ) -> Tuple[Array, Tuple[int, ...]]:
     """Move ``axes`` to the front of ``x`` in the given order.
 
-    Returns ``(reshaped, original_axes_normalised)`` where the
-    returned array has those axes as its leading dims.
+    Parameters
+    ----------
+    x
+        Array whose axes are to be reordered.
+    axes
+        Axis indices (possibly negative) to move to the front, in
+        the order they should appear. Must be distinct once
+        normalised against ``x.ndim``.
+
+    Returns
+    -------
+    reshaped : Array
+        ``x`` transposed so that the requested axes are its leading
+        dimensions, followed by the remaining axes in their original
+        relative order.
+    axes_norm : tuple of int
+        The requested ``axes`` normalised to the range
+        ``[0, x.ndim)``, matching the leading dimensions of the
+        returned array. Suitable for passing to
+        :func:`_move_axes_back` to restore the original ordering.
     """
     n = x.ndim
     axes_norm = tuple(ax % n for ax in axes)
@@ -95,10 +113,29 @@ def _move_axes_back(
     n_front: int,
     axes_norm: Tuple[int, ...],
 ) -> Array:
-    """Inverse of ``_move_axes_to_front``.
+    """Restore the axis ordering undone by :func:`_move_axes_to_front`.
 
-    ``x`` has its first ``n_front`` dims corresponding to
-    ``axes_norm``; rebuild the original ordering.
+    ``x`` has its first ``n_front`` dimensions corresponding to
+    ``axes_norm``; this rebuilds the original axis ordering.
+
+    Parameters
+    ----------
+    x
+        Array whose leading ``n_front`` axes were previously moved to
+        the front.
+    n_front
+        Number of leading axes that were moved to the front. This
+        argument is retained for clarity of intent; the ordering is
+        reconstructed from ``axes_norm``.
+    axes_norm
+        The normalised original positions of the leading axes, as
+        returned by :func:`_move_axes_to_front`.
+
+    Returns
+    -------
+    Array
+        ``x`` transposed back so that each moved axis returns to its
+        original position.
     """
     n = x.ndim
     perm_inverse = [0] * n
@@ -187,15 +224,17 @@ def sphere_grid_pad_2d(
     The pole flip + W/2 roll is the natural "go over the pole"
     topology of an equirectangular grid.
 
-    For the ``josa`` spherical-diffeomorphism warp (GS-13), this
-    composes directly with the existing sampler -- no sphere-aware
-    sampler is needed: pad the SVF here (with ``pole_negate_channel``
-    for the longitudinal flow component), ``integrate_velocity_field``,
-    then ``spatial_transform(..., mode='nearest')``.  The longitudinal
-    seam is handled by this padding (equivalent to ``mode='wrap'``) and
-    the over-the-pole halo by the flip + roll; ``mode='nearest'`` then
-    edge-replicates the (already topology-correct) padded borders.  See
-    ``tests/test_josa_boundary.py`` for the composition.
+    For a spherical-diffeomorphism warp this composes directly with
+    the existing sampler -- no sphere-aware sampler is needed: pad the
+    stationary velocity field here (with ``pole_negate_channel`` for
+    the longitudinal flow component), integrate it with
+    :func:`~nitrix.geometry.grid.integrate_velocity_field`, then
+    resample with
+    :func:`~nitrix.geometry.grid.spatial_transform` using
+    ``mode='nearest'``.  The longitudinal seam is handled by this
+    padding (equivalent to ``mode='wrap'``) and the over-the-pole halo
+    by the flip + roll; ``mode='nearest'`` then edge-replicates the
+    (already topology-correct) padded borders.
 
     Raises
     ------
@@ -304,10 +343,26 @@ def sphere_grid_pad_2d(
 
 
 def _negate_at_index(x: Array, axis: int, index: int) -> Array:
-    """Negate ``x`` at ``index`` along ``axis``, leave the rest unchanged.
+    """Negate ``x`` at ``index`` along ``axis``, leaving the rest unchanged.
 
     Equivalent to ``x.at[..., index, ...].set(-x[..., index, ...])``
-    along the named axis; written generically.
+    along the named axis; written generically for an arbitrary axis.
+
+    Parameters
+    ----------
+    x
+        Array to be selectively negated.
+    axis
+        Axis (possibly negative) along which ``index`` selects the
+        slice to negate.
+    index
+        Single index along ``axis`` whose slice is sign-flipped.
+
+    Returns
+    -------
+    Array
+        A copy of ``x`` with the slice at ``index`` along ``axis``
+        negated and all other entries unchanged.
     """
     n = x.ndim
     axis_norm = axis % n
@@ -324,10 +379,11 @@ def sphere_grid_unpad_2d(
     height_axis: int = -2,
     width_axis: int = -1,
 ) -> Num[Array, '... H W ...']:
-    """Strip the padding added by ``sphere_grid_pad_2d``.
+    """Strip the padding added by :func:`sphere_grid_pad_2d`.
 
-    The inverse operation is a plain slice; provided as a companion
-    so the composition pattern reads cleanly::
+    The inverse operation is a plain slice along the height and width
+    axes; it is provided as a companion so the composition pattern
+    reads cleanly::
 
         padded = sphere_grid_pad_2d(image, pad=k)
         out_padded = some_valid_padded_kernel(padded)
@@ -336,13 +392,25 @@ def sphere_grid_unpad_2d(
     Parameters
     ----------
     image
-        Padded image.
-    pad, height_axis, width_axis
-        Match the arguments passed to ``sphere_grid_pad_2d``.
+        Padded image, ``(..., H_padded, W_padded, ...)``, as produced
+        by :func:`sphere_grid_pad_2d`.
+    pad
+        Pad amount that was applied. ``int`` -> symmetric
+        ``h_pad = w_pad = pad``; ``(h_pad, w_pad)`` -> per-axis. Must
+        match the value passed to :func:`sphere_grid_pad_2d`.
+    height_axis
+        Axis index of the latitudinal (height) axis. Default ``-2``.
+        Must match the value passed to :func:`sphere_grid_pad_2d`.
+    width_axis
+        Axis index of the longitudinal (width) axis. Default ``-1``.
+        Must match the value passed to :func:`sphere_grid_pad_2d`.
 
     Returns
     -------
-    The un-padded image with the original ``H`` and ``W``.
+    Num[Array, '... H W ...']
+        The un-padded image, with ``H = H_padded - 2 * h_pad`` along
+        ``height_axis`` and ``W = W_padded - 2 * w_pad`` along
+        ``width_axis``; all other axes unchanged.
     """
     h_pad, w_pad = _resolve_pad(pad)
     if h_pad == 0 and w_pad == 0:

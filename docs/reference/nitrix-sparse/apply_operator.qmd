@@ -1,0 +1,50 @@
+---
+title: "apply_operator"
+generated: true
+description: "Apply a sparse operator to a per-vertex field, format-agnostically."
+---
+
+[‹ back to `nitrix.sparse`](../nitrix-sparse.qmd)
+
+*Re-exported here; defined in `nitrix.sparse._apply`.*
+
+<!-- nitrix:gen sig:apply_operator -->
+```python
+apply_operator(op: MeshOperator, x: Num[Array, '... n d'], *, semiring: 'Semiring[Any] | None' = None, backend: Backend = 'jax') -> Num[Array, '... m d']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:apply_operator -->
+Apply a sparse operator to a per-vertex field, format-agnostically.
+
+Computes the semiring contraction $\mathrm{op} \cdot x$ whether
+`op` is a flat [`ELL`](../nitrix-sparse-ell/ELL.qmd) or a bucketed [`SectionedELL`](../nitrix-sparse-ell_sectioned/SectionedELL.qmd).  Leading
+axes of `x` are treated as batch and vmapped over the 2-D core (the
+operator is shared across the batch -- it is not itself batched), matching
+the shape contract of the cross-level mesh wrappers.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:apply_operator -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `op` | `MeshOperator` | — | — | The sparse operator, an [`ELL`](../nitrix-sparse-ell/ELL.qmd) or [`SectionedELL`](../nitrix-sparse-ell_sectioned/SectionedELL.qmd) of shape `(m, n)` mapping an `n`-vertex field to an `m`-vertex field. |
+| `x` | `Num` | `...` × `n` × `d` | — | Per-vertex field of shape `(..., n, d)`, where `d` is the trailing feature dimension. For a scalar field use a trailing singleton `(..., n, 1)`. Must be at least 2-D. |
+| `semiring` | `'Semiring[Any] | None'` | — | `None` | Algebra to reduce under. Defaults to [`REAL`](../nitrix-semiring.qmd) (resolved lazily to avoid an import cycle). |
+| `backend` | `Backend` | — | `'jax'` | Backend passed through to the underlying kernel. `'jax'` (the default) is the only generally-available path for the ELL gather. |
+
+**Returns** `Num` — shape `...` × `m` × `d`. The contracted field of shape `(..., m, d)`, carrying the same leading batch axes and trailing feature dimension as `x`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:apply_operator -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d` | spatial dimension (2 or 3) |
+| `m` | rows of a multi-row contrast |
+<!-- nitrix:/gen -->

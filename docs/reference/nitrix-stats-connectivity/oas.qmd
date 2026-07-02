@@ -1,0 +1,43 @@
+---
+title: "oas"
+generated: true
+description: "Oracle-approximating-shrinkage (OAS) covariance estimator."
+---
+
+[‹ back to `nitrix.stats.connectivity`](../nitrix-stats-connectivity.qmd)
+
+<!-- nitrix:gen sig:oas -->
+```python
+oas(X: Float[Array, 'n p'], *, assume_centered: bool = False) -> Tuple[Float[Array, 'p p'], Float[Array, '']]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:oas -->
+Oracle-approximating-shrinkage (OAS) covariance estimator.
+
+Uses the same convex blend of the sample covariance toward a scaled
+identity as [`ledoit_wolf`](../nitrix-stats-connectivity/ledoit_wolf.qmd), but with the different closed-form
+shrinkage intensity of Chen, Wiesel, Eldar and Hero (2010).  This matches
+`sklearn.covariance.oas`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:oas -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X` | `Float` | `n` × `p` | — | Data matrix of `n` observations by `p` features. |
+| `assume_centered` | `bool` | — | `False` | If `True`, treat `X` as already mean-centred; otherwise centre each feature before estimating the covariance. Default `False`. |
+
+**Returns** `Tuple[Float[Array, 'p p'], Float[Array, '']]`. The shrunk covariance matrix $\hat{\Sigma}$. The scalar shrinkage intensity $\alpha \in [0, 1]$.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:oas -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

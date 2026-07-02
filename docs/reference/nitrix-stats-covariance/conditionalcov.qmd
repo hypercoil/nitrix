@@ -1,0 +1,52 @@
+---
+title: "conditionalcov"
+generated: true
+description: "Covariance of `X` conditioned on the variables in `Y`."
+---
+
+[‹ back to `nitrix.stats.covariance`](../nitrix-stats-covariance.qmd)
+
+<!-- nitrix:gen sig:conditionalcov -->
+```python
+conditionalcov(X: Num[Array, '... c obs'], Y: Num[Array, '... d obs'], *, rowvar: bool = True, bias: bool = False, ddof: Optional[int] = None, weights: Optional[Num[Array, '... obs']] = None, weight_matrix: Optional[Num[Array, '... obs obs']] = None, l2: float = 0.0, residualise_l2: float = 0.0) -> Num[Array, '... c c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:conditionalcov -->
+Covariance of `X` conditioned on the variables in `Y`.
+
+Operationally, `X` is residualised against `Y` (see
+`residualise`) and the covariance
+of the residuals is returned.  This is the "explain away the
+`Y` subspace, then look at what remains" view of conditioning.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:conditionalcov -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X` | `Num` | `...` × `c` × `obs` | — | Variables whose conditional covariance is sought. |
+| `Y` | `Num` | `...` × `d` × `obs` | — | Conditioning variables to residualise out of `X`. |
+| `rowvar` | `bool` | — | `True` | If `True` (default), the observation axis is the last axis; see [`cov`](../nitrix-stats-covariance/cov.qmd). |
+| `bias` | `bool` | — | `False` | Bias flag; see [`cov`](../nitrix-stats-covariance/cov.qmd). |
+| `ddof` | `Optional[int]` | — | `None` | Degrees-of-freedom override; see [`cov`](../nitrix-stats-covariance/cov.qmd). |
+| `weights` | `Optional[Num[Array, '... obs']]` | — | `None` | Per-observation vector weights; see [`cov`](../nitrix-stats-covariance/cov.qmd). |
+| `weight_matrix` | `Optional[Num[Array, '... obs obs']]` | — | `None` | Full observation-coupling matrix; see [`cov`](../nitrix-stats-covariance/cov.qmd). |
+| `l2` | `float` | — | `0.0` | Ridge regularisation strength for the covariance step; see [`cov`](../nitrix-stats-covariance/cov.qmd). |
+| `residualise_l2` | `float` | — | `0.0` | Ridge for the residualisation step, passed to `residualise`. Typically left at `0`; raise it if `Y` is near-collinear. |
+
+**Returns** `Num` — shape `...` × `c` × `c`. Conditional covariance matrix over the variables of `X`, `(..., c, c)`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:conditionalcov -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `c` | feature channels (channels-last) |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->

@@ -1,0 +1,55 @@
+---
+title: "layer_norm"
+generated: true
+description: "LayerNorm over the trailing feature axis, with backend dispatch."
+---
+
+[‹ back to `nitrix.nn.norm`](../nitrix-nn-norm.qmd)
+
+<!-- nitrix:gen sig:layer_norm -->
+```python
+layer_norm(x: Float[Array, '... c'], weight: Optional[Float[Array, 'c']] = None, bias: Optional[Float[Array, 'c']] = None, *, eps: float = 1e-05, out_scale: float = 1.0, backend: Backend = 'auto') -> Float[Array, '... c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:layer_norm -->
+LayerNorm over the trailing feature axis, with backend dispatch.
+
+Standardises `x` over its trailing axis to zero mean and unit variance
+(biased, dividing by the axis length), then applies the optional affine
+transform and the depth-scaling factor. The output is
+$\text{out\_scale} \cdot (\hat{x} \cdot \text{weight} +
+\text{bias})$, where $\hat{x}$ is the standardised input; see the
+[`reference_layer_norm`](../nitrix-nn-norm/reference_layer_norm.qmd) oracle for the exact recipe. The `out_scale`
+factor is the curse-of-depth hook that folds constant depth-scaling schemes
+in at zero marginal cost.
+
+When the resolved backend is `pallas-cuda` the fused kernel is attempted;
+if it cannot run for the given shape or host, the call falls back loudly to
+the JAX reference.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:layer_norm -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Float` | `...` × `c` | — | Input array; normalisation runs over the trailing channel axis `c`. |
+| `weight` | `Optional[Float[Array, 'c']]` | — | `None` | Per-channel affine scale of shape `(c,)`. If omitted, no scaling is applied. |
+| `bias` | `Optional[Float[Array, 'c']]` | — | `None` | Per-channel affine shift of shape `(c,)`. If omitted, no shift is applied. |
+| `eps` | `float` | — | `1e-05` | Constant added to the variance before the reciprocal square root, for numerical stability. |
+| `out_scale` | `float` | — | `1.0` | Depth-scaling multiplier applied to the full affine output. |
+| `backend` | `Backend` | — | `'auto'` | Execution backend. `'auto'` resolves to `'pallas-cuda'` on a capable GPU and `'jax'` otherwise. |
+
+**Returns** `Float` — shape `...` × `c`. The normalised, affine-transformed and depth-scaled array, with the same shape and dtype as `x`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:layer_norm -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `c` | feature channels (channels-last) |
+<!-- nitrix:/gen -->

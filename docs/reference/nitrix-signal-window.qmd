@@ -1,0 +1,67 @@
+---
+title: "nitrix.signal.window"
+generated: true
+signature-hash: b25dd98cd4a687a2
+description: "Windowed-sample extraction."
+listing:
+  id: nitrix-signal-window-symbols
+  contents: "nitrix-signal-window/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.signal.window`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Windowed-sample extraction.
+
+Sample fixed-size windows from a tensor along a specified axis,
+with optional overlap.  Used for time-series augmentation (random
+crops, multi-window bootstrap), per-window covariance estimation,
+and sliding-window analysis.
+
+The single public symbol is [`sample_windows`](nitrix-signal-window/sample_windows.qmd); behaviour is
+parameterised by two flags:
+
+- `allow_overlap`: `True` -- sample starts uniformly from
+  `[0, n - window_size]` *without replacement* (so window
+  count is exact).  `False` (default) -- starts are
+  constrained to produce non-overlapping windows; the
+  non-overlap is enforced by distributing the "unused" indices
+  among `num_windows + 1` gaps via a multinomial.
+- `create_new_axis`: `True` -- stack windows along a freshly
+  inserted axis (`multiplying_axis`).  `False` (default) --
+  concatenate along an existing axis.
+
+What changed from `nitrix.functional.window`:
+
+- The four-function factory (`sample_windows(allow_overlap=...,
+  create_new_axis=...)` returning a callable) collapsed into a
+  single function with two flags.  Caller writes
+  `sample_windows(tensor, ...)` directly, not
+  `sample_windows(...)(tensor, ...)`.
+- Internal `_select_fn` / `_slice_fn` dispatch removed in
+  favour of a single body that branches on the flags.
+- The numpyro-era `Multinomial` distribution dropped in favour
+  of `jax.random.multinomial` (already done in the prior
+  numpyro-strip pass; this rewrite preserves it).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-signal-window-symbols}
+:::

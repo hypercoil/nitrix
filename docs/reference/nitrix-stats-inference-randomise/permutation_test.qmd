@@ -1,0 +1,57 @@
+---
+title: "permutation_test"
+generated: true
+description: "Permutation test of a GLM t- or F-contrast with FWE control."
+---
+
+[‹ back to `nitrix.stats.inference.randomise`](../nitrix-stats-inference-randomise.qmd)
+
+<!-- nitrix:gen sig:permutation_test -->
+```python
+permutation_test(data: Float[Array, '*spatial N'], design: Float[Array, 'N p'], contrast: Float[Array, 'p'] | Float[Array, 'm p'], *, key: Array, n_perm: int = 500, enhancement: Enhancement = 'tfce', exchange: Exchange = 'sign', nuisance: Optional[Float[Array, 'N q']] = None, blocks: Optional[Int[Array, 'N']] = None, mask: Optional[Bool[Array, '*spatial']] = None, two_sided: bool = True, var_smooth: Optional[float] = None, connectivity: int = 1, cluster_thresh: Optional[float] = None, tfce_E: float = 0.5, tfce_H: float = 2.0, tfce_steps: int = 100, pvalue_method: PValueMethod = 'empirical', gpd_n_exceedances: int = 250) -> PermResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:permutation_test -->
+Permutation test of a GLM t- or F-contrast with FWE control.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:permutation_test -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `data` | `Float` | `*spatial` × `N` | — | `(*spatial, N)` responses (the observation axis is last). |
+| `design` | `Float` | `N` × `p` | — | `(N, p)` GLM design (includes the effect and any nuisance columns). |
+| `contrast` | `Float` | `m` × `p` | — | The tested contrast. A `(p,)` vector `c` is a **t-contrast** (signed, two-sided by default); a `(m, p)` matrix `C` (`m > 1`) is an **F-contrast** -- the joint test `C beta = 0` reported as the non-negative F-statistic (`two_sided` is then irrelevant and ignored, the F already captures both directions). |
+| `key` | `Array` | — | — | `jax.random` key (RNG policy is the caller's). |
+| `n_perm` | `int` | — | `500` | Number of permutations incl. the identity (default `500`). |
+| `enhancement` | `Enhancement` | — | `'tfce'` | `'tfce'` (default), `'voxel'` (raw statistic, voxelwise FWE), or `'cluster_extent'` / `'cluster_mass'` (cluster-forming at `cluster_thresh`). |
+| `exchange` | `Exchange` | — | `'sign'` | `'sign'` (sign-flipping; symmetric / one-sample) or `'perm'` (row permutation; two-sample / regression). |
+| `nuisance` | `Optional[Float[Array, 'N q']]` | — | `None` | Optional `(N, q)` nuisance design for Freedman-Lane. `None` permutes the data directly (exact for designs with no nuisance). |
+| `blocks` | `Optional[Int[Array, 'N']]` | — | `None` | Optional per-observation exchangeability-block labels. |
+| `mask` | `Optional[Bool[Array, '*spatial']]` | — | `None` | Optional spatial mask; out-of-mask voxels do not contribute to clusters or the maximum. |
+| `two_sided` | `bool` | — | `True` | Two-sided test (default `True`). Ignored for an F-contrast. |
+| `var_smooth` | `Optional[float]` | — | `None` | Optional Gaussian sigma for variance smoothing (pseudo-t). |
+| `connectivity` | `int` | — | `1` | Spatial connectivity order used when forming clusters (for TFCE and the cluster-based enhancements). Default `1`. |
+| `cluster_thresh` | `Optional[float]` | — | `None` | Cluster-forming statistic threshold; **required** for `enhancement='cluster_extent'` / `'cluster_mass'` (the classic cluster-extent / cluster-mass FWE -- one threshold, far cheaper per permutation than TFCE). |
+| `tfce_E` | `float` | — | `0.5` | Threshold-free cluster enhancement parameters: the extent exponent $E$ (default `0.5`), the height exponent $H$ (default `2.0`), and the number of integration steps (default `100`). Only used when `enhancement='tfce'`. |
+| `tfce_H` | `float` | — | `2.0` | Threshold-free cluster enhancement parameters: the extent exponent $E$ (default `0.5`), the height exponent $H$ (default `2.0`), and the number of integration steps (default `100`). Only used when `enhancement='tfce'`. |
+| `tfce_steps` | `int` | — | `100` | Threshold-free cluster enhancement parameters: the extent exponent $E$ (default `0.5`), the height exponent $H$ (default `2.0`), and the number of integration steps (default `100`). Only used when `enhancement='tfce'`. |
+| `pvalue_method` | `PValueMethod` | — | `'empirical'` | `'empirical'` (default) -- the FWE p-map is the discrete fraction of permutations whose null max $\geq$ the observed (floored at $1 / n_{perm}$). `'gpd'` -- fit a generalised Pareto distribution to the upper tail of the null-max distribution so FWE p-values resolve **below** the $1 / n_{perm}$ floor, letting `n_perm` drop. Only the FWE map is GPD-smoothed; the uncorrected map stays empirical. |
+| `gpd_n_exceedances` | `int` | — | `250` | Number of upper-tail null-max exceedances used for the GPD fit when `pvalue_method='gpd'` (default `250`; clamped to `n_perm - 1`). |
+
+**Returns** `PermResult`. A [`PermResult`](../nitrix-stats-inference-randomise/PermResult.qmd) holding the observed statistic and enhanced maps, the FWE and uncorrected p-maps, and the null-max distribution.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:permutation_test -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `N` | observations — time points, subjects, or sampled points |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `m` | rows of a multi-row contrast |
+<!-- nitrix:/gen -->

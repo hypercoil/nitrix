@@ -1,0 +1,72 @@
+---
+title: "semiring_ell_rmatvec"
+generated: true
+description: "Adjoint (transpose) ELL matvec: $Y = A^{ top} X$ for the operand."
+---
+
+[‹ back to `nitrix.semiring.ell`](../nitrix-semiring-ell.qmd)
+
+<!-- nitrix:gen sig:semiring_ell_rmatvec -->
+```python
+semiring_ell_rmatvec(values: Num[Array, '... m kmax'], indices: Int[Array, '... m kmax'], X: Num[Array, '... m ncol'], *, semiring: Semiring[Any] = REAL, n_cols: int) -> Num[Array, '... n_cols ncol']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:semiring_ell_rmatvec -->
+Adjoint (transpose) ELL matvec: $Y = A^{\top} X$ for the operand.
+
+The transpose companion of [`semiring_ell_matmul`](../nitrix-semiring-ell/semiring_ell_matmul.qmd).  Where the
+matmul *gathers* --
+$(A X)_i = \sum_p \mathtt{values}_{i, p} \cdot X_{\mathtt{indices}_{i, p}}$
+-- this *scatters*:
+
+$$
+Y_{c, j} = \sum_{(i, p)\,:\,\mathtt{indices}_{i, p} = c}
+    \mathtt{values}_{i, p} \cdot X_{i, j}
+$$
+
+for the same implicit $m \times n_{\mathrm{cols}}$ operand
+$A$.  Composing the two gives the symmetric-part matvec
+$\tfrac{1}{2}(A X + A^{\top} X) = \operatorname{sym}(A)\,X$,
+which is what the extremal eigensolvers require when an adjacency was
+built by a construction (for example top-k-per-row affinity
+sparsification, [`nitrix.sparse.ell_from_dense`](../nitrix-sparse.qmd)) that does **not**
+preserve symmetry.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:semiring_ell_rmatvec -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `values` | `Num` | `...` × `m` × `kmax` | — | ELL values, shape `(..., m, k_max)`. Pad positions must hold the real additive identity `0`. |
+| `indices` | `Int` | `...` × `m` × `kmax` | — | ELL column indices, shape `(..., m, k_max)`; the scatter targets. |
+| `X` | `Num` | `...` × `m` × `ncol` | — | Dense operand indexed by the ELL *row*, shape `(..., m, ncol)`. |
+| `semiring` | `Semiring[Any]` | — | `REAL` | The algebra to reduce under. **Real semiring only** -- the additive scatter is meaningless for a general monoid (the symmetric part $\tfrac{1}{2}(A + A^{\top})$ needs linear structure, and a non-zero pad identity would scatter spurious mass). Any other algebra raises `NotImplementedError`. The argument is retained for surface parity with [`semiring_ell_matmul`](../nitrix-semiring-ell/semiring_ell_matmul.qmd). |
+| `n_cols` | `int` | — | — | Outer dimension of the implicit operand $A$ and the leading axis of the output. Required: unlike the gather direction it is **not** recoverable from `X` (which is indexed by the row axis `m`). |
+
+**Returns** `Num` — shape `...` × `n_cols` × `ncol`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:semiring_ell_rmatvec -->
+::: {.callout-note}
+JAX-only: there is no Pallas scatter kernel (the matmul backward's
+gradient-with-respect-to-`B` scatter is likewise JAX-only), so no
+`backend` argument is exposed.  The result is differentiable with
+respect to `values` and `X` via the registered real-semiring adjoint
+VJP (`indices` is integer-valued and therefore non-differentiable).
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:semiring_ell_rmatvec -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `m` | rows of a multi-row contrast |
+| `kmax` | *(undocumented — add to `_dimensions.yml`)* |
+| `ncol` | *(undocumented — add to `_dimensions.yml`)* |
+| `n_cols` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

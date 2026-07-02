@@ -1,0 +1,59 @@
+---
+title: "histogram_match_fit"
+generated: true
+description: "Fit the reference standard-scale landmarks (the `apply` target)."
+---
+
+[‹ back to `nitrix.bias`](../nitrix-bias.qmd)
+
+*Re-exported here; defined in `nitrix.bias._histogram_match`.*
+
+<!-- nitrix:gen sig:histogram_match_fit -->
+```python
+histogram_match_fit(reference: Float[Array, '*spatial'], *, reference_weight: Optional[Float[Array, '*spatial']] = None, n_match_points: int = 7, n_histogram_levels: int = 1024, threshold_at_mean: bool = True) -> Float[Array, ' landmarks']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:histogram_match_fit -->
+Fit the reference standard-scale landmarks (the `apply` target).
+
+The *fit* half of the Nyul-Udupa "fit a standard scale once, apply to
+many subjects" workflow: derive the reference image's landmark
+intensities -- the outer extrema, the optional mean landmark, and the
+`n_match_points` interior quantile landmarks -- so the same standard
+scale can be applied to many sources via [`histogram_match_apply`](../nitrix-bias/histogram_match_apply.qmd)
+without re-deriving them (and without carrying the reference volume).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:histogram_match_fit -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `reference` | `Float` | `*spatial` | — | Image whose intensity distribution defines the target CDF. |
+| `reference_weight` | `Optional[Float[Array, '*spatial']]` | — | `None` | Optional mask / confidence (see [`histogram_match`](../nitrix-bias/histogram_match.qmd)). Passing a weight overrides the ITK-style `threshold_at_mean` policy. |
+| `n_match_points` | `int` | — | `7` | As [`histogram_match`](../nitrix-bias/histogram_match.qmd). The **same** values must be passed to [`histogram_match_apply`](../nitrix-bias/histogram_match_apply.qmd), or the source and reference landmark vectors disagree in length (`apply` validates this). |
+| `n_histogram_levels` | `int` | — | `1024` | As [`histogram_match`](../nitrix-bias/histogram_match.qmd). The **same** values must be passed to [`histogram_match_apply`](../nitrix-bias/histogram_match_apply.qmd), or the source and reference landmark vectors disagree in length (`apply` validates this). |
+| `threshold_at_mean` | `bool` | — | `True` | As [`histogram_match`](../nitrix-bias/histogram_match.qmd). The **same** values must be passed to [`histogram_match_apply`](../nitrix-bias/histogram_match_apply.qmd), or the source and reference landmark vectors disagree in length (`apply` validates this). |
+
+**Returns** `Float` — shape `landmarks`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:histogram_match_fit -->
+::: {.callout-note}
+Computed in `result_type(reference.dtype, float32)` (the fp32 floor
+of the scientific core); `apply` upcasts to its own working dtype.
+Not differentiable through the histogram binning (see
+[`histogram_match`](../nitrix-bias/histogram_match.qmd)).
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:histogram_match_fit -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `landmarks` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

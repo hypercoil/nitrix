@@ -2,26 +2,33 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Pallas Triton fused ESM Demons force (v4 Phase 5a).
+Pallas-Triton fused efficient second-order minimisation (ESM) Demons force.
 
-Fuses the symmetric ``∇warped`` central-difference stencil with the ESM force
-elementwise combine into **one** tiled kernel.  The pure-JAX
-:meth:`register._force._BoundDemons.update` lets XLA fuse the elementwise force
-chain (``diff``, ``j``, ``denom``, ``scale``, ``u``) but **breaks fusion at the
-``correlate1d`` stencil** that builds ``∇warped`` -- so ``∇warped`` (``M·ndim``)
-round-trips HBM before the force consumes it.  This kernel reads ``warped`` (with
-a 1-voxel halo for the central difference), ``fixed`` and the hoisted ``∇F``
-once, computes ``∇warped`` in-tile, and writes only the velocity update ``u``
-(``M·ndim``) -- collapsing the gradient round-trip.
+Fuses the symmetric warped-image central-difference stencil with the ESM force
+elementwise combine into a single tiled kernel.  The pure-JAX oracle lets XLA
+fuse the elementwise force chain (``diff``, ``j``, ``denom``, ``scale``, ``u``)
+but breaks fusion at the :func:`correlate1d` stencil that builds the moving-image
+gradient :math:`\\nabla\\mathrm{warped}` -- so that gradient (of size
+:math:`M \\cdot \\mathrm{ndim}`) round-trips high-bandwidth memory before the
+force consumes it.  This kernel reads ``warped`` (with a 1-voxel halo for the
+central difference), ``fixed`` and the hoisted fixed-image gradient
+:math:`\\nabla F` once, computes :math:`\\nabla\\mathrm{warped}` in-tile, and
+writes only the velocity update ``u`` (of size :math:`M \\cdot \\mathrm{ndim}`),
+collapsing the gradient round-trip.
 
-Parity oracle = ``_BoundDemons.update`` (ULP-equal, **including** the 0a denom
-guard ``denom > eps``).  Scope: **isotropic** (``rel_spacing=None``) single-pair
-GPU.  The public dispatcher (``register._force``) falls back to the JAX path for
-anisotropic spacing, CPU, the cohort ``vmap``, or an untileable shape (a loud
-``NitrixBackendFallback``).
+The parity oracle is the pure-JAX Demons update path, to which this kernel is
+ULP-equal, including the denominator guard ``denom > eps`` that zeroes the force
+where both the gradient and the intensity mismatch vanish.  Scope: isotropic
+spacing (``rel_spacing=None``), single moving/fixed pair, on GPU.  The public
+dispatcher falls back to the JAX path for anisotropic spacing, CPU, the cohort
+``vmap``, or an untileable shape, emitting a loud
+:class:`NitrixBackendFallback`.
 
-Implementation detail: never import from ``nitrix._kernels.cuda`` directly.  Use
-``register.DemonsForce(backend=...)`` which handles dispatch and fallback
+Notes
+-----
+This is a private implementation detail.  Never import from
+``nitrix._kernels.cuda`` directly; use the public :class:`DemonsForce`
+constructor with a chosen ``backend``, which handles dispatch and fallback
 observability.
 """
 
@@ -44,8 +51,10 @@ __all__ = [
 class PallasNotTileable(RuntimeError):
     """The Pallas kernel rejected the requested shape.
 
-    Caught by the dispatcher in ``register._force`` and translated into a
-    ``NitrixBackendFallback`` warning (the JAX path runs instead).
+    Raised when a spatial extent admits no friendly tile, or when the
+    ``grad_fixed`` argument does not carry the trailing gradient axis.  Caught
+    by the Demons force dispatcher and translated into a
+    :class:`NitrixBackendFallback` warning, so that the JAX path runs instead.
     """
 
 
@@ -64,7 +73,24 @@ _DEFAULT_LADDER: tuple[int, ...] = (8,)
 
 
 def _pick_tile(extent: int, ndim: int) -> int | None:
-    """Largest friendly tile dividing ``extent`` (``None`` if none divides)."""
+    """Pick the largest friendly tile side that evenly divides an extent.
+
+    Scans the ``ndim``-aware candidate ladder from the largest side downwards
+    and returns the first side length that divides ``extent`` exactly.
+
+    Parameters
+    ----------
+    extent : int
+        Length of the spatial axis to be tiled.
+    ndim : int
+        Number of spatial dimensions, selecting which candidate ladder to use.
+
+    Returns
+    -------
+    int or None
+        The largest ladder side dividing ``extent`` exactly, or ``None`` if no
+        candidate divides it.
+    """
     for c in _TILE_LADDER.get(ndim, _DEFAULT_LADDER):
         if extent % c == 0:
             return c
@@ -74,10 +100,31 @@ def _pick_tile(extent: int, ndim: int) -> int | None:
 def _build_kernel(
     ndim: int, tiles: tuple[int, ...], alpha: float, eps: float
 ) -> Callable[..., None]:
-    """ESM force over one spatial tile (the stencil + the 0a-guarded combine).
+    """Build the per-tile ESM force kernel for a given dimensionality.
 
-    ``alpha``/``eps`` are baked in as compile-time constants (mirrors the
-    semiring kernel's static-config build).
+    Returns a Pallas kernel closure that, over one spatial tile, computes the
+    in-tile warped-image central-difference stencil and the guarded ESM force
+    combine.  The ``alpha`` and ``eps`` values are baked in as compile-time
+    constants, mirroring the static-config build used by the semiring kernels.
+
+    Parameters
+    ----------
+    ndim : int
+        Number of spatial dimensions the kernel operates over.
+    tiles : tuple of int
+        Per-axis tile side lengths, one entry per spatial dimension.
+    alpha : float
+        Normalisation weight on the intensity-mismatch term of the ESM
+        denominator; its square is precomputed and baked in.
+    eps : float
+        Denominator floor: the force is zeroed wherever the accumulated
+        denominator does not exceed this value.
+
+    Returns
+    -------
+    Callable
+        A Pallas kernel taking the haloed warped, fixed, fixed-gradient, and
+        output references and writing the per-tile velocity update in place.
     """
     a2 = alpha * alpha
     full = (slice(None),) * ndim
@@ -119,18 +166,53 @@ def demons_esm_force_pallas(
     alpha: float,
     eps: float,
 ) -> Float[Array, '*spatial ndim']:
-    """Fused ESM Demons force for one isotropic single-pair field.
+    """Fused ESM Demons force for one isotropic single moving/fixed pair.
 
-    Returns ``u = (F − warped)·J / (|J|² + α²(F − warped)²)`` with
-    ``J = ½(∇F + ∇warped)`` -- ULP-equal to ``_BoundDemons.update`` for
-    ``rel_spacing=None`` (the conversion to voxel units is the identity there).
+    Computes the efficient second-order minimisation (ESM) velocity update
+
+    .. math::
+
+        u = \\frac{(F - \\mathrm{warped})\\, J}
+                  {|J|^{2} + \\alpha^{2}\\,(F - \\mathrm{warped})^{2}},
+        \\qquad
+        J = \\tfrac{1}{2}\\,(\\nabla F + \\nabla\\mathrm{warped}),
+
+    where :math:`F` is the fixed image, ``warped`` is the moving image resampled
+    into the fixed frame, and :math:`J` is the symmetric ESM gradient.  The
+    warped-image gradient :math:`\\nabla\\mathrm{warped}` is formed in-tile by a
+    1-voxel-halo central difference with edge padding, matching the pure-JAX
+    oracle for isotropic spacing (``rel_spacing=None``), where the conversion to
+    voxel units is the identity.  The result is ULP-equal to that oracle,
+    including its denominator guard.
+
+    Parameters
+    ----------
+    warped : Float[Array, '*spatial']
+        Moving image resampled into the fixed frame, with ``ndim`` spatial axes.
+    fixed : Float[Array, '*spatial']
+        Fixed (reference) image, same shape as ``warped``.
+    grad_fixed : Float[Array, '*spatial ndim']
+        Precomputed spatial gradient of ``fixed``, carrying a trailing axis of
+        length ``ndim`` for the per-dimension components.
+    alpha : float
+        Normalisation weight on the intensity-mismatch term of the ESM
+        denominator.
+    eps : float
+        Denominator floor: the force is zeroed wherever the accumulated
+        denominator does not exceed this value.
+
+    Returns
+    -------
+    Float[Array, '*spatial ndim']
+        The per-voxel velocity update, with the same spatial shape as ``warped``
+        and a trailing axis of length ``ndim`` giving the update components.
 
     Raises
     ------
     PallasNotTileable
         If a spatial extent admits no friendly tile, or ``grad_fixed`` does not
         carry the trailing ``ndim`` axis.  The dispatcher catches this and runs
-        the JAX path with a ``NitrixBackendFallback`` warning.
+        the JAX path with a :class:`NitrixBackendFallback` warning.
     """
     ndim = warped.ndim
     if grad_fixed.shape != warped.shape + (ndim,):
@@ -181,7 +263,9 @@ def demons_esm_force_pallas(
                 pl.BlockSpec((*tiles, ndim), trailing_index_map),
             ],
             out_specs=pl.BlockSpec((*tiles, ndim), trailing_index_map),
-            out_shape=jax.ShapeDtypeStruct(warped.shape + (ndim,), warped.dtype),
+            out_shape=jax.ShapeDtypeStruct(
+                warped.shape + (ndim,), warped.dtype
+            ),
             compiler_params=plgpu.CompilerParams(),
             name='demons_esm_force',
         )(warped_p, fixed, grad_fixed),

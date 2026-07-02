@@ -1,0 +1,75 @@
+---
+title: "MultiLabel"
+generated: true
+description: "ANTs-style multi-label interpolation for label / segmentation maps."
+---
+
+[‹ back to `nitrix.geometry.grid`](../nitrix-geometry-grid.qmd)
+
+*Re-exported here; defined in `nitrix.geometry._interpolate`.*
+
+<!-- nitrix:gen sig:MultiLabel -->
+```python
+class MultiLabel
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:MultiLabel -->
+ANTs-style multi-label interpolation for label / segmentation maps.
+
+Naive nearest-neighbour resampling of a segmentation aliases label
+boundaries and drops thin structures; plain linear interpolation
+invents non-label values between labels.  `MultiLabel` (ANTs
+`MultiLabel` / ITK label interpolators) does neither: each label's
+binary indicator mask is resampled with a smooth `inner` kernel,
+and the output at each voxel is the **arg-max** label over those
+resampled scores.  Boundaries are anti-aliased (the inner kernel
+smooths each mask), yet the output is restricted to the input label
+set (no invented values).
+
+The implementation is a memory-bounded running arg-max fold over the
+static label set -- `O(K)` inner resamples carrying two
+output-shaped arrays, never a `K`-channel stack.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:MultiLabel.sample -->
+```python
+sample(image: Float[Array, '*spatial c'], coords: Float[Array, '*out_spatial ndim'], *, mode: BoundaryMode, cval: float) -> Float[Array, '*out_spatial c']
+```
+<!-- nitrix:/gen -->
+
+Sample the label map at `coords` by per-label arg-max.
+
+Resamples each label's indicator mask with the `inner` kernel
+and returns, per voxel, the label with the highest resampled
+score, keeping the output inside the input label set.
+
+<!-- nitrix:gen sig:MultiLabel.__init__ -->
+```python
+__init__(labels: Tuple[int, ...], inner: Interpolator = Linear()) -> None
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:MultiLabel -->
+::: {.callout-note}
+Not differentiable: the arg-max is a hard selection, so the gradient
+with respect to both the image values and the coordinates is zero
+(the call does not error under `jax.grad` -- it returns zeros).
+`cval` is ignored; out-of-support samples resolve to `labels[0]`
+as above.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:MultiLabel -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `c` | feature channels (channels-last) |
+| `*out_spatial` | the output grid's spatial axes (variadic) |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->

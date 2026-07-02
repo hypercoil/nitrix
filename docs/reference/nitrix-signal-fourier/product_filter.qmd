@@ -1,0 +1,42 @@
+---
+title: "product_filter"
+generated: true
+description: "Frequency-domain convolution via `rfft` multiplication."
+---
+
+[‹ back to `nitrix.signal.fourier`](../nitrix-signal-fourier.qmd)
+
+<!-- nitrix:gen sig:product_filter -->
+```python
+product_filter(X: Num[Array, '... obs'], weight: Num[Array, '... obs_freq'], **fft_params) -> Num[Array, '... obs']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:product_filter -->
+Frequency-domain convolution via `rfft` multiplication.
+
+Equivalent to a circular convolution along the trailing axis.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:product_filter -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X` | `Num` | `...` × `obs` | — | Multi-channel signal, trailing axis is observations. |
+| `weight` | `Num` | `...` × `obs_freq` | — | Frequency-domain weights, trailing axis is the rfft frequency axis (length `obs // 2 + 1`). |
+| `**fft_params` | `Any` | — | `{}` | — |
+
+**Returns** `Num` — shape `...` × `obs`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:product_filter -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+| `obs_freq` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

@@ -1,0 +1,30 @@
+---
+title: "demote_axis"
+generated: true
+---
+
+[‹ back to `nitrix.numerics.tensor_ops`](../nitrix-numerics-tensor_ops.qmd)
+
+*Re-exported here; defined in `nitrix._internal.util`.*
+
+<!-- nitrix:gen sig:demote_axis -->
+```python
+demote_axis(ndim: int, axis: Union[int, Tuple[int, ...]]) -> Tuple[int, ...]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:demote_axis -->
+*TODO: write an overview.*
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:demote_axis -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `ndim` | `int` | — | — | — |
+| `axis` | `Union[int, Tuple[int, ...]]` | — | — | — |
+
+**Returns** `Tuple[int, ...]`.
+<!-- nitrix:/gen -->
+

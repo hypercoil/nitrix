@@ -1,0 +1,45 @@
+---
+title: "gibbs_ringing"
+generated: true
+description: "Inject Gibbs (truncation) ringing by truncating high-frequency k-space."
+---
+
+[‹ back to `nitrix.augment.intensity`](../nitrix-augment-intensity.qmd)
+
+<!-- nitrix:gen sig:gibbs_ringing -->
+```python
+gibbs_ringing(x: Float[Array, '...'], alpha: float, *, axes: Optional[Sequence[int]] = None) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:gibbs_ringing -->
+Inject Gibbs (truncation) ringing by truncating high-frequency k-space.
+
+Gibbs ringing is the oscillation that appears near sharp edges when a
+signal's spectrum is sharply truncated -- the artefact of a
+finitely-sampled (band-limited) acquisition.  This models it directly:
+transform to k-space, zero every frequency whose normalised radius
+exceeds `1 - alpha` (a hard spherical truncation -- the sharp cutoff
+*is* what produces the ringing), and transform back.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:gibbs_ringing -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Float` | `...` | — | Real-valued input. |
+| `alpha` | `float` | — | — | Truncation strength in `[0, 1]`. `0` keeps the full spectrum (identity); larger values remove more high-frequency content and ring more strongly; `1` keeps only the DC component. Deterministic in `alpha` -- draw it from a range in the caller for a random augmentation. |
+| `axes` | `Optional[Sequence[int]]` | — | `None` | Axes to transform over. `None` (default) uses all axes; for a channels-last volume pass the spatial axes so the channel axis is not mixed into the transform. |
+
+**Returns** `Float` — shape `...`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:gibbs_ringing -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

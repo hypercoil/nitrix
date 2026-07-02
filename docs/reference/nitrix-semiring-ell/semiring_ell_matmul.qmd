@@ -1,0 +1,54 @@
+---
+title: "semiring_ell_matmul"
+generated: true
+description: "Semiring-generalised ELL-sparse matrix multiplication."
+---
+
+[‹ back to `nitrix.semiring.ell`](../nitrix-semiring-ell.qmd)
+
+<!-- nitrix:gen sig:semiring_ell_matmul -->
+```python
+semiring_ell_matmul(values: Num[Array, '... m kmax'], indices: Int[Array, '... m kmax'], B: Num[Array, '... n_cols ncol'], *, semiring: Semiring[Any] = REAL, n_cols: Optional[int] = None, backend: Backend = 'auto') -> Num[Array, '... m ncol']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:semiring_ell_matmul -->
+Semiring-generalised ELL-sparse matrix multiplication.
+
+Computes:
+    C[..., i, j] = (+)_p ( values[..., i, p] (*) B[..., indices[..., i, p], j] )
+
+where the implicit $M \times N$ sparse left operand has the per-row
+neighbour list `indices[..., i, :]` with values
+`values[..., i, :]`.  Padding positions in `indices` must point
+to a valid row of `B`, and the corresponding `values` entries
+must be the semiring identity so the contribution is a no-op.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:semiring_ell_matmul -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `values` | `Num` | `...` × `m` × `kmax` | — | ELL values, shape `(..., m, k_max)`. |
+| `indices` | `Int` | `...` × `m` × `kmax` | — | ELL column indices into `B`'s outer dim, shape `(..., m, k_max)`. |
+| `B` | `Num` | `...` × `n_cols` × `ncol` | — | Dense right operand, shape `(..., n_cols, ncol)`. `n_cols` is the outer dim of the implicit sparse matrix. |
+| `semiring` | `Semiring[Any]` | — | `REAL` | Algebra to reduce under. |
+| `n_cols` | `Optional[int]` | — | `None` | The implicit sparse-matrix outer dim. Required for the public contract but defaults to `B.shape[-2]`. |
+| `backend` | `Backend` | — | `'auto'` | `"auto"`, `"pallas-cuda"`, or `"jax"`. |
+
+**Returns** `Num` — shape `...` × `m` × `ncol`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:semiring_ell_matmul -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `m` | rows of a multi-row contrast |
+| `kmax` | *(undocumented — add to `_dimensions.yml`)* |
+| `n_cols` | *(undocumented — add to `_dimensions.yml`)* |
+| `ncol` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

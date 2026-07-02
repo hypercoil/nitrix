@@ -1,0 +1,33 @@
+---
+title: "demote_and_unfold"
+generated: true
+---
+
+[‹ back to `nitrix.numerics.tensor_ops`](../nitrix-numerics-tensor_ops.qmd)
+
+*Re-exported here; defined in `nitrix._internal.util`.*
+
+*decorated:* `@partial(jax.jit, static_argnames=('target_address', 'axes'))`
+
+<!-- nitrix:gen sig:demote_and_unfold -->
+```python
+demote_and_unfold(tensor: Shaped[Array, ...], target_address: int, axes: Union[int, Tuple[int, ...]] | None = None) -> Shaped[Array, ...]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:demote_and_unfold -->
+*TODO: write an overview.*
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:demote_and_unfold -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `tensor` | `Shaped[Array, ...]` | — | — | — |
+| `target_address` | `int` | — | — | — |
+| `axes` | `Union[int, Tuple[int, ...]] | None` | — | `None` | — |
+
+**Returns** `Shaped[Array, ...]`.
+<!-- nitrix:/gen -->
+

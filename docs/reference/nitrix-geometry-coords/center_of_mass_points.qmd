@@ -1,0 +1,86 @@
+---
+title: "center_of_mass_points"
+generated: true
+description: "Weighted centre of mass for a set of regions over a point cloud."
+---
+
+[‹ back to `nitrix.geometry.coords`](../nitrix-geometry-coords.qmd)
+
+<!-- nitrix:gen sig:center_of_mass_points -->
+```python
+center_of_mass_points(weight: Float[Array, '... n_regions n_points'], coords: Float[Array, '... n_points ndim'], *, radius: Optional[float] = None) -> Float[Array, '... n_regions ndim']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:center_of_mass_points -->
+Weighted centre of mass for a set of regions over a point cloud.
+
+For each region $r$ and coordinate axis $d$ the result
+is the weight-weighted average of the point coordinates,
+
+$$
+\mathrm{cm}_{r,d}
+= \frac{\sum_p \mathrm{weight}_{r,p}\,\mathrm{coords}_{p,d}}
+        {\sum_p \mathrm{weight}_{r,p}}.
+$$
+
+If `radius` is given, the result is projected back onto a
+sphere of that radius -- useful when the underlying coordinates
+live on a sphere (the centre of mass off the sphere has no
+geometric meaning).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:center_of_mass_points -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `weight` | `Float` | `...` × `n_regions` × `n_points` | — | Non-negative weights, `(..., n_regions, n_points)`. |
+| `coords` | `Float` | `...` × `n_points` × `ndim` | — | Per-point coordinates, `(..., n_points, ndim)`. |
+| `radius` | `Optional[float]` | — | `None` | Optional sphere radius for projection. |
+
+**Returns** `Float` — shape `...` × `n_regions` × `ndim`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:center_of_mass_points -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **113.4 µs** (median, L4); up to **3.58× faster** than `numpy.weighted_mean`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_CENTER_OF_MASS_POINTS.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| center_of_mass_points | jax-cpu | p=1024 | `cupy.center_of_mass_points` | skipped | — | — | — | — | — |
+| center_of_mass_points | jax-cpu | p=1024 | `nitrix-jax` | ok | 41.8 µs / 43.8 µs | 59.16 ms | 718 MB (rss) | ✓ 0.00025×tol | 1.00x vs nitrix-jax |
+| center_of_mass_points | jax-cpu | p=1024 | `numpy.weighted_mean` | ok | 37.2 µs / 38.6 µs | 90.4 µs | 718 MB (rss) | ✓ 0.00018×tol | 0.89x vs nitrix-jax |
+| center_of_mass_points | jax-cuda12 | p=1024 | `cupy.center_of_mass_points` | ok | 75.4 µs / 79.5 µs | 145.61 ms | 0.27 MB (hbm) | ✓ 0.00014×tol | 0.68x vs nitrix-jax |
+| center_of_mass_points | jax-cuda12 | p=1024 | `nitrix-jax` | ok | 110.3 µs / 113.4 µs | 341.23 ms | 71.58 MB (hbm) | ✓ 0.00011×tol | 1.00x vs nitrix-jax |
+| center_of_mass_points | jax-cuda12 | p=1024 | `numpy.weighted_mean` | ok | 37.3 µs / 37.7 µs | 83.0 µs | 0.27 MB (hbm) | ✓ 0.00018×tol | 0.34x vs nitrix-jax |
+| center_of_mass_points | jax-cpu | p=16384 | `cupy.center_of_mass_points` | skipped | — | — | — | — | — |
+| center_of_mass_points | jax-cpu | p=16384 | `nitrix-jax` | ok | 367.0 µs / 460.6 µs | 139.82 ms | 718 MB (rss) | ✓ 0.00031×tol | 1.00x vs nitrix-jax |
+| center_of_mass_points | jax-cpu | p=16384 | `numpy.weighted_mean` | ok | 477.7 µs / 487.9 µs | 736.3 µs | 718 MB (rss) | ✓ 8.3e-05×tol | 1.30x vs nitrix-jax |
+| center_of_mass_points | jax-cuda12 | p=16384 | `cupy.center_of_mass_points` | ok | 76.0 µs / 80.3 µs | 138.45 ms | 4.39 MB (hbm) | ✓ 6e-05×tol | 0.57x vs nitrix-jax |
+| center_of_mass_points | jax-cuda12 | p=16384 | `nitrix-jax` | ok | 134.1 µs / 157.5 µs | 433.35 ms | 75.74 MB (hbm) | ✓ 4.7e-05×tol | 1.00x vs nitrix-jax |
+| center_of_mass_points | jax-cuda12 | p=16384 | `numpy.weighted_mean` | ok | 479.5 µs / 483.7 µs | 603.5 µs | 4.39 MB (hbm) | ✓ 8.3e-05×tol | 3.58x vs nitrix-jax |
+| center_of_mass_points | jax-cpu | p=4096 | `cupy.center_of_mass_points` | skipped | — | — | — | — | — |
+| center_of_mass_points | jax-cpu | p=4096 | `nitrix-jax` | ok | 105.3 µs / 122.0 µs | 104.06 ms | 718 MB (rss) | ✓ 0.00034×tol | 1.00x vs nitrix-jax |
+| center_of_mass_points | jax-cpu | p=4096 | `numpy.weighted_mean` | ok | 163.7 µs / 171.1 µs | 253.9 µs | 718 MB (rss) | ✓ 0.00015×tol | 1.55x vs nitrix-jax |
+| center_of_mass_points | jax-cuda12 | p=4096 | `cupy.center_of_mass_points` | ok | 75.9 µs / 80.6 µs | 140.78 ms | 1.10 MB (hbm) | ✓ 8.3e-05×tol | 0.70x vs nitrix-jax |
+| center_of_mass_points | jax-cuda12 | p=4096 | `nitrix-jax` | ok | 108.8 µs / 112.3 µs | 478.74 ms | 72.43 MB (hbm) | ✓ 7.8e-05×tol | 1.00x vs nitrix-jax |
+| center_of_mass_points | jax-cuda12 | p=4096 | `numpy.weighted_mean` | ok | 170.2 µs / 171.1 µs | 254.8 µs | 1.10 MB (hbm) | ✓ 0.00015×tol | 1.56x vs nitrix-jax |
+:::
+
+*source: bench `2a974f27` · nitrix `5d1717e0`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:center_of_mass_points -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n_regions` | *(undocumented — add to `_dimensions.yml`)* |
+| `n_points` | *(undocumented — add to `_dimensions.yml`)* |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->

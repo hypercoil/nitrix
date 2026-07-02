@@ -1,0 +1,62 @@
+---
+title: "nitrix.geometry.coords"
+generated: true
+signature-hash: a4e054e65ecfdefa
+description: "Coordinate utilities."
+listing:
+  id: nitrix-geometry-coords-symbols
+  contents: "nitrix-geometry-coords/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.geometry.coords`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Coordinate utilities.
+
+Centre of mass on point clouds, displacements from reference points,
+and the weight-compactness regulariser.
+
+The shape convention is chosen to sit naturally with the rest of the
+library:
+
+- `weight`: `(..., n_regions, n_points)` -- one row per region,
+  one column per point.
+- `coords`: `(..., n_points, ndim)` -- one row per point.
+- [`center_of_mass_points`](nitrix-geometry-coords/center_of_mass_points.qmd) returns `(..., n_regions, ndim)`.
+
+The point-leading `(..., n_points, ndim)` coordinate layout matches
+that used elsewhere (`bilateral_gaussian`,
+`brute_force_knn`, and so on) and lets the
+einsum read naturally as `weight @ coords`.
+
+The names `cmass_coor`, `cmass_reference_displacement_grid`,
+`cmass_reference_displacement_coor` and `diffuse` are retained as
+aliases of [`center_of_mass_points`](nitrix-geometry-coords/center_of_mass_points.qmd),
+[`displacement_from_reference_grid`](nitrix-geometry-coords/displacement_from_reference_grid.qmd),
+[`displacement_from_reference_points`](nitrix-geometry-coords/displacement_from_reference_points.qmd) and
+[`compactness_penalty`](nitrix-geometry-coords/compactness_penalty.qmd) respectively.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n_regions` | *(undocumented — add to `_dimensions.yml`)* |
+| `n_points` | *(undocumented — add to `_dimensions.yml`)* |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-geometry-coords-symbols}
+:::

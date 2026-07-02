@@ -1,71 +1,103 @@
 ---
 title: "nitrix.stats.gam"
 generated: true
-signature-hash: 63907b15bf2a160f
+signature-hash: e947076f6a900be4
+description: "Mass-univariate generalised additive (mixed) models."
+listing:
+  id: nitrix-stats-gam-symbols
+  contents: "nitrix-stats-gam/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
-Auto-generated scaffold for `nitrix.stats.gam` (signatures only). Replace the
-skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
-`check_reference_staleness.py` flags this page if the underlying
-signatures drift from this stub.
+Auto-generated scaffold for `nitrix.stats.gam`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
 
-## `GAMResult` {#GAMResult}
+<!-- nitrix:gen overview:__module__ -->
+Mass-univariate generalised additive (mixed) models.
 
-*decorated:* `@register_result(children=('coef', 'lam', 'edf', 'edf_total', 'dispersion', 'deviance', 'null_deviance', 'cov_unscaled'), aux=('family', 'n_obs', 'col_slices'))`, `@dataclass(frozen=True)`
+[`gam_fit`](nitrix-stats-gam/gam_fit.qmd) fits, per element (voxel / vertex / fixel), a generalised
+additive model
 
-```python
-class GAMResult
-```
+$$
+g(\mathbb{E}[y]) = X_{\text{parametric}} \beta
+    + \sum_k f_k(x_k), \qquad f_k = B_k(x_k)\,\gamma_k
+$$
 
-Per-element GAM fit output.
+with each smooth $f_k$ a penalised spline (from the sibling basis module)
+carrying a roughness penalty $\lambda_k\,\gamma_k^{\top} S_k\,\gamma_k$.
+This is the ModelArray `gam` / `mgcv`-style fit; a *generalised additive
+mixed model* (GAMM) adds explicit random-effect blocks, which enter as just
+more penalty components (a random effect is a ridge penalty), so the same
+machinery covers both.
+<!-- nitrix:/gen -->
 
-*TODO: class overview.*
+<!-- nitrix:gen sections:__module__ -->
+### Two nested loops, one per element
 
-## `SmoothTest` {#SmoothTest}
+- **Inner** (fixed $\lambda$): penalised iteratively reweighted least
+  squares -- the same solver-free weighted normal-equations solve as the
+  generalised linear model, with the block penalty
+  $S(\lambda) = \sum_k \lambda_k S_k$ added.  Ordinary and weighted least
+  squares and the exponential family all reduce to it.
+- **Outer** (select $\lambda$): the generalised Fellner-Schall update
+  (Wood & Fasiolo, 2017) -- a multiplicative, positivity-preserving
+  generalised-REML step
 
-```python
-class SmoothTest
-```
+  $$
+\lambda_k \leftarrow \lambda_k\,
+  \frac{\operatorname{tr}(S_\lambda^{-} S_k) - \operatorname{tr}(V S_k)}
+       {\gamma_k^{\top} S_k\,\gamma_k / \phi}
+  $$
 
-Per-smooth approximate-significance test (Wood 2013, integer-rank).
+  that increases the (Laplace) marginal likelihood each iteration.  Because GAM
+  smooths occupy disjoint coefficient blocks,
+  $\operatorname{tr}(S_\lambda^{-} S_k) = \operatorname{rank}(S_k)/\lambda_k$
+  -- no generalised inverse of the summed penalty is needed.  This is the
+  operational form of the penalty / variance-component REML equivalence (the GAM
+  smoothing parameter is the ratio $\phi / \sigma_b^2$ of a mixed model).
 
-*TODO: class overview.*
+Both loops run a fixed number of iterations (clean under
+`jax.vmap` over elements) and every solve avoids the vendor dense
+eigensolver, so the whole fit runs on hardware where that solver is unreliable.
 
-## `gam_fit` {#gam_fit}
+### Outputs (modelarray ``gam`` parity)
 
-```python
-gam_fit(Y: Float[Array, 'V N'], smooths: Sequence[Smooth], *, parametric: Optional[Float[Array, 'N q']]=None, intercept: bool=True, family: Union[str, Family]=GAUSSIAN, lambda_mode: Literal['per_element', 'shared']='per_element', n_outer: int=20, n_inner: int=10, ridge: float=1e-08, lam_floor: float=1e-06, lam_ceil: float=100000000.0, block: Optional[int]=None) -> GAMResult
-```
+[`GAMResult`](nitrix-stats-gam/GAMResult.qmd) carries per-element coefficients, selected $\lambda$,
+per-smooth **effective degrees of freedom** (the trace of the smooth's influence
+block) and total effective degrees of freedom, dispersion, deviance, and the
+Bayesian coefficient covariance $V = (X^{\top} W X + S_\lambda)^{-1}$ (for
+smooth-term confidence bands and the approximate $F$ / $\chi^2$
+tests).  Partial effects are rendered with [`smooth_partial_effect`](nitrix-stats-gam/smooth_partial_effect.qmd).
 
-Fit a mass-univariate GAM: shared smooth bases, per-element responses.
+### References
 
-**Parameters** — *TODO: document each parameter.*
+Wood, S. N. & Fasiolo, M. (2017). A generalized Fellner-Schall method for
+smoothing parameter optimization with application to Tweedie location, scale
+and shape models. Biometrics, 73(4), 1071-1081.
+https://doi.org/10.1111/biom.12666
 
-**Returns** — *TODO.*
+Wood, S. N. (2017). Generalized Additive Models: An Introduction with R,
+2nd ed. Chapman and Hall/CRC.
+<!-- nitrix:/gen -->
 
-## `smooth_partial_effect` {#smooth_partial_effect}
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
 
-```python
-smooth_partial_effect(result: GAMResult, smooth_index: int, basis: Smooth, x: Union[Float[Array, ' g'], Tuple[Float[Array, ' g'], ...]]) -> Tuple[Float[Array, 'V g'], Float[Array, 'V g']]
-```
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `m` | rows of a multi-row contrast |
+| `N` | observations — time points, subjects, or sampled points |
+<!-- nitrix:/gen -->
 
-Per-element partial effect of one smooth on a covariate grid ``x``.
+## Symbols
 
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `smooth_significance` {#smooth_significance}
-
-```python
-smooth_significance(result: GAMResult, smooths: Sequence[Smooth]) -> SmoothTest
-```
-
-Approximate significance test for each smooth term (Wood 2013).
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
+::: {#nitrix-stats-gam-symbols}
+:::

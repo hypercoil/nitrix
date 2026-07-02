@@ -1,0 +1,54 @@
+---
+title: "gaulss_fit"
+generated: true
+description: "Mass-univariate Gaussian location-scale regression (`gaulss`)."
+---
+
+[‹ back to `nitrix.stats.gaulss`](../nitrix-stats-gaulss.qmd)
+
+<!-- nitrix:gen sig:gaulss_fit -->
+```python
+gaulss_fit(Y: Float[Array, 'V N'], X: Float[Array, 'N p'], *, scale_design: Optional[Float[Array, 'N q']] = None, n_iter: int = 50, ridge: float = 1e-08, block: Optional[int] = None) -> GauLSSResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:gaulss_fit -->
+Mass-univariate Gaussian location-scale regression (`gaulss`).
+
+Fits, per element, $y_v \sim \mathcal{N}(\mu, \sigma^2)$ with
+$\mu = X \beta_{\mu}$ and $\log \sigma = Z \beta_{\sigma}$ --
+modelling heteroscedasticity directly -- by joint Fisher scoring.  The mean
+and log-scale designs are shared across elements; only the responses vary.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:gaulss_fit -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `Y` | `Float` | `V` × `N` | — | Responses, one length-`N` observation vector per element. |
+| `X` | `Float` | `N` × `p` | — | Mean-model design matrix, shared across elements; carries its own intercept. |
+| `scale_design` | `Optional[Float[Array, 'N q']]` | — | `None` | Log-scale design matrix $Z$, shared across elements. Defaults to an intercept-only column -- a constant variance (the homoscedastic Gaussian, recovering OLS for the mean); pass a design to model the variance. |
+| `n_iter` | `int` | — | `50` | Number of Fisher-scoring iterations. Default `50`. |
+| `ridge` | `float` | — | `1e-08` | Small stabiliser added to the normal equations. Default `1e-8`. |
+| `block` | `Optional[int]` | — | `None` | Element-block size bounding peak memory; `None` processes all elements at once. |
+
+**Returns** `GauLSSResult`. Fit output holding the mean coefficients `coef_mu`, the log-scale coefficients `coef_scale`, the block information inverses `cov_mu` and `cov_scale`, and the maximised log-likelihood `log_lik`. A mean contrast is $c^{\top} \mathrm{coef\_mu}$ with standard error $\sqrt{c^{\top} \mathrm{cov\_mu}\, c}$; a scale contrast is the analogous read-out on `coef_scale`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:gaulss_fit -->
+### See also
+
+gaulss_predict : Evaluate the fitted mean and scale on a (new) design.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:gaulss_fit -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `N` | observations — time points, subjects, or sampled points |
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

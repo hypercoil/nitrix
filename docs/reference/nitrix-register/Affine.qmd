@@ -1,0 +1,74 @@
+---
+title: "Affine"
+generated: true
+description: "Affine (general linear + translation) transform."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._model`.*
+
+<!-- nitrix:gen sig:Affine -->
+```python
+class Affine
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:Affine -->
+Affine (general linear + translation) transform.
+
+The parameter vector holds `ndim**2` row-major linear-generator
+entries followed by `ndim` translation entries (12 in 3-D, 6 in
+2-D). The linear block is the matrix exponential (`matrix_exp`)
+of the generator, guaranteeing an invertible, orientation-preserving
+map.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:Affine.n_params -->
+```python
+n_params(ndim: int) -> int
+```
+<!-- nitrix:/gen -->
+
+Parameter count: `ndim**2` linear-generator entries plus
+`ndim` translations.
+
+<!-- nitrix:gen sig:Affine.exp -->
+```python
+exp(params: Float[Array, '... p'], *, ndim: int) -> Float[Array, '... d1 d1']
+```
+<!-- nitrix:/gen -->
+
+Affine exponential map via [`affine_exp`](../nitrix-geometry-transform/affine_exp.qmd), returning the
+homogeneous $(\text{ndim} + 1, \text{ndim} + 1)$
+transform whose linear block is the exponential of the
+generator.
+
+<!-- nitrix:gen sig:Affine.rescale_to_grid -->
+```python
+rescale_to_grid(params: Float[Array, ' p'], ratio: Float[Array, ' d']) -> Float[Array, ' p']
+```
+<!-- nitrix:/gen -->
+
+Rescale to a finer grid by scaling the trailing translation
+block by `ratio`; the linear-generator block is
+grid-invariant and left unchanged.
+
+<!-- nitrix:gen sig:Affine.__init__ -->
+```python
+__init__() -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:Affine -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->

@@ -1,0 +1,57 @@
+---
+title: "nitrix.metrics.contrastive"
+generated: true
+signature-hash: 817da0d568cfcb31
+description: "Contrastive / self-supervised representation kernels."
+listing:
+  id: nitrix-metrics-contrastive-symbols
+  contents: "nitrix-metrics-contrastive/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.metrics.contrastive`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Contrastive / self-supervised representation kernels.
+
+- [`info_nce`](nitrix-metrics-contrastive/info_nce.qmd) -- the InfoNCE / NT-Xent objective between two aligned view
+  batches: pull the matched pair together and push every other sample apart
+  on the unit sphere.
+- [`dino_cross_entropy`](nitrix-metrics-contrastive/dino_cross_entropy.qmd) -- the self-distillation cross-entropy between a
+  sharpened, centred teacher distribution (stop-gradient) and a student.
+- [`ibot_cross_entropy`](nitrix-metrics-contrastive/ibot_cross_entropy.qmd) -- the masked-token variant of the above,
+  averaged over the masked positions of each sample.
+- [`koleo`](nitrix-metrics-contrastive/koleo.qmd) -- the Kozachenko--Leonenko differential-entropy regulariser:
+  spread features out by penalising small nearest-neighbour distances.
+
+These are *score kernels*: they take the **objective structure** (the view
+pairing, the masked-token selection, the teacher `center` and its EMA) as
+explicit arguments rather than baking a recipe in, and they reduce through the
+shared leaf reduction. The EMA / centre bookkeeping and the view-stacking
+layout are recipes and stay with the caller.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d` | spatial dimension (2 or 3) |
+| `...` | anonymous leading (batch) axes |
+| `k` | kernel or basis components |
+| `b` | *(undocumented — add to `_dimensions.yml`)* |
+| `t` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-metrics-contrastive-symbols}
+:::

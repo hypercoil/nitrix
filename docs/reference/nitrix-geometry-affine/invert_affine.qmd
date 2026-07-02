@@ -1,0 +1,43 @@
+---
+title: "invert_affine"
+generated: true
+description: "Multiplicative inverse of an affine transform."
+---
+
+[‹ back to `nitrix.geometry.affine`](../nitrix-geometry-affine.qmd)
+
+<!-- nitrix:gen sig:invert_affine -->
+```python
+invert_affine(mat: Float[Array, '... n np1']) -> Float[Array, '... n np1']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:invert_affine -->
+Multiplicative inverse of an affine transform.
+
+Promotes the affine to homogeneous square form via
+[`make_square_affine`](../nitrix-geometry-affine/make_square_affine.qmd), inverts it, and drops the implied bottom row
+back off.  The result maps coordinates in the opposite direction to
+`mat`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:invert_affine -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mat` | `Float` | `...` × `n` × `np1` | — | Batched affine matrices in `(..., N, N+1)` form (or already square `(..., N+1, N+1)`). |
+
+**Returns** `Float` — shape `...` × `n` × `np1`. Batched inverse affines in `(..., N, N+1)` form.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:invert_affine -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `np1` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

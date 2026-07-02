@@ -1,0 +1,54 @@
+---
+title: "nitrix.linalg.krylov"
+generated: true
+signature-hash: 81a3fb324fec5970
+description: "Matrix-free Krylov solvers."
+listing:
+  id: nitrix-linalg-krylov-symbols
+  contents: "nitrix-linalg-krylov/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.linalg.krylov`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Matrix-free Krylov solvers.
+
+The [`cg`](nitrix-linalg-krylov/cg.qmd) routine implements conjugate gradients for a symmetric
+positive-definite system $A x = b$, where $A$ is supplied
+either as a dense matrix or as a matrix-vector-product callable.  Because
+conjugate gradients is built from matrix-vector products and inner
+products only -- with no factorisation -- it never touches the cuSolver
+handle pool, so it stays on the GPU on the stacks where the direct dense
+solvers wedge.  That makes it the device-resilient positive-definite
+path: the registration Gauss-Newton / Levenberg-Marquardt normal
+equations $(J^{\top} J + \lambda \operatorname{diag}) \delta =
+-J^{\top} r$ are symmetric positive-definite and small, so their
+per-iteration solve runs matrix-free on-device instead of paying a host
+round-trip to a CPU Cholesky.
+
+The solve is differentiable: the underlying conjugate-gradient routine
+carries its own (implicit) differentiation rule, so gradients flow
+through the solve.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-linalg-krylov-symbols}
+:::

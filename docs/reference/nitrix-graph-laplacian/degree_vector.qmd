@@ -1,0 +1,77 @@
+---
+title: "degree_vector"
+generated: true
+description: "Per-node degree (row sum) of an adjacency operator."
+---
+
+[‹ back to `nitrix.graph.laplacian`](../nitrix-graph-laplacian.qmd)
+
+<!-- nitrix:gen sig:degree_vector -->
+```python
+degree_vector(A: _GraphInput) -> Num[Array, '... n']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:degree_vector -->
+Per-node degree (row sum) of an adjacency operator.
+
+For an [`ELL`](../nitrix-sparse.qmd) adjacency this is the sum of the
+stored values along the last axis (pad positions contribute the
+additive identity `0`).  For [`SectionedELL`](../nitrix-sparse.qmd),
+each bucket is summed and scattered back to the original row order.
+For dense `A` it is the row sum `A.sum(-1)`.
+
+For directed graphs (asymmetric `A`) this returns the out-degree;
+the corresponding in-degree is given by [`in_degree_vector`](../nitrix-graph-laplacian/in_degree_vector.qmd).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:degree_vector -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `A` | `_GraphInput` | — | — | Adjacency operator: dense `(..., n, n)`, [`ELL`](../nitrix-sparse.qmd), or [`SectionedELL`](../nitrix-sparse.qmd). |
+
+**Returns** `Num` — shape `...` × `n`. Per-node (out-)degree, shape `(..., n)`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:degree_vector -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **97.7 µs** (median, L4).  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_DEGREE_VECTOR.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| degree_vector | jax-cpu | n=128 | `cupy.degree` | skipped | — | — | — | — | — |
+| degree_vector | jax-cpu | n=128 | `nitrix-jax` | ok | 11.7 µs / 12.3 µs | 69.43 ms | 702 MB (rss) | ✓ 0.00011×tol | 1.00x vs nitrix-jax |
+| degree_vector | jax-cpu | n=128 | `numpy.degree` | ok | 6.6 µs / 6.6 µs | 17.7 µs | 702 MB (rss) | ✓ 0.00011×tol | 0.56x vs nitrix-jax |
+| degree_vector | jax-cuda12 | n=128 | `cupy.degree` | ok | 16.9 µs / 18.5 µs | 21.53 ms | 0.07 MB (hbm) | ✓ 0.00012×tol | 0.18x vs nitrix-jax |
+| degree_vector | jax-cuda12 | n=128 | `nitrix-jax` | ok | 95.8 µs / 97.7 µs | 224.73 ms | 33.62 MB (hbm) | ✓ 0.00011×tol | 1.00x vs nitrix-jax |
+| degree_vector | jax-cuda12 | n=128 | `numpy.degree` | ok | 8.0 µs / 8.4 µs | 20.7 µs | 0.07 MB (hbm) | ✓ 0.00011×tol | 0.08x vs nitrix-jax |
+| degree_vector | jax-cpu | n=256 | `cupy.degree` | skipped | — | — | — | — | — |
+| degree_vector | jax-cpu | n=256 | `nitrix-jax` | ok | 12.5 µs / 17.0 µs | 39.31 ms | 702 MB (rss) | ✓ 0.00011×tol | 1.00x vs nitrix-jax |
+| degree_vector | jax-cpu | n=256 | `numpy.degree` | ok | 17.0 µs / 17.3 µs | 27.1 µs | 702 MB (rss) | ✓ 0.00011×tol | 1.35x vs nitrix-jax |
+| degree_vector | jax-cuda12 | n=256 | `cupy.degree` | ok | 16.2 µs / 17.9 µs | 21.74 ms | 0.26 MB (hbm) | ✓ 0.00013×tol | 0.18x vs nitrix-jax |
+| degree_vector | jax-cuda12 | n=256 | `nitrix-jax` | ok | 91.2 µs / 95.4 µs | 192.95 ms | 33.82 MB (hbm) | ✓ 0.00013×tol | 1.00x vs nitrix-jax |
+| degree_vector | jax-cuda12 | n=256 | `numpy.degree` | ok | 21.8 µs / 26.8 µs | 37.5 µs | 0.26 MB (hbm) | ✓ 0.00011×tol | 0.24x vs nitrix-jax |
+| degree_vector | jax-cpu | n=512 | `cupy.degree` | skipped | — | — | — | — | — |
+| degree_vector | jax-cpu | n=512 | `nitrix-jax` | ok | 41.6 µs / 45.0 µs | 37.52 ms | 702 MB (rss) | ✓ 0.00012×tol | 1.00x vs nitrix-jax |
+| degree_vector | jax-cpu | n=512 | `numpy.degree` | ok | 56.4 µs / 57.1 µs | 67.5 µs | 702 MB (rss) | ✓ 0.00013×tol | 1.36x vs nitrix-jax |
+| degree_vector | jax-cuda12 | n=512 | `cupy.degree` | ok | 17.2 µs / 19.3 µs | 21.52 ms | 1.05 MB (hbm) | ✓ 0.00014×tol | 0.19x vs nitrix-jax |
+| degree_vector | jax-cuda12 | n=512 | `nitrix-jax` | ok | 91.2 µs / 95.5 µs | 190.87 ms | 34.61 MB (hbm) | ✓ 0.00012×tol | 1.00x vs nitrix-jax |
+| degree_vector | jax-cuda12 | n=512 | `numpy.degree` | ok | 56.8 µs / 57.4 µs | 77.1 µs | 1.05 MB (hbm) | ✓ 0.00013×tol | 0.62x vs nitrix-jax |
+:::
+
+*source: bench `f174a26b` · nitrix `88a23053`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:degree_vector -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

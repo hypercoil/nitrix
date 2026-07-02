@@ -2,47 +2,42 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Regular-grid stencil specialisation of ELL.
+Regular-grid stencil specialisation of the ELL sparse format.
 
-When every voxel of a regular n-D grid uses the same neighbour
-offset pattern (the "stencil"), the resulting linear operator
-has a special structure: row ``i`` indexes neighbours at fixed
-offsets from row ``i``'s spatial coordinate.  We store this as
-a plain ``ELL`` with:
+When every voxel of a regular n-D grid uses the same neighbour offset pattern
+(the "stencil"), the resulting linear operator has a special structure: row
+:math:`i` indexes neighbours at fixed offsets from row :math:`i`'s spatial
+coordinate. This is stored as a plain :class:`~nitrix.sparse.ELL` with:
 
 - ``n_rows = prod(grid_shape)`` (one row per voxel).
 - ``k_max = len(offsets)`` (one column per stencil tap).
-- ``indices[v, k]`` = the linearised index of the ``k``-th
-  neighbour of voxel ``v``.
-- ``values[v, k]`` = the stencil weight at offset ``k``.
+- ``indices[v, k]`` is the linearised index of the ``k``-th neighbour of
+  voxel ``v``.
+- ``values[v, k]`` is the stencil weight at offset ``k``.
 
-This is the substrate equivalent of the regular finite-difference
-operators (5-point Laplacian, sobel filters, etc.) -- once
-constructed, all the machinery of ``semiring_ell_matmul``,
-``laplacian_eigenmap``, ``connectopy``, etc. flows naturally.
+This is the substrate equivalent of the regular finite-difference operators
+(the 5-point Laplacian, Sobel filters, and so on). Once constructed, the
+machinery of :func:`~nitrix.semiring.semiring_ell_matmul`,
+:func:`~nitrix.graph.laplacian_eigenmap`, and related routines flows naturally.
 
-Public surface:
+The public surface consists of :func:`regular_grid_stencil` (the general n-D
+stencil constructor with replicate / periodic / reflect boundary modes),
+:func:`grid_laplacian` (a convenience for the (2n+1)-point n-D Laplacian on a
+regular grid), and :func:`grid_identity` (the identity operator, trivial but
+composable with :func:`grid_laplacian` to form :math:`I - L` smoothers).
 
-- ``regular_grid_stencil`` -- general n-D stencil constructor
-  with replicate / periodic / reflect boundary modes.
-- ``grid_laplacian`` -- convenience for the (2n+1)-point n-D
-  Laplacian on a regular grid.
-- ``grid_identity`` -- the identity operator (trivial but
-  composable with grid_laplacian for ``I - L`` smoothers etc.).
-
-Boundary handling:
-
-- ``'replicate'``: at the grid edge, the out-of-bounds neighbour
-  index is clamped to the edge cell.  Effectively duplicates the
-  boundary value when applied via matmul.  Matches scipy
-  ``mode='nearest'``.
-- ``'periodic'``: wrap around (toroidal topology).  Matches scipy
+Boundary handling
+-----------------
+- ``'replicate'``: at the grid edge, the out-of-bounds neighbour index is
+  clamped to the edge cell. This effectively duplicates the boundary value
+  when applied via matmul, matching scipy ``mode='nearest'``.
+- ``'periodic'``: wrap around (toroidal topology), matching scipy
   ``mode='wrap'``.
-- ``'reflect'``: mirror at the edge (with edge cell repeated).
-  Matches scipy ``mode='reflect'`` (numpy ``mode='symmetric'``).
+- ``'reflect'``: mirror at the edge with the edge cell repeated, matching
+  scipy ``mode='reflect'`` (numpy ``mode='symmetric'``).
 
-For more exotic topologies (e.g., parameterised-sphere with pole
-flip), pre-pad the spatial axes via ``nitrix.geometry.sphere_grid``
+For more exotic topologies (e.g., a parameterised sphere with pole flip),
+pre-pad the spatial axes via the routines in :mod:`nitrix.geometry.sphere_grid`
 and construct the stencil on the padded grid.
 """
 
@@ -77,15 +72,36 @@ def _linearise_offsets(
     offsets: NDArray[Any],
     boundary: BoundaryMode,
 ) -> NDArray[Any]:
-    """Map per-voxel + per-offset neighbour coordinates to linear indices.
+    """Map per-voxel and per-offset neighbour coordinates to linear indices.
 
-    Returns ``indices`` of shape ``(n_voxels, n_offsets)`` where
-    ``indices[v, k]`` is the linearised index (under C order) of the
-    ``k``-th neighbour of voxel ``v`` after boundary handling.
+    For each voxel of the grid, the stencil offsets are added to the voxel's
+    spatial coordinate, the named boundary handling is applied at the grid
+    edges, and the resulting neighbour coordinates are flattened to linear
+    (C-order) indices.
 
-    Done in NumPy at construction time -- no JIT path.  The result is
-    a fixed integer array passed to ELL; the actual matmul (via
-    ``semiring_ell_matmul``) is pure JAX.
+    This is done in NumPy at construction time, off any JIT path. The result
+    is a fixed integer array passed to :class:`~nitrix.sparse.ELL`; the actual
+    matmul (via :func:`~nitrix.semiring.semiring_ell_matmul`) is pure JAX.
+
+    Parameters
+    ----------
+    grid_shape
+        Spatial grid dimensions, with voxels linearised in C order. Its length
+        is the grid dimensionality ``ndim``.
+    offsets
+        Integer offsets of shape ``(n_offsets, ndim)`` defining the stencil
+        relative to each voxel. The second axis must match ``len(grid_shape)``.
+    boundary
+        Boundary handling at the grid edges, one of ``'replicate'``,
+        ``'periodic'`` or ``'reflect'``. See the module docstring.
+
+    Returns
+    -------
+    NDArray
+        Integer (``int32``) array of shape ``(n_voxels, n_offsets)`` where
+        ``n_voxels = prod(grid_shape)`` and entry ``[v, k]`` is the linearised
+        C-order index of the ``k``-th neighbour of voxel ``v`` after boundary
+        handling.
     """
     ndim = len(grid_shape)
     if offsets.shape[1] != ndim:
@@ -221,9 +237,23 @@ def regular_grid_stencil(
 
 
 def _axis_unit_offsets(ndim: int) -> NDArray[Any]:
-    """Return the 2*ndim + 1 axis-aligned offsets ``{0, ±e_d}``.
+    """Return the :math:`2\\,\\mathrm{ndim} + 1` axis-aligned offsets.
 
-    Order: center, then ``(+e_0, -e_0, +e_1, -e_1, ...)``.
+    The offsets are the origin together with the positive and negative unit
+    steps along each axis, i.e. :math:`\\{0,\\ \\pm e_d\\}` for every axis
+    :math:`d`. They are ordered as centre first, then
+    :math:`(+e_0, -e_0, +e_1, -e_1, \\dots)`.
+
+    Parameters
+    ----------
+    ndim
+        Number of spatial dimensions of the grid.
+
+    Returns
+    -------
+    NDArray
+        Integer array of shape ``(2 * ndim + 1, ndim)`` holding the stencil
+        offsets in the order described above.
     """
     rows = [np.zeros(ndim, dtype=np.int64)]
     for d in range(ndim):
@@ -243,39 +273,39 @@ def grid_laplacian(
 ) -> ELL:
     """The standard (2n+1)-point n-D Laplacian stencil on a regular grid.
 
-    The 5-point stencil in 2-D (or 7-point in 3-D, etc.):
-
-    .. code::
-
-                       u(i-1, j)
-        Δu(i, j) =   u(i, j-1)   u(i+1, j)   - 4 u(i, j)
-                       u(i, j+1)
-
-    Or in 1-D: ``Δu(i) = u(i-1) - 2 u(i) + u(i+1)``.
+    This builds the classic second-order finite-difference Laplacian: the
+    5-point stencil in 2-D, the 7-point stencil in 3-D, and so on. In 1-D the
+    stencil is :math:`\\Delta u(i) = u(i-1) - 2\\,u(i) + u(i+1)`; in 2-D each
+    voxel is coupled to its four axis-aligned neighbours with a centre weight
+    of :math:`-4` (for unit spacing).
 
     Parameters
     ----------
     grid_shape
-        Spatial grid dimensions.
+        Spatial grid dimensions, with voxels linearised in C order.
     boundary
-        Boundary handling.  ``'replicate'`` is the standard
-        free-boundary convention (zero flux); ``'periodic'`` gives
-        a toroidal Laplacian; ``'reflect'`` gives a Neumann-like
-        condition with the boundary mirrored.
+        Boundary handling. ``'replicate'`` is the standard free-boundary
+        convention (zero flux); ``'periodic'`` gives a toroidal Laplacian;
+        ``'reflect'`` gives a Neumann-like condition with the boundary
+        mirrored. Default ``'replicate'``.
     spacing
-        Voxel spacing.  ``float`` -- isotropic; sequence -- per-axis
-        for anisotropic grids (e.g., fMRI ``(3, 3, 4)``).  The
-        Laplacian weight along each axis is scaled by ``1/h^2``
-        where ``h`` is that axis's spacing.
+        Voxel spacing. A ``float`` is isotropic; a sequence gives per-axis
+        spacing for anisotropic grids (e.g., fMRI ``(3, 3, 4)``). The
+        Laplacian weight along each axis is scaled by :math:`1/h^2`, where
+        :math:`h` is that axis's spacing. Default ``1.0``.
     sign
-        ``'negative'`` (default) -- the standard discrete Laplacian
-        ``Δu`` with eigvalues ``≤ 0`` on a finite grid (matches the
-        continuous Laplacian sign).  ``'positive'`` -- ``-Δu``, the
-        positive-definite form used in spectral graph theory.
+        ``'negative'`` (default) gives the standard discrete Laplacian
+        :math:`\\Delta u`, whose eigenvalues are :math:`\\le 0` on a finite
+        grid (matching the continuous Laplacian sign). ``'positive'`` gives
+        :math:`-\\Delta u`, the positive-definite form used in spectral graph
+        theory.
 
     Returns
     -------
-    ELL representing the Laplacian operator.
+    ELL
+        An :class:`~nitrix.sparse.ELL` operator of shape
+        ``(prod(grid_shape), prod(grid_shape))`` with :math:`2\\,n + 1` taps
+        per row, representing the Laplacian.
     """
     grid_shape_t = tuple(int(s) for s in grid_shape)
     ndim = len(grid_shape_t)
@@ -318,10 +348,28 @@ def grid_identity(
 ) -> ELL:
     """The identity operator on a regular grid.
 
-    Returned as an ELL with one tap per row (the centre offset).
-    Composable with ``grid_laplacian`` and other stencil operators
-    for "shifted Laplacian" preconditioners and "implicit smoothing"
-    operators ``I - α L``.
+    Returned as an :class:`~nitrix.sparse.ELL` with a single tap per row (the
+    centre offset, with unit weight). This is composable with
+    :func:`grid_laplacian` and other stencil operators to form "shifted
+    Laplacian" preconditioners and "implicit smoothing" operators of the form
+    :math:`I - \\alpha L`.
+
+    Parameters
+    ----------
+    grid_shape
+        Spatial grid dimensions, with voxels linearised in C order.
+    n_cols
+        Optional override for the number of columns of the returned operator.
+        Defaults to ``prod(grid_shape)`` (the square self-coupling case). Set
+        explicitly when the operator maps the grid into a different-sized
+        domain.
+
+    Returns
+    -------
+    ELL
+        An :class:`~nitrix.sparse.ELL` operator of shape
+        ``(prod(grid_shape), n_cols)`` with one tap per row (weight ``1.0`` on
+        the centre voxel).
     """
     grid_shape_t = tuple(int(s) for s in grid_shape)
     ndim = len(grid_shape_t)

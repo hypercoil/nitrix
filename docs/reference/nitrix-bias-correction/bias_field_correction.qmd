@@ -1,0 +1,57 @@
+---
+title: "bias_field_correction"
+generated: true
+description: "Bias-field correction with a selectable field-fitting algorithm."
+---
+
+[‹ back to `nitrix.bias.correction`](../nitrix-bias-correction.qmd)
+
+<!-- nitrix:gen sig:bias_field_correction -->
+```python
+bias_field_correction(image: Float[Array, '... *spatial'], *, method: CorrectionMethod = 'n4', mask: Optional[Float[Array, '... *spatial']] = None, spline_order: int = 3, n_control_points: Union[int, Sequence[int]] = 4, n_fitting_levels: int = 4, max_iterations: Union[int, Sequence[int]] = 50, convergence_threshold: float = 0.001, n_histogram_bins: int = 200, fwhm: float = 0.15, wiener_noise: float = 0.01, ridge: float = 0.1, penalty: float = 0.1, penalty_order: int = 2, spatial_rank: Optional[int] = None, return_bias_field: bool = False, eps: float = 1e-08) -> Union[Float[Array, '... *spatial'], Tuple[Float[Array, '... *spatial'], Float[Array, '... *spatial']]]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:bias_field_correction -->
+Bias-field correction with a selectable field-fitting algorithm.
+
+Estimates the smooth multiplicative bias field corrupting `image` and
+returns the corrected image (`image / bias`).  All methods share the
+N3/N4 iteration; `method` selects the B-spline field estimator.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:bias_field_correction -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `image` | `Float` | `...` × `*spatial` | — | Positive intensities over the spatial grid. Leading dimensions (with `spatial_rank` set) are a batch of independently corrected volumes. |
+| `method` | `CorrectionMethod` | — | `'n4'` | Field-fitting algorithm (default `'n4'`): - `'n4'` -- Lee--Wolberg--Shin MBA; exactly N4 / ANTs (ITK parity). Equivalent to [`n4_bias_field_correction`](../nitrix-bias-n4/n4_bias_field_correction.qmd). - `'least_squares'` -- regularised weighted least-squares B-spline fit; unbiased, denoised by `ridge`. Competitive with N4 (which wins is data-dependent). - `'psplines'` -- penalised least-squares (P-splines); `ridge` plus a difference-roughness `penalty` for extra smoothing. All methods use the multi-resolution coarse-to-fine schedule (`n_fitting_levels`); it is required for stability. |
+| `mask` | `Optional[Float[Array, '... *spatial']]` | — | `None` | Region over which the field is estimated; `None` uses `image > 0`. Float masks are per-voxel confidence weights. |
+| `spline_order` | `int` | — | `3` | Degree of the B-spline basis (default `3`, cubic). As in [`n4_bias_field_correction`](../nitrix-bias-n4/n4_bias_field_correction.qmd). |
+| `n_control_points` | `Union[int, Sequence[int]]` | — | `4` | Number of B-spline control points at the coarsest fitting level, per spatial axis or shared (default `4`). As in [`n4_bias_field_correction`](../nitrix-bias-n4/n4_bias_field_correction.qmd). |
+| `n_fitting_levels` | `int` | — | `4` | Number of coarse-to-fine multi-resolution levels; the control-point mesh doubles each level (default `4`). As in [`n4_bias_field_correction`](../nitrix-bias-n4/n4_bias_field_correction.qmd). |
+| `max_iterations` | `Union[int, Sequence[int]]` | — | `50` | Maximum sharpening iterations, per level or shared across levels (default `50`). As in [`n4_bias_field_correction`](../nitrix-bias-n4/n4_bias_field_correction.qmd). |
+| `convergence_threshold` | `float` | — | `0.001` | Coefficient-of-variation threshold on the per-iteration field ratio at which a level terminates (default `1e-3`). As in [`n4_bias_field_correction`](../nitrix-bias-n4/n4_bias_field_correction.qmd). |
+| `n_histogram_bins` | `int` | — | `200` | Number of bins for the intensity histogram used in the deconvolution sharpening step (default `200`). As in [`n4_bias_field_correction`](../nitrix-bias-n4/n4_bias_field_correction.qmd). |
+| `fwhm` | `float` | — | `0.15` | Full width at half maximum of the Gaussian point-spread function assumed by the histogram sharpening (default `0.15`). As in [`n4_bias_field_correction`](../nitrix-bias-n4/n4_bias_field_correction.qmd). |
+| `wiener_noise` | `float` | — | `0.01` | Wiener-deconvolution noise level for the histogram sharpening (default `0.01`). As in [`n4_bias_field_correction`](../nitrix-bias-n4/n4_bias_field_correction.qmd). |
+| `ridge` | `float` | — | `0.1` | Tikhonov regularisation (relative to the mean Gram diagonal) for the `'least_squares'` / `'psplines'` normal equations. Default `1e-1`; this is the denoising strength on the noisy per-iteration residual (the least-squares analogue of MBA's $w^2$ averaging), not a mere numerical stabiliser; too small (e.g. `1e-4`) overfits residual noise and degrades the field. Ignored by `'n4'`. |
+| `penalty` | `float` | — | `0.1` | P-spline roughness penalty weight (relative to the mean Gram diagonal; larger gives a smoother field). Default `1e-1`. Only used by `'psplines'`. |
+| `penalty_order` | `int` | — | `2` | Order of the finite-difference roughness penalty (default `2`, penalising curvature). Only used by `'psplines'`. |
+| `spatial_rank` | `Optional[int]` | — | `None` | Number of trailing axes of `image` that are spatial; the remainder are batch dimensions. `None` infers it from `n_control_points` (if a sequence) or treats every dim as spatial (single volume). As in [`n4_bias_field_correction`](../nitrix-bias-n4/n4_bias_field_correction.qmd). |
+| `return_bias_field` | `bool` | — | `False` | If `True`, also return the estimated multiplicative bias field (default `False`). As in [`n4_bias_field_correction`](../nitrix-bias-n4/n4_bias_field_correction.qmd). |
+| `eps` | `float` | — | `1e-08` | Small positive floor applied before the log transform to guard against non-positive intensities (default `1e-8`). As in [`n4_bias_field_correction`](../nitrix-bias-n4/n4_bias_field_correction.qmd). |
+
+**Returns** `Union[Float[Array, '... *spatial'], Tuple[Float[Array, '... *spatial'], Float[Array, '... *spatial']]]`. The bias-corrected image (`image / bias_field`), with the same shape as `image`. Returned alone when `return_bias_field` is `False`. The estimated multiplicative bias field, same shape as `image`. Returned as the second element of the tuple only when `return_bias_field` is `True`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:bias_field_correction -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

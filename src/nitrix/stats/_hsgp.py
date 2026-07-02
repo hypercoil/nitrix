@@ -4,15 +4,20 @@
 """
 Shared Hilbert-space approximate-GP (HSGP) eigenstructure.
 
-The fixed Laplace-Dirichlet eigenfunction basis on a box domain (1-D and the
-multi-dimensional tensor product), the (rho-independent) eigenfunction design,
-and the diagonal spectral-reweighting penalty -- the single source of truth used
-by :mod:`nitrix.stats.gp` (``gp_fit``), :mod:`nitrix.stats.hgp` (``hgp_fit``), and
-:mod:`nitrix.stats.basis` (``hsgp_basis``).  Neutral: depends only on the kernel
-spectral densities, so it carries no import cycle between those modules.
+The fixed Laplace--Dirichlet eigenfunction basis on a box domain (both the 1-D
+case and the multi-dimensional tensor product), the eigenfunction design (which
+is independent of the length-scale :math:`\\rho`), and the diagonal
+spectral-reweighting penalty. This module is the single source of truth for that
+eigenstructure, shared by :mod:`nitrix.stats.gp` (:func:`~nitrix.stats.gp.gp_fit`),
+:mod:`nitrix.stats.hgp` (:func:`~nitrix.stats.hgp.hgp_fit`), and
+:mod:`nitrix.stats.basis` (:func:`~nitrix.stats.basis.hsgp_basis`). It depends only
+on the kernel spectral densities, so it introduces no import cycle between those
+modules.
 
-``phi_j(x) = sqrt(1/L) sin(sqrt(lambda_j) (x - c + L))`` on ``[c - L, c + L]``; the
-kernel enters only as the diagonal reweighting ``1 / S_rho(sqrt(lambda_j))``.
+The eigenfunctions are
+:math:`\\phi_j(x) = \\sqrt{1/L}\\,\\sin(\\sqrt{\\lambda_j}\\,(x - c + L))` on the
+box :math:`[c - L,\\, c + L]`; the kernel enters only through the diagonal
+reweighting :math:`1 / S_\\rho(\\sqrt{\\lambda_j})`.
 """
 
 from __future__ import annotations
@@ -37,10 +42,30 @@ __all__ = [
 ]
 
 
-def _hsgp_domain(
-    lo: float, hi: float, boundary: float
-) -> Tuple[float, float]:
-    """``(c, L)``: the domain midrange and the half-width of ``[c - L, c + L]``."""
+def _hsgp_domain(lo: float, hi: float, boundary: float) -> Tuple[float, float]:
+    """Centre and half-width of the (padded) box domain :math:`[c - L,\\, c + L]`.
+
+    The centre :math:`c` is the midrange of the observed interval and the
+    half-width :math:`L` is the observed half-range scaled by ``boundary`` (with a
+    small floor to avoid a degenerate zero-width domain).
+
+    Parameters
+    ----------
+    lo : float
+        Lower extent of the observed covariate range.
+    hi : float
+        Upper extent of the observed covariate range.
+    boundary : float
+        Multiplicative padding factor applied to the observed half-range, so the
+        eigenfunction support extends beyond the data.
+
+    Returns
+    -------
+    c : float
+        Domain centre :math:`c`, the midrange :math:`\\tfrac{1}{2}(lo + hi)`.
+    L : float
+        Domain half-width :math:`L`, the padded half-range.
+    """
     c = 0.5 * (lo + hi)
     half = max(0.5 * (hi - lo), 1e-6)
     return c, float(boundary) * half
@@ -49,13 +74,36 @@ def _hsgp_domain(
 def _hsgp_eigen(
     rank: int, c: float, L: float, dtype: Any
 ) -> Tuple[Float[Array, ' m'], Float[Array, ' m'], float]:
-    """The fixed Laplace-Dirichlet eigen-frequencies, per-mode phase, and the
-    ``sqrt(1/L)`` amplitude -- everything the eigenfunctions need, independent of
-    the kernel and ``rho``.
+    """Fixed Laplace--Dirichlet eigenstructure for the 1-D eigenfunctions.
 
-    ``phi_j(x) = sqrt(1/L) sin(sqrt(lambda_j) (x - c + L)) = sqrt(1/L)
-    sin(sqrt(lambda_j) x + phase_j)`` with ``phase_j = sqrt(lambda_j) (L - c)``
-    (folding the centring constant ``c`` into the stored phase).
+    Returns the eigen-frequencies, the per-mode phase, and the common amplitude
+    :math:`\\sqrt{1/L}` -- everything the eigenfunctions require, independent of
+    the kernel and of the length-scale :math:`\\rho`. Rewriting the basis as
+    :math:`\\phi_j(x) = \\sqrt{1/L}\\,\\sin(\\sqrt{\\lambda_j}\\,(x - c + L))
+    = \\sqrt{1/L}\\,\\sin(\\sqrt{\\lambda_j}\\,x + \\mathrm{phase}_j)` folds the
+    centring constant :math:`c` into the stored phase
+    :math:`\\mathrm{phase}_j = \\sqrt{\\lambda_j}\\,(L - c)`.
+
+    Parameters
+    ----------
+    rank : int
+        Number of basis functions :math:`m`; modes are indexed
+        :math:`j = 1, \\ldots, m`.
+    c : float
+        Domain centre :math:`c`.
+    L : float
+        Domain half-width :math:`L`.
+    dtype : Any
+        Floating dtype of the returned frequency and phase arrays.
+
+    Returns
+    -------
+    sqrt_lambda : Float[Array, ' m']
+        Square-root eigenvalues :math:`\\sqrt{\\lambda_j} = j\\pi / (2L)`.
+    phase : Float[Array, ' m']
+        Per-mode phase :math:`\\mathrm{phase}_j = \\sqrt{\\lambda_j}\\,(L - c)`.
+    inv_sqrt_L : float
+        Common eigenfunction amplitude :math:`\\sqrt{1/L}`.
     """
     j = np.arange(1, rank + 1, dtype=np.float64)
     sqrt_lambda = j * np.pi / (2.0 * L)
@@ -73,7 +121,29 @@ def _hsgp_features(
     phase: Float[Array, ' m'],
     inv_sqrt_L: float,
 ) -> Float[Array, 'g m']:
-    """The (rho-independent) eigenfunction design ``Phi`` at covariate ``x``."""
+    """Eigenfunction design matrix :math:`\\Phi` at covariate ``x``.
+
+    Evaluates the fixed 1-D eigenfunctions, which are independent of the
+    length-scale :math:`\\rho`, at every observation.
+
+    Parameters
+    ----------
+    x : Float[Array, ' g']
+        Covariate values at the ``g`` evaluation points.
+    sqrt_lambda : Float[Array, ' m']
+        Square-root eigenvalues :math:`\\sqrt{\\lambda_j}`, one per basis mode.
+    phase : Float[Array, ' m']
+        Per-mode phase :math:`\\mathrm{phase}_j`.
+    inv_sqrt_L : float
+        Common eigenfunction amplitude :math:`\\sqrt{1/L}`.
+
+    Returns
+    -------
+    Float[Array, 'g m']
+        Design matrix :math:`\\Phi` with entries
+        :math:`\\Phi_{ij} = \\sqrt{1/L}\\,\\sin(\\sqrt{\\lambda_j}\\,x_i
+        + \\mathrm{phase}_j)`.
+    """
     return inv_sqrt_L * jnp.sin(
         sqrt_lambda[None, :] * x[:, None] + phase[None, :]
     )
@@ -85,19 +155,41 @@ def _penalty_diag(
     rho: Float[Array, ''],
     n_fixed: int,
 ) -> Tuple[Float[Array, ' p'], Float[Array, '']]:
-    """The diagonal penalty core ``d`` over the full ``p = n_fixed + m`` columns
-    and the smooth-block log-pseudo-determinant contribution ``sum_j log d_j``.
+    """Diagonal penalty core and its smooth-block log-pseudo-determinant.
 
-    The penalty is ``S_lambda = lambda diag(d)`` with ``d = [0, ..., 0, 1/s_1,
-    ..., 1/s_m]`` (zeros on the unpenalised fixed-effect columns); ``s_j =
-    S_rho(sqrt(lambda_j))`` is the spectral density (amplitude folded into
-    ``lambda``).  Returns ``(d, sum_j log(1/s_j))``.
+    Builds the diagonal penalty core :math:`d` over the full
+    :math:`p = \\mathtt{n\\_fixed} + m` columns and returns the smooth-block
+    log-pseudo-determinant contribution :math:`\\sum_j \\log d_j`. The full penalty
+    is :math:`S_\\lambda = \\lambda\\,\\operatorname{diag}(d)` with
+    :math:`d = [0, \\ldots, 0,\\, 1/s_1, \\ldots, 1/s_m]` -- zeros on the
+    unpenalised fixed-effect columns -- where
+    :math:`s_j = S_\\rho(\\sqrt{\\lambda_j})` is the kernel spectral density (the
+    amplitude is folded into the scale :math:`\\lambda`). A small floor guards the
+    reciprocal against numerically vanishing densities.
+
+    Parameters
+    ----------
+    sqrt_lambda : Float[Array, ' m']
+        Square-root eigenvalues :math:`\\sqrt{\\lambda_j}` of the ``m`` basis modes.
+    kernel : str
+        Kernel name selecting the spectral density :math:`S_\\rho`.
+    rho : Float[Array, '']
+        Kernel length-scale :math:`\\rho`.
+    n_fixed : int
+        Number of leading unpenalised fixed-effect columns.
+
+    Returns
+    -------
+    d : Float[Array, ' p']
+        Diagonal penalty core over all :math:`p = \\mathtt{n\\_fixed} + m` columns,
+        zero on the fixed block and :math:`1/s_j` on the smooth block.
+    logdet : Float[Array, '']
+        Smooth-block contribution :math:`\\sum_j \\log(1/s_j)` to the
+        log-pseudo-determinant.
     """
     s = spectral_density(sqrt_lambda, kernel=kernel, rho=rho, amplitude=1.0)
     inv_s = 1.0 / jnp.clip(s, 1e-30, None)
-    d = jnp.concatenate(
-        [jnp.zeros((n_fixed,), dtype=inv_s.dtype), inv_s]
-    )
+    d = jnp.concatenate([jnp.zeros((n_fixed,), dtype=inv_s.dtype), inv_s])
     return d, jnp.sum(jnp.log(inv_s))
 
 
@@ -106,11 +198,38 @@ def _hsgp_eigen_nd(
 ) -> Tuple[Array, Array, Array, Array, Tuple[Tuple[float, float], ...]]:
     """Tensor-product Laplace eigenstructure on the box domain (host build).
 
-    Returns ``(freqs, phase, inv_sqrt_L, omega_norm, bounds)``: per-mode per-axis
-    eigen-frequencies ``(M, D)``, phases ``(M, D)``, the per-axis ``sqrt(1/L_d)``
-    ``(D,)``, the mode-frequency magnitude ``||w|| = sqrt(sum_d lambda_{j_d})``
-    ``(M,)``, and the per-axis ``(lo, hi)`` (recorded for re-evaluation).
-    ``M = prod_d m_per[d]``."""
+    Constructs, on the host in double precision, the multi-dimensional
+    Laplace--Dirichlet eigenstructure as the tensor product of the per-axis 1-D
+    bases. The per-axis box is centred and padded exactly as in the 1-D case, and
+    the total number of modes is :math:`M = \\prod_d \\mathtt{m\\_per}[d]`.
+
+    Parameters
+    ----------
+    x_np : numpy.ndarray
+        Covariate array of shape ``(n, D)`` whose per-axis minima and maxima define
+        the box domain.
+    m_per : Tuple[int, ...]
+        Number of basis functions per axis; its length is the input dimension
+        :math:`D`.
+    boundary : float
+        Multiplicative padding factor applied to each axis half-range.
+    dtype : Any
+        Floating dtype of the returned arrays.
+
+    Returns
+    -------
+    freqs : Array
+        Per-mode, per-axis eigen-frequencies :math:`w_{m,d}`, shape ``(M, D)``.
+    phase : Array
+        Per-mode, per-axis phases, shape ``(M, D)``.
+    inv_sqrt_L : Array
+        Per-axis amplitude :math:`\\sqrt{1/L_d}`, shape ``(D,)``.
+    omega_norm : Array
+        Mode-frequency magnitude
+        :math:`\\lVert w \\rVert = \\sqrt{\\sum_d \\lambda_{j_d}}`, shape ``(M,)``.
+    bounds : Tuple[Tuple[float, float], ...]
+        Per-axis observed ``(lo, hi)`` extents, recorded for re-evaluation.
+    """
     lo = x_np.min(axis=0)
     hi = x_np.max(axis=0)
     c_mid = 0.5 * (lo + hi)
@@ -141,8 +260,29 @@ def _hsgp_features_nd(
     phase: Float[Array, 'M D'],
     inv_sqrt_L: Float[Array, ' D'],
 ) -> Float[Array, 'g M']:
-    """The (rho-independent) tensor-product eigenfunction design ``Phi`` at ``X``:
-    ``prod_d sqrt(1/L_d) sin(w_{m,d} x_d + phase_{m,d})``."""
+    """Tensor-product eigenfunction design matrix :math:`\\Phi` at ``X``.
+
+    Evaluates the multi-dimensional eigenfunctions, which are independent of the
+    length-scale, as the per-axis product
+    :math:`\\prod_d \\sqrt{1/L_d}\\,\\sin(w_{m,d}\\,x_d + \\mathrm{phase}_{m,d})`.
+
+    Parameters
+    ----------
+    X : Float[Array, 'g D']
+        Covariate matrix of the ``g`` evaluation points across ``D`` axes.
+    freqs : Float[Array, 'M D']
+        Per-mode, per-axis eigen-frequencies :math:`w_{m,d}`.
+    phase : Float[Array, 'M D']
+        Per-mode, per-axis phases :math:`\\mathrm{phase}_{m,d}`.
+    inv_sqrt_L : Float[Array, ' D']
+        Per-axis amplitude :math:`\\sqrt{1/L_d}`.
+
+    Returns
+    -------
+    Float[Array, 'g M']
+        Design matrix :math:`\\Phi` whose ``(i, m)`` entry is the product over
+        axes of the per-axis eigenfunctions evaluated at observation :math:`i`.
+    """
     X = jnp.asarray(X)
     arg = freqs[None, :, :] * X[:, None, :] + phase[None, :, :]  # (g, M, D)
     terms = inv_sqrt_L[None, None, :] * jnp.sin(arg)
@@ -156,11 +296,44 @@ def _penalty_diag_nd_iso(
     dim: int,
     n_fixed: int,
 ) -> Tuple[Float[Array, ' p'], Float[Array, '']]:
-    """Isotropic tensor-HSGP diagonal penalty: ``1/S_D(||w||; rho)`` (the ``D``-dim
-    radial spectral density), zeros on the fixed columns."""
+    """Isotropic tensor-HSGP diagonal penalty.
+
+    Reweights each mode by the reciprocal
+    :math:`1 / S_D(\\lVert w \\rVert;\\, \\rho)` of the :math:`D`-dimensional radial
+    spectral density evaluated at the mode-frequency magnitude, placing zeros on the
+    leading fixed-effect columns. A small floor guards the reciprocal against
+    numerically vanishing densities.
+
+    Parameters
+    ----------
+    omega_norm : Float[Array, ' M']
+        Mode-frequency magnitude :math:`\\lVert w \\rVert` for each of the ``M``
+        modes.
+    kernel : str
+        Kernel name selecting the spectral density.
+    rho : float
+        Isotropic kernel length-scale :math:`\\rho`.
+    dim : int
+        Dimension :math:`D` of the radial spectral density.
+    n_fixed : int
+        Number of leading unpenalised fixed-effect columns.
+
+    Returns
+    -------
+    d : Float[Array, ' p']
+        Diagonal penalty core over all :math:`p = \\mathtt{n\\_fixed} + M` columns,
+        zero on the fixed block and :math:`1/S_D(\\lVert w \\rVert;\\, \\rho)` on the
+        smooth block.
+    logdet : Float[Array, '']
+        Smooth-block contribution to the log-pseudo-determinant,
+        :math:`\\sum_m \\log(1/s_m)`.
+    """
     s = spectral_density(
-        omega_norm, kernel=kernel, rho=jnp.asarray(rho, dtype=omega_norm.dtype),
-        amplitude=1.0, dim=dim,
+        omega_norm,
+        kernel=kernel,
+        rho=jnp.asarray(rho, dtype=omega_norm.dtype),
+        amplitude=1.0,
+        dim=dim,
     )
     inv_s = 1.0 / jnp.clip(s, 1e-30, None)
     d = jnp.concatenate([jnp.zeros((n_fixed,), dtype=inv_s.dtype), inv_s])
@@ -173,14 +346,45 @@ def _penalty_diag_nd_ard(
     rho_vec: Tuple[float, ...],
     n_fixed: int,
 ) -> Tuple[Float[Array, ' p'], Float[Array, '']]:
-    """Separable / ARD tensor-HSGP penalty: ``1 / prod_d S_1(w_{m,d}; rho_d)`` (a
-    per-axis 1-D density), zeros on the fixed columns."""
+    """Separable / ARD tensor-HSGP diagonal penalty.
+
+    Reweights each mode by the reciprocal of the separable spectral density
+    :math:`1 / \\prod_d S_1(w_{m,d};\\, \\rho_d)`, the product of per-axis 1-D
+    densities evaluated at the per-axis frequency, with an independent length-scale
+    :math:`\\rho_d` on each axis (automatic relevance determination). Zeros are
+    placed on the leading fixed-effect columns, and a small floor guards the
+    reciprocal against numerically vanishing densities.
+
+    Parameters
+    ----------
+    freqs : Float[Array, 'M D']
+        Per-mode, per-axis eigen-frequencies :math:`w_{m,d}`.
+    kernel : str
+        Kernel name selecting the per-axis 1-D spectral density.
+    rho_vec : Tuple[float, ...]
+        Per-axis length-scales :math:`\\rho_d`, one entry per axis.
+    n_fixed : int
+        Number of leading unpenalised fixed-effect columns.
+
+    Returns
+    -------
+    d_full : Float[Array, ' p']
+        Diagonal penalty core over all :math:`p = \\mathtt{n\\_fixed} + M` columns,
+        zero on the fixed block and
+        :math:`1 / \\prod_d S_1(w_{m,d};\\, \\rho_d)` on the smooth block.
+    logdet : Float[Array, '']
+        Smooth-block contribution to the log-pseudo-determinant,
+        :math:`\\sum_m \\log(1/s_m)`.
+    """
     dtype = freqs.dtype
     s = jnp.ones((freqs.shape[0],), dtype=dtype)
     for d in range(freqs.shape[1]):
         s = s * spectral_density(
-            freqs[:, d], kernel=kernel,
-            rho=jnp.asarray(rho_vec[d], dtype=dtype), amplitude=1.0, dim=1,
+            freqs[:, d],
+            kernel=kernel,
+            rho=jnp.asarray(rho_vec[d], dtype=dtype),
+            amplitude=1.0,
+            dim=1,
         )
     inv_s = 1.0 / jnp.clip(s, 1e-30, None)
     d_full = jnp.concatenate([jnp.zeros((n_fixed,), dtype=dtype), inv_s])

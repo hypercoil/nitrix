@@ -1,0 +1,57 @@
+---
+title: "point_set_nearest_sq_dist"
+generated: true
+description: "Per-query nearest squared distance to a reference point set."
+---
+
+[‹ back to `nitrix.geometry`](../nitrix-geometry.qmd)
+
+*Re-exported here; defined in `nitrix.geometry._mesh_distance`.*
+
+<!-- nitrix:gen sig:point_set_nearest_sq_dist -->
+```python
+point_set_nearest_sq_dist(queries: Float[Array, 'n d'], refs: Float[Array, 'm d'], *, chunk_size: Optional[int] = None) -> Float[Array, ' n']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:point_set_nearest_sq_dist -->
+Per-query nearest squared distance to a reference point set.
+
+For each row of `queries`, the minimum squared Euclidean distance to
+any row of `refs` -- the (one-directional) **chamfer core**.  The
+chamfer *distance* is the symmetric, reduced quantity
+$\operatorname{mean}(\text{nearest}(A \to B)) +
+\operatorname{mean}(\text{nearest}(B \to A))$; that reduction is left to
+the consumer, so this returns the **unreduced** per-query distances.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:point_set_nearest_sq_dist -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `queries` | `Float` | `n` × `d` | — | `(n, d)` query points. |
+| `refs` | `Float` | `m` × `d` | — | `(m, d)` reference points. |
+| `chunk_size` | `Optional[int]` | — | `None` | Optional query-block size bounding the `(chunk_size, m)` pairwise intermediate. `None` (default) forms the full `(n, m)` block in one shot (fine for moderate sizes); a positive value evaluates the queries in `lax.map`-ed blocks (queries are padded to a multiple of `chunk_size` and sliced back), trading the dense intermediate for a bounded one. |
+
+**Returns** `Float` — shape `n`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:point_set_nearest_sq_dist -->
+::: {.callout-note}
+Squared distance (no `sqrt`), the chamfer convention.  The broad phase
+is dense ($O(n m)$); an exact spatial index is the separate, gated
+`mesh-spatial-acceleration` request.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:point_set_nearest_sq_dist -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d` | spatial dimension (2 or 3) |
+| `m` | rows of a multi-row contrast |
+<!-- nitrix:/gen -->

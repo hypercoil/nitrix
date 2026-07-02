@@ -2,7 +2,8 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Public ``semiring_conv`` -- the third member of the SPEC §4.1 trinity.
+Public :func:`semiring_conv` -- the convolution member of the semiring
+reduction family alongside :func:`~nitrix.semiring.semiring_matmul`.
 
 For each output spatial position, the kernel is multiplied with the
 input receptive field via the algebra's ``binary_op`` and then
@@ -27,13 +28,14 @@ We reduce the conv to a matmul over patches:
 2. Reshape patches to ``(batch * prod(spatial_out), c_in * prod(kspatial))``.
 3. Reshape ``k`` to ``(c_in * prod(kspatial), c_out)`` with the same
    axis ordering.
-4. Call ``semiring_matmul`` -- the existing custom_vjp on matmul
-   gives us the backward "for free" via the JAX autograd pipeline.
+4. Call :func:`~nitrix.semiring.semiring_matmul` -- the existing
+   ``custom_vjp`` on matmul gives us the backward "for free" via the
+   JAX autograd pipeline.
 
 The patches tensor is materialised (this is the price for re-using
-``semiring_matmul``).  For typical conv shapes (~spatial × c_in ×
-kspatial ≲ 64 MB) this is fine; a streaming-Pallas conv kernel that
-avoids materialisation is a Phase 2.A.6 follow-up.
+:func:`~nitrix.semiring.semiring_matmul`).  For typical conv shapes
+(~spatial × c_in × kspatial ≲ 64 MB) this is fine; a streaming-Pallas
+conv kernel that avoids materialisation is a future-work item.
 
 Backward
 --------
@@ -42,11 +44,12 @@ Composed via JAX autograd from:
 
 - ``lax.conv_general_dilated_patches`` (XLA-registered VJP)
 - The ``reshape`` / ``moveaxis`` glue (trivial VJPs)
-- ``semiring_matmul`` (our per-algebra custom_vjp)
+- :func:`~nitrix.semiring.semiring_matmul` (our per-algebra
+  ``custom_vjp``)
 
-We do *not* need a separate ``conv_vjp`` field on ``Semiring``: the
-chain rule through the matmul VJP already handles all five
-differentiable algebras correctly.
+We do *not* need a separate ``conv_vjp`` field on
+:class:`~nitrix.semiring.Semiring`: the chain rule through the matmul
+VJP already handles all five differentiable algebras correctly.
 
 Layout
 ------
@@ -61,8 +64,8 @@ Backend selection
 -----------------
 
 Three-level resolution as everywhere else.  The Pallas-CUDA path is
-a stub that raises ``PallasConvNotTileable``; the dispatcher catches
-this and falls back to JAX with one ``NitrixBackendFallback``
+a stub that rejects the request; the dispatcher catches this and falls
+back to JAX with one :class:`~nitrix._internal.backend.NitrixBackendFallback`
 warning per ``(shape, dtype, algebra)`` signature.  A native Pallas
 conv kernel is a future-work item.
 """
@@ -117,7 +120,27 @@ def _normalise_n_tuple(
 def _normalise_padding(
     padding: Union[str, Sequence[tuple[int, int]]], spatial_rank: int
 ) -> Union[str, tuple[tuple[int, int], ...]]:
-    """Accept ``'SAME'``, ``'VALID'``, or an explicit per-dim sequence."""
+    """Validate and canonicalise the ``padding`` argument.
+
+    Accepts the string modes ``'SAME'`` or ``'VALID'`` (case-insensitive,
+    returned upper-cased) or an explicit per-spatial-dim sequence of
+    ``(lo, hi)`` pairs (returned as a tuple of ``int`` pairs).
+
+    Parameters
+    ----------
+    padding : str or sequence of (int, int)
+        Either ``'SAME'`` / ``'VALID'`` or one ``(lo, hi)`` pair per
+        spatial dimension.
+    spatial_rank : int
+        Number of spatial dimensions; an explicit sequence must have
+        exactly this many pairs.
+
+    Returns
+    -------
+    str or tuple of (int, int)
+        The upper-cased mode string, or the validated tuple of
+        per-dimension ``(lo, hi)`` padding pairs.
+    """
     if isinstance(padding, str):
         if padding.upper() not in ('SAME', 'VALID'):
             raise ValueError(
@@ -150,7 +173,31 @@ def _resolve_pad(
 
     Mirrors the ``"SAME"`` / ``"VALID"`` semantics of
     ``lax.conv_general_dilated`` exactly (per-dim symmetric or
-    near-symmetric padding for SAME; zero for VALID).
+    near-symmetric padding for ``"SAME"``; zero for ``"VALID"``).  An
+    input that is already an explicit per-dimension tuple is returned
+    unchanged.
+
+    Parameters
+    ----------
+    pad : str or tuple of (int, int)
+        ``'SAME'``, ``'VALID'``, or an explicit tuple of ``(lo, hi)``
+        pairs (one per spatial dimension).
+    spatial_in : tuple of int
+        Input spatial extents.  Its length fixes the number of spatial
+        dimensions.
+    kspatial : tuple of int
+        Kernel spatial extents, one per spatial dimension.
+    strides : tuple of int
+        Window strides, one per spatial dimension.
+    dilations : tuple of int
+        Kernel dilations (right-hand-side dilation), one per spatial
+        dimension.
+
+    Returns
+    -------
+    tuple of (int, int)
+        The explicit ``(lo, hi)`` padding pair for each spatial
+        dimension, in order.
     """
     n = len(spatial_in)
     if pad == 'VALID':
@@ -181,7 +228,7 @@ def _extract_patches_nan_safe(
     padding_explicit: Sequence[tuple[int, int]],
     identity: Any,
 ) -> Num[Array, '...']:
-    """NaN-safe patch extraction.
+    r"""NaN-safe patch extraction.
 
     ``lax.conv_general_dilated_patches`` lowers via a multiply-with-
     one-hot trick that produces ``NaN`` when ``x`` contains ``-inf``
@@ -191,8 +238,8 @@ def _extract_patches_nan_safe(
     no-ops under the reduction).
 
     Strategy: pad ``x`` with ``identity`` on the spatial dims, then
-    build ``(out_d, k_d)`` index matrices and gather along each dim
-    via ``jnp.take``.  No multiplication, no NaN injection.
+    build :math:`(\text{out}_d, k_d)` index matrices and gather along
+    each dim via ``jnp.take``.  No multiplication, no NaN injection.
 
     Parameters
     ----------
@@ -270,11 +317,48 @@ def reference_semiring_conv(
     dilation: Union[int, Sequence[int]] = 1,
     backend: Backend = 'jax',
 ) -> Num[Array, '... *spatial_out c_out']:
-    """Pure-JAX reference for ``semiring_conv``.
+    """Pure-JAX reference for :func:`semiring_conv`.
 
-    NaN-safe patches extraction (pads with the algebra's identity,
-    gathers via ``jnp.take``) followed by ``semiring_matmul`` for
-    the per-output-position reduction.  See module docstring.
+    Performs NaN-safe patch extraction (padding with the algebra's
+    identity and gathering via ``jnp.take``) and then applies
+    :func:`~nitrix.semiring.semiring_matmul` over the reshaped patches
+    for the per-output-position reduction.  See the module docstring
+    for the full forward strategy.
+
+    Parameters
+    ----------
+    x : Num[Array, '... *spatial c_in']
+        Input array in channel-last layout: arbitrary leading batch
+        dimensions, followed by the spatial dimensions and a trailing
+        input-channel axis ``c_in``.
+    k : Num[Array, '*kspatial c_in c_out']
+        Convolution kernel: the spatial extents ``*kspatial``, then the
+        input-channel axis ``c_in`` (which must match ``x``) and the
+        output-channel axis ``c_out``.  The number of spatial
+        dimensions is inferred as ``k.ndim - 2``.
+    semiring : Semiring
+        Algebra whose ``binary_op`` combines the receptive field with
+        the kernel and whose ``monoid`` reduces the products; its
+        ``identity`` is used as the padding value.
+    stride : int or sequence of int, optional
+        Per-spatial-dim window stride, either a single ``int`` applied
+        to every dimension or one value per dimension.  Default ``1``.
+    padding : str or sequence of (int, int), optional
+        ``'SAME'``, ``'VALID'``, or an explicit per-spatial-dim
+        sequence of ``(lo, hi)`` pairs.  Default ``'SAME'``.
+    dilation : int or sequence of int, optional
+        Per-spatial-dim kernel dilation, either a single ``int`` or one
+        value per dimension.  Default ``1``.
+    backend : {'jax', 'pallas-cuda'}, optional
+        Execution engine forwarded to the inner
+        :func:`~nitrix.semiring.semiring_matmul`.  Default ``'jax'``.
+
+    Returns
+    -------
+    Num[Array, '... *spatial_out c_out']
+        Convolved output in channel-last layout: the original leading
+        batch dimensions, the strided/padded output spatial extents
+        ``*spatial_out``, and the output-channel axis ``c_out``.
     """
     spatial_rank = k.ndim - 2
     if spatial_rank < 1:
@@ -366,10 +450,31 @@ def _semiring_conv_pallas(
     """Pallas dispatch; returns ``None`` if the kernel rejects the request.
 
     Currently always rejects: there is no dedicated Pallas conv kernel
-    yet (would require a separate ``_kernels/cuda/semiring_conv.py``
-    that streams over kspatial × c_in instead of materialising patches).
-    The dispatcher catches the ``None`` and falls back to JAX with a
-    ``NitrixBackendFallback`` warning.
+    yet (a native path would require a separate kernel that streams over
+    kspatial × c_in instead of materialising patches).  The dispatcher
+    catches the ``None`` and falls back to JAX with a
+    :class:`~nitrix._internal.backend.NitrixBackendFallback` warning.
+
+    Parameters
+    ----------
+    x : Num[Array, '... *spatial c_in']
+        Input array in channel-last layout.
+    k : Num[Array, '*kspatial c_in c_out']
+        Convolution kernel in channel-last layout.
+    semiring : Semiring
+        Algebra to reduce under.
+    stride : int or sequence of int
+        Per-spatial-dim window stride.
+    padding : str or sequence of (int, int)
+        ``'SAME'``, ``'VALID'``, or explicit per-dim ``(lo, hi)`` pairs.
+    dilation : int or sequence of int
+        Per-spatial-dim kernel dilation.
+
+    Returns
+    -------
+    Array or None
+        The convolved output if a Pallas kernel handled the request;
+        ``None`` otherwise (always ``None`` at present).
     """
     return None
 
@@ -399,8 +504,9 @@ def semiring_conv(
         Kernel, ``(*kspatial, c_in, c_out)``.  The number of trailing
         spatial dims of ``x`` is inferred from ``k.ndim - 2``.
     semiring
-        Algebra to reduce under.  Defaults to ``REAL`` (i.e., standard
-        linear convolution).
+        Algebra to reduce under.  Defaults to
+        :data:`~nitrix.semiring.REAL` (i.e., standard linear
+        convolution).
     stride
         Per-spatial-dim stride.  Either an ``int`` (applied to every
         spatial dim) or a per-dim sequence.
@@ -421,18 +527,19 @@ def semiring_conv(
 
     Notes
     -----
-    The forward path reuses ``semiring_matmul`` over reshaped
-    patches, so:
+    The forward path reuses :func:`~nitrix.semiring.semiring_matmul`
+    over reshaped patches, so:
 
     - ``backend`` is honoured for the inner reduction: ``pallas-cuda``
       uses the native Pallas matmul kernel for the per-output-position
       reduction.
-    - The backward composes through ``semiring_matmul``'s registered
-      VJP automatically; no per-algebra ``conv_vjp`` is required.
+    - The backward composes through
+      :func:`~nitrix.semiring.semiring_matmul`'s registered VJP
+      automatically; no per-algebra ``conv_vjp`` is required.
 
-    For ``REAL``, this produces the same answer as
+    For :data:`~nitrix.semiring.REAL`, this produces the same answer as
     ``lax.conv_general_dilated`` modulo TF32 vs strict-fp32 precision
-    (see ``semiring_matmul``'s docstring).
+    (see :func:`~nitrix.semiring.semiring_matmul`'s docstring).
     """
     # Try the Pallas-specific kernel first (currently a stub).
     out = _semiring_conv_pallas(

@@ -1,0 +1,53 @@
+---
+title: "linear_interpolate"
+generated: true
+description: "Fill masked-out frames via linear interpolation."
+---
+
+[‹ back to `nitrix.signal.interpolate`](../nitrix-signal-interpolate.qmd)
+
+<!-- nitrix:gen sig:linear_interpolate -->
+```python
+linear_interpolate(data: Num[Array, '... obs'], mask: Bool[Array, '... obs']) -> Num[Array, '... obs']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:linear_interpolate -->
+Fill masked-out frames via linear interpolation.
+
+For each observation channel, missing frames (`mask == False`)
+are replaced by a piecewise-linear interpolation between the
+nearest observed frames on either side.  Leading / trailing
+missing frames are filled with the nearest observed value
+(edge replication).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:linear_interpolate -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `data` | `Num` | `...` × `obs` | — | Time series, observation axis is the last axis. Leading axes are vmapped over independently. |
+| `mask` | `Bool` | `...` × `obs` | — | Boolean mask with the same shape; `True` means observed, `False` means missing. |
+
+**Returns** `Num` — shape `...` × `obs`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:linear_interpolate -->
+::: {.callout-note}
+Differentiable through `data`; not through `mask` (a
+boolean dispatcher).  Implementation uses two parallel
+associative scans (`O(log n)` depth on GPU) rather than the
+sequential `lax.scan` of the legacy code.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:linear_interpolate -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

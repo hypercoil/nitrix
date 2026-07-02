@@ -1,49 +1,82 @@
 ---
 title: "nitrix.stats.inference.randomise"
 generated: true
-signature-hash: 0b7733b10d7ca435
+signature-hash: 899c56b61523b583
+description: "Permutation inference for the general linear model."
+listing:
+  id: nitrix-stats-inference-randomise-symbols
+  contents: "nitrix-stats-inference-randomise/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
-Auto-generated scaffold for `nitrix.stats.inference.randomise` (signatures only). Replace the
-skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
-`check_reference_staleness.py` flags this page if the underlying
-signatures drift from this stub.
+Auto-generated scaffold for `nitrix.stats.inference.randomise`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
 
-## `PermResult` {#PermResult}
+<!-- nitrix:gen overview:__module__ -->
+Permutation inference for the general linear model.
 
-*decorated:* `@register_result(children=('stat', 'enhanced', 'p_fwe', 'p_uncorrected', 'null_max'))`, `@dataclass(frozen=True)`
+[`permutation_test`](nitrix-stats-inference-randomise/permutation_test.qmd) is a non-parametric, family-wise-error-controlling
+test of a general linear model (GLM) contrast over a statistic image, built
+from the parts in this subpackage.  It is an on-device analogue of the FSL
+`randomise` tool.
+<!-- nitrix:/gen -->
 
-```python
-class PermResult
-```
+<!-- nitrix:gen sections:__module__ -->
+### The procedure
 
-Permutation-test output (all maps in the input spatial shape).
+For data $Y$ (one response per observation per voxel), design $X$,
+and a contrast -- a `(p,)` t-contrast $c$ or a `(m, p)` F-contrast
+$C$:
 
-*TODO: class overview.*
+1. Fit ordinary least squares and form the observed statistic image (t / F, or
+   a variance-smoothed pseudo-t), then **enhance** it (TFCE / cluster / raw
+   voxel).
+2. For each of `n_perm` relabellings (sign flips or permutations, honouring
+   exchangeability blocks), refit and re-enhance.  Nuisance regressors are
+   handled by **Freedman-Lane**: permute the residuals of the reduced
+   (nuisance-only) model and add the nuisance fit back, so only the tested
+   effect is exchanged.
+3. Accumulate, without storing every permutation: the **uncorrected** p-map
+   (fraction of permutations whose voxel statistic $\geq$ the observed)
+   and the **FWE** p-map (fraction whose *spatial maximum* enhanced statistic
+   $\geq$ the observed enhanced value).  The first permutation is the
+   identity, so the observed is included and $p \geq 1 / n_{perm}$.
+   Optionally (`pvalue_method='gpd'`) the FWE p-value is read instead from a
+   generalised-Pareto fit to the null-max tail, resolving below the
+   $1 / n_{perm}$ floor at fewer permutations (see [`gpd_pvalue`](nitrix-stats-inference-randomise/gpd_pvalue.qmd)).
 
-## `gpd_pvalue` {#gpd_pvalue}
+The only linear solve is a shared `(p, p)` inverse, so no dense factorisation
+library is required.  The enhancement is a non-differentiable inference kernel
+(it forms discrete clusters); the returned maps are plain arrays.
 
-```python
-gpd_pvalue(stat: Float[Array, '...'], null_dist: Float[Array, 'n'], *, n_exceedances: int=250) -> Float[Array, '...']
-```
+### References
 
-Tail-accelerated exceedance p-value via a generalized Pareto fit.
+.. [1] Winkler AM, Ridgway GR, Douaud G, Nichols TE, Smith SM (2016). Faster
+   permutation inference in brain imaging. *NeuroImage*, 141, 502-516.
+   `10.1016/j.neuroimage.2016.05.068`
+<!-- nitrix:/gen -->
 
-**Parameters** — *TODO: document each parameter.*
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
 
-**Returns** — *TODO.*
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `n_perm` | *(undocumented — add to `_dimensions.yml`)* |
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `N` | observations — time points, subjects, or sampled points |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `m` | rows of a multi-row contrast |
+<!-- nitrix:/gen -->
 
-## `permutation_test` {#permutation_test}
+## Symbols
 
-```python
-permutation_test(data: Float[Array, '*spatial N'], design: Float[Array, 'N p'], contrast: Float[Array, 'p'] | Float[Array, 'm p'], *, key: Array, n_perm: int=500, enhancement: Enhancement='tfce', exchange: Exchange='sign', nuisance: Optional[Float[Array, 'N q']]=None, blocks: Optional[Int[Array, 'N']]=None, mask: Optional[Bool[Array, '*spatial']]=None, two_sided: bool=True, var_smooth: Optional[float]=None, connectivity: int=1, cluster_thresh: Optional[float]=None, tfce_E: float=0.5, tfce_H: float=2.0, tfce_steps: int=100, pvalue_method: PValueMethod='empirical', gpd_n_exceedances: int=250) -> PermResult
-```
-
-Permutation test of a GLM t- or F-contrast with FWE control.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
+::: {#nitrix-stats-inference-randomise-symbols}
+:::

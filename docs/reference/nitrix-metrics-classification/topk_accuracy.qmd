@@ -1,0 +1,40 @@
+---
+title: "topk_accuracy"
+generated: true
+description: "Top-`k` accuracy: fraction of rows whose top-`k` logits hit the label."
+---
+
+[‹ back to `nitrix.metrics.classification`](../nitrix-metrics-classification.qmd)
+
+<!-- nitrix:gen sig:topk_accuracy -->
+```python
+topk_accuracy(logits: Float[Array, 'N C'], target: Int[Array, 'N'], *, k: int = 1, reduction: Reduction = 'mean') -> Float[Array, ''] | Float[Array, 'N']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:topk_accuracy -->
+Top-`k` accuracy: fraction of rows whose top-`k` logits hit the label.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:topk_accuracy -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `logits` | `Float` | `N` × `C` | — | Class scores `(N, C)` (the top-`k` are taken along the class axis). |
+| `target` | `Int` | `N` | — | True class indices `(N,)` in `[0, C)`. |
+| `k` | `int` | — | `1` | Number of top predictions to consider (static). Default `1`. |
+| `reduction` | `Reduction` | — | `'mean'` | `"mean"` (default; the accuracy), `"sum"` (the hit count), or `"none"` (the per-row `0/1` hit). |
+
+**Returns** `Float` — shape `N`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:topk_accuracy -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `N` | observations — time points, subjects, or sampled points |
+| `C` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

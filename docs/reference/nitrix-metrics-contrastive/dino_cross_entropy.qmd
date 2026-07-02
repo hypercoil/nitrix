@@ -1,0 +1,50 @@
+---
+title: "dino_cross_entropy"
+generated: true
+description: "Self-distillation cross-entropy (DINO)."
+---
+
+[‹ back to `nitrix.metrics.contrastive`](../nitrix-metrics-contrastive.qmd)
+
+<!-- nitrix:gen sig:dino_cross_entropy -->
+```python
+dino_cross_entropy(student_logits: Float[Array, '... k'], teacher_logits: Float[Array, '... k'], center: Float[Array, 'k'], *, student_temp: float = 0.1, teacher_temp: float = 0.04, reduction: Reduction = 'mean') -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:dino_cross_entropy -->
+Self-distillation cross-entropy (DINO).
+
+The teacher distribution is centred and sharpened
+($\operatorname{softmax}((\text{teacher} - \text{center}) /
+\tau_t)$) and detached; the loss is its cross-entropy against the
+student's $\operatorname{log\_softmax}(\text{student} / \tau_s)$,
+summed over the `k` prototypes and reduced over the batch.  Centring
+(subtracting a running mean) plus a low teacher temperature is what
+prevents collapse.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:dino_cross_entropy -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `student_logits` | `Float` | `...` × `k` | — | Prototype scores `(..., k)`. |
+| `teacher_logits` | `Float` | `...` × `k` | — | Prototype scores `(..., k)`. |
+| `center` | `Float` | `k` | — | Teacher centring vector `(k,)` (maintained upstream). |
+| `student_temp` | `float` | — | `0.1` | Softmax temperatures (teacher sharper, i.e. smaller). |
+| `teacher_temp` | `float` | — | `0.04` | Softmax temperatures (teacher sharper, i.e. smaller). |
+| `reduction` | `Reduction` | — | `'mean'` | `"mean"` (default), `"sum"`, or `"none"` (per-sample CE). |
+
+**Returns** `Float` — shape `...`. The self-distillation cross-entropy. With `reduction="none"` this is the per-sample cross-entropy retaining the leading batch axes; with `"mean"` or `"sum"` it is a scalar reducing over the batch.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:dino_cross_entropy -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `k` | kernel or basis components |
+<!-- nitrix:/gen -->

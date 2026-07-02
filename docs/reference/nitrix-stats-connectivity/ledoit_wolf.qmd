@@ -1,0 +1,53 @@
+---
+title: "ledoit_wolf"
+generated: true
+description: "Ledoit-Wolf analytic-shrinkage covariance estimator."
+---
+
+[‹ back to `nitrix.stats.connectivity`](../nitrix-stats-connectivity.qmd)
+
+<!-- nitrix:gen sig:ledoit_wolf -->
+```python
+ledoit_wolf(X: Float[Array, 'n p'], *, assume_centered: bool = False) -> Tuple[Float[Array, 'p p'], Float[Array, '']]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:ledoit_wolf -->
+Ledoit-Wolf analytic-shrinkage covariance estimator.
+
+Forms the convex blend $(1 - \alpha) S + \alpha \mu I$ of the
+sample covariance $S$ toward the scaled identity
+$\mu I$ (with $\mu = \operatorname{tr}(S) / p$), using the
+closed-form Ledoit-Wolf shrinkage intensity
+
+$$
+\alpha = \beta^2 / \delta^2,
+\qquad \delta^2 = \lVert S - \mu I \rVert_F^2,
+\qquad \beta^2 = \frac{1}{n^2} \sum_k \lVert x_k \rVert^4
+- \frac{1}{n} \lVert S \rVert_F^2,
+$$
+
+with $\beta^2$ clipped to $[0, \delta^2]$.  This matches
+`sklearn.covariance.ledoit_wolf`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:ledoit_wolf -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X` | `Float` | `n` × `p` | — | Data matrix of `n` observations by `p` features. |
+| `assume_centered` | `bool` | — | `False` | If `True`, treat `X` as already mean-centred; otherwise centre each feature before estimating the covariance. Default `False`. |
+
+**Returns** `Tuple[Float[Array, 'p p'], Float[Array, '']]`. The shrunk covariance matrix $\hat{\Sigma}$. The scalar shrinkage intensity $\alpha \in [0, 1]$.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:ledoit_wolf -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

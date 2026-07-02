@@ -1,0 +1,78 @@
+---
+title: "displacement_from_reference_points"
+generated: true
+description: "Displacement of a centre of mass (point cloud) from a reference."
+---
+
+[‹ back to `nitrix.geometry.coords`](../nitrix-geometry-coords.qmd)
+
+<!-- nitrix:gen sig:displacement_from_reference_points -->
+```python
+displacement_from_reference_points(weight: Float[Array, '... n_regions n_points'], reference: Float[Array, '... n_regions ndim'], coords: Float[Array, '... n_points ndim'], *, radius: Optional[float] = None) -> Float[Array, '... n_regions ndim']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:displacement_from_reference_points -->
+Displacement of a centre of mass (point cloud) from a reference.
+
+Computes the per-region centre of mass over the point cloud (see
+[`center_of_mass_points`](../nitrix-geometry-coords/center_of_mass_points.qmd)) and subtracts a per-region reference
+coordinate. This is the point-cloud analogue of
+[`displacement_from_reference_grid`](../nitrix-geometry-coords/displacement_from_reference_grid.qmd).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:displacement_from_reference_points -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `weight` | `Float` | `...` × `n_regions` × `n_points` | — | Non-negative weights, `(..., n_regions, n_points)` -- one row per region, one column per point. |
+| `reference` | `Float` | `...` × `n_regions` × `ndim` | — | Per-region reference coordinates, `(..., n_regions, ndim)`. |
+| `coords` | `Float` | `...` × `n_points` × `ndim` | — | Per-point coordinates, `(..., n_points, ndim)`. |
+| `radius` | `Optional[float]` | — | `None` | Optional sphere radius. If given, the centre of mass is projected onto a sphere of that radius before the displacement is taken. |
+
+**Returns** `Float` — shape `...` × `n_regions` × `ndim`. The per-region displacement `cm - reference`, where `cm` is the weighted centre of mass of the point cloud.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:displacement_from_reference_points -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **117.1 µs** (median, L4); up to **3.8× faster** than `numpy.weighted_mean`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_DISPLACEMENT_FROM_REFERENCE_POINTS.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| displacement_from_reference_points | jax-cpu | p=1024 | `cupy.displacement_from_reference_points` | skipped | — | — | — | — | — |
+| displacement_from_reference_points | jax-cpu | p=1024 | `nitrix-jax` | ok | 60.4 µs / 61.9 µs | 65.55 ms | 718 MB (rss) | ✓ 0.00028×tol | 1.00x vs nitrix-jax |
+| displacement_from_reference_points | jax-cpu | p=1024 | `numpy.weighted_mean` | ok | 40.2 µs / 40.5 µs | 100.3 µs | 718 MB (rss) | ✓ 0.00021×tol | 0.67x vs nitrix-jax |
+| displacement_from_reference_points | jax-cuda12 | p=1024 | `cupy.displacement_from_reference_points` | ok | 150.0 µs / 155.5 µs | 141.67 ms | 0.27 MB (hbm) | ✓ 0.00013×tol | 1.32x vs nitrix-jax |
+| displacement_from_reference_points | jax-cuda12 | p=1024 | `nitrix-jax` | ok | 113.9 µs / 117.1 µs | 386.49 ms | 71.58 MB (hbm) | ✓ 0.00014×tol | 1.00x vs nitrix-jax |
+| displacement_from_reference_points | jax-cuda12 | p=1024 | `numpy.weighted_mean` | ok | 41.0 µs / 41.7 µs | 92.3 µs | 0.27 MB (hbm) | ✓ 0.00021×tol | 0.36x vs nitrix-jax |
+| displacement_from_reference_points | jax-cpu | p=16384 | `cupy.displacement_from_reference_points` | skipped | — | — | — | — | — |
+| displacement_from_reference_points | jax-cpu | p=16384 | `nitrix-jax` | ok | 382.2 µs / 388.7 µs | 139.87 ms | 718 MB (rss) | ✓ 0.00035×tol | 1.00x vs nitrix-jax |
+| displacement_from_reference_points | jax-cpu | p=16384 | `numpy.weighted_mean` | ok | 487.0 µs / 489.6 µs | 912.8 µs | 718 MB (rss) | ✓ 8.4e-05×tol | 1.27x vs nitrix-jax |
+| displacement_from_reference_points | jax-cuda12 | p=16384 | `cupy.displacement_from_reference_points` | ok | 149.1 µs / 152.6 µs | 138.30 ms | 4.39 MB (hbm) | ✓ 6.1e-05×tol | 1.16x vs nitrix-jax |
+| displacement_from_reference_points | jax-cuda12 | p=16384 | `nitrix-jax` | ok | 129.1 µs / 137.2 µs | 513.57 ms | 75.74 MB (hbm) | ✓ 5.3e-05×tol | 1.00x vs nitrix-jax |
+| displacement_from_reference_points | jax-cuda12 | p=16384 | `numpy.weighted_mean` | ok | 490.0 µs / 496.0 µs | 580.4 µs | 4.39 MB (hbm) | ✓ 8.4e-05×tol | 3.80x vs nitrix-jax |
+| displacement_from_reference_points | jax-cpu | p=4096 | `cupy.displacement_from_reference_points` | skipped | — | — | — | — | — |
+| displacement_from_reference_points | jax-cpu | p=4096 | `nitrix-jax` | ok | 125.9 µs / 127.9 µs | 100.18 ms | 718 MB (rss) | ✓ 0.00039×tol | 1.00x vs nitrix-jax |
+| displacement_from_reference_points | jax-cpu | p=4096 | `numpy.weighted_mean` | ok | 144.7 µs / 169.1 µs | 221.0 µs | 718 MB (rss) | ✓ 0.00015×tol | 1.15x vs nitrix-jax |
+| displacement_from_reference_points | jax-cuda12 | p=4096 | `cupy.displacement_from_reference_points` | ok | 148.7 µs / 154.2 µs | 139.91 ms | 1.10 MB (hbm) | ✓ 8.6e-05×tol | 1.33x vs nitrix-jax |
+| displacement_from_reference_points | jax-cuda12 | p=4096 | `nitrix-jax` | ok | 111.9 µs / 117.1 µs | 528.45 ms | 84.99 MB (hbm) | ✓ 9.3e-05×tol | 1.00x vs nitrix-jax |
+| displacement_from_reference_points | jax-cuda12 | p=4096 | `numpy.weighted_mean` | ok | 174.3 µs / 175.3 µs | 249.9 µs | 1.10 MB (hbm) | ✓ 0.00015×tol | 1.56x vs nitrix-jax |
+:::
+
+*source: bench `2a974f27` · nitrix `5d1717e0`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:displacement_from_reference_points -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n_regions` | *(undocumented — add to `_dimensions.yml`)* |
+| `n_points` | *(undocumented — add to `_dimensions.yml`)* |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->

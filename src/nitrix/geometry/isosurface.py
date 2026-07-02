@@ -4,10 +4,10 @@
 """
 Volume <-> surface conversion.
 
-``marching_cubes`` extracts the level-set of a scalar volume as a ``Mesh``;
-``mesh_to_sdf`` is the inverse -- it rasterises a triangle mesh to a
-signed-distance volume.  Both are host-side NumPy builders (data-dependent
-work) co-located here as the field<->mesh pair.
+:func:`marching_cubes` extracts the level-set of a scalar volume as a
+:class:`Mesh`; :func:`mesh_to_sdf` is the inverse -- it rasterises a triangle
+mesh to a signed-distance volume.  Both are host-side NumPy builders
+(data-dependent work) co-located here as the field<->mesh pair.
 
 **Engine: marching tetrahedra.**  Each grid cube is split into six tetrahedra
 by the Freudenthal-Kuhn decomposition (all sharing the cube's main diagonal),
@@ -20,8 +20,9 @@ table, achieves the same guarantee at much higher implementation risk).
 Vertices on shared grid edges are deduplicated, so the mesh is closed.
 
 The output triangle count is data-dependent, so -- like the icosphere
-construction -- this is a **host-side NumPy** builder that emits a ``Mesh`` of
-JAX arrays; it is not a fixed-shape JAX kernel and is not differentiable.
+construction -- this is a **host-side NumPy** builder that emits a
+:class:`Mesh` of JAX arrays; it is not a fixed-shape JAX kernel and is not
+differentiable.
 
 Faces are oriented so per-vertex normals point toward *increasing* scalar value
 (outward for a signed-distance field, which is negative inside).
@@ -68,10 +69,27 @@ def _edge_index(a: int, b: int) -> int:
 
 
 def _build_tet_table() -> List[List[Tuple[int, int, int]]]:
-    """``table[code]`` = triangles (triples of tet-edge indices) for an
-    inside-bitmask ``code`` over the 4 tet corners (bit ``i`` = corner ``i``
-    inside).  Winding is fixed at runtime, so the triangulation only needs to
-    list the correct crossed edges without bowties."""
+    """Build the marching-tetrahedra triangulation lookup table.
+
+    For each of the 16 possible inside/outside configurations of a
+    tetrahedron's four corners, this returns the triangles that tessellate the
+    isosurface within that tetrahedron.  The configuration is encoded as an
+    inside-bitmask ``code`` over the four corners (bit ``i`` set means corner
+    ``i`` is inside).  Each triangle is a triple of tetrahedron-edge indices
+    (into :data:`_TET_EDGES`) naming the edges the surface crosses.  Winding
+    is fixed at runtime, so the table only needs to list the correct crossed
+    edges without bowties.
+
+    Returns
+    -------
+    list of list of tuple of int
+        A 16-element list indexed by ``code``.  Each entry is the list of
+        triangles for that configuration; an empty list for the fully-inside
+        (``code == 15``) and fully-outside (``code == 0``) cases, one triangle
+        when exactly one corner is on the minority side, and two triangles
+        (a split quad) when the corners are evenly divided.  Every triangle is
+        a ``(int, int, int)`` triple of edge indices.
+    """
     table: List[List[Tuple[int, int, int]]] = []
     for code in range(16):
         inside = [(code >> i) & 1 for i in range(4)]
@@ -122,9 +140,10 @@ def marching_cubes(
 
     Returns
     -------
-    ``Mesh`` -- watertight, manifold, with outward-oriented faces (normals
-    toward increasing value).  Empty (0 vertices, 0 faces) if the level set
-    does not intersect the volume.
+    Mesh
+        A watertight, manifold :class:`Mesh` with outward-oriented faces
+        (normals pointing toward increasing scalar value).  Empty (0 vertices,
+        0 faces) if the level set does not intersect the volume.
 
     Notes
     -----
@@ -295,9 +314,25 @@ def marching_cubes(
 def _solid_angle(
     p: NDArray[Any], a: NDArray[Any], b: NDArray[Any], c: NDArray[Any]
 ) -> NDArray[Any]:
-    """Signed solid angle (m,F) subtended by triangles (a,b,c) at points ``p``
-    (Van Oosterom-Strackee); summed over faces and /4pi it is the generalised
-    winding number."""
+    """Signed solid angle subtended by triangles at a set of query points.
+
+    Evaluates the Van Oosterom-Strackee formula for the signed solid angle
+    that each triangle ``(a, b, c)`` subtends at each point ``p``.  Summed over
+    all faces of a mesh and divided by :math:`4\\pi`, this yields the
+    generalised winding number, which is used to determine inside/outside sign.
+
+    Parameters
+    ----------
+    p : NDArray
+        Query points, shape ``(m, 1, 3)`` (broadcast against the faces).
+    a, b, c : NDArray
+        The three vertices of each triangle, shape ``(1, F, 3)``.
+
+    Returns
+    -------
+    NDArray
+        Signed solid angles, shape ``(m, F)``, one per (point, triangle) pair.
+    """
     pa, pb, pc = a - p, b - p, c - p
     la = np.linalg.norm(pa, axis=-1)
     lb = np.linalg.norm(pb, axis=-1)
@@ -320,14 +355,14 @@ def mesh_to_sdf(
 ) -> Float[Array, 'x y z']:
     """Rasterise a triangle mesh to a signed-distance volume (negative inside).
 
-    The inverse of ``marching_cubes``: the training-target generator behind
+    The inverse of :func:`marching_cubes`: the training-target generator behind
     learned level-set surface models and a field<->mesh round-trip validator.
 
     Unsigned distance is the exact point-to-triangle distance (Ericson's
     closest-point, the seven Voronoi regions), minimised over faces.  The sign
-    is from the **generalised winding number** (the summed solid angle / 4pi):
-    robust on a watertight mesh regardless of global face orientation
-    (``|winding| ~ 1`` inside, ``~ 0`` outside).
+    is from the **generalised winding number** (the summed solid angle divided
+    by :math:`4\\pi`): robust on a watertight mesh regardless of global face
+    orientation (:math:`|w| \\approx 1` inside, :math:`\\approx 0` outside).
 
     Cost is ``O(n_voxels * n_faces)`` (host-side NumPy, chunked over voxels to
     bound memory) -- practical for moderate volumes / meshes; a spatial-hash

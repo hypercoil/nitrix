@@ -1,0 +1,67 @@
+---
+title: "nitrix.graph"
+generated: true
+signature-hash: 5ccff9f76bc705d0
+description: "Graph-theoretic primitives."
+listing:
+  id: nitrix-graph-symbols
+  contents: "nitrix-graph/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.graph`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Graph-theoretic primitives.
+
+Differentiable operators over graphs and meshes, spanning graph Laplacians,
+modularity and community structure, spectral embeddings, and functional
+parcellation. Operators are multi-format (dense, ELL, and SectionedELL sparse
+storage) wherever the underlying mathematics admits it.
+
+The subsystem is organised into four groups of operators.
+
+Laplacian
+    `laplacian`, [`laplacian_matvec`](nitrix-graph-laplacian/laplacian_matvec.qmd), and the degree vectors
+    [`degree_vector`](nitrix-graph-laplacian/degree_vector.qmd), [`in_degree_vector`](nitrix-graph-laplacian/in_degree_vector.qmd), and
+    [`symmetric_degree_vector`](nitrix-graph-laplacian/symmetric_degree_vector.qmd).
+
+Community structure
+    Modularity-related operators: [`girvan_newman_null`](nitrix-graph-community/girvan_newman_null.qmd),
+    [`modularity_matrix`](nitrix-graph-community/modularity_matrix.qmd) (dense), [`modularity_matrix_matvec`](nitrix-graph/modularity_matrix_matvec.qmd)
+    (sparse-friendly), [`coaffiliation`](nitrix-graph-community/coaffiliation.qmd), and [`relaxed_modularity`](nitrix-graph-community/relaxed_modularity.qmd)
+    (dense plus a sparse-aware factored path).
+
+Connectopy
+    Spectral embeddings: [`laplacian_eigenmap`](nitrix-graph-connectopy/laplacian_eigenmap.qmd) and
+    [`diffusion_embedding`](nitrix-graph-connectopy/diffusion_embedding.qmd), each with both a dense (`eigh`) and a
+    sparse (`lobpcg`) solver path.
+
+Parcellation
+    Functional-parcellation steps: [`surface_boundary_map`](nitrix-graph-parcellation/surface_boundary_map.qmd)
+    (connectivity-profile boundary detection) and [`eta_squared`](nitrix-graph-parcellation/eta_squared.qmd)
+    similarity, together with [`mesh_watershed`](nitrix-graph-parcellation/mesh_watershed.qmd) (host-side
+    priority-flood basins on a vertex field).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `k` | kernel or basis components |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-graph-symbols}
+:::

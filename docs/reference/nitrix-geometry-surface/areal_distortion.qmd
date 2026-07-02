@@ -1,0 +1,45 @@
+---
+title: "areal_distortion"
+generated: true
+description: "Per-vertex areal distortion `log2(A_warped / A_source)`."
+---
+
+[‹ back to `nitrix.geometry.surface`](../nitrix-geometry-surface.qmd)
+
+<!-- nitrix:gen sig:areal_distortion -->
+```python
+areal_distortion(source: Mesh, warped: Mesh, *, area_scheme: Literal['voronoi', 'barycentric'] = 'voronoi') -> Float[Array, 'n_vertices']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:areal_distortion -->
+Per-vertex areal distortion `log2(A_warped / A_source)`.
+
+The surface analogue of [`jacobian_det_displacement`](../nitrix-geometry-grid/jacobian_det_displacement.qmd) and the MSM areal
+regulariser / `?h.jacobian` QA readout: positive where the warp expands
+area, negative where it contracts, zero for an isometry.  `source` and
+`warped` **must share topology** (identical `faces` and corresponding
+vertex indexing -- e.g. `warped` is `source` after a spherical /
+inflation warp).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:areal_distortion -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `source` | `Mesh` | — | — | Triangle meshes with the same topology, before / after the warp. |
+| `warped` | `Mesh` | — | — | Triangle meshes with the same topology, before / after the warp. |
+| `area_scheme` | `Literal['voronoi', 'barycentric']` | — | `'voronoi'` | Vertex-area scheme (`'voronoi'` default). |
+
+**Returns** `Float` — shape `n_vertices`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:areal_distortion -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_vertices` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

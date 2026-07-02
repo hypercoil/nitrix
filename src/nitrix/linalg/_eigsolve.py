@@ -1,36 +1,35 @@
 # -*- coding: utf-8 -*-
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
-"""
+r"""
 Dedicated extremal (top-k) eigendecomposition dispatcher.
 
-Consolidates the solver suite that previously lived inlined in
-``nitrix.graph.connectopy``.  The design rationale is in
-``docs/design/eigsolve-dispatcher.md``; the implicit-VJP math is in
-``docs/design/lobpcg-implicit-vjp.md``.
+Consolidates the solver suite that previously lived inlined in the graph
+connectopy module.
 
 The load-bearing factoring: the solver *forward* (which method) is
 orthogonal to the gradient *backward* (which operand format).  The
 backward is solver-independent -- it depends only on the converged
 eigenpair -- so it is shared across methods and specialised only by
-format (dense ``V K Vᵀ``; ELL gather-einsum onto the sparsity pattern;
-SectionedELL per-section gather).  The forward is format-independent --
-every iterative method is written against an abstract matvec
-``apply: X -> M @ X``.  This module therefore ships:
+format (dense :math:`V K V^{\top}`; ELL gather-einsum onto the sparsity
+pattern; SectionedELL per-section gather).  The forward is
+format-independent -- every iterative method is written against an
+abstract matvec ``apply: X -> M @ X``.  This module therefore ships:
 
-- one frozen, hashable ``SolverSpec`` carrying all static config (it
+- one frozen, hashable :class:`SolverSpec` carrying all static config (it
   rides the ``custom_vjp`` ``nondiff_argnums`` as a single argument);
 - three ``custom_vjp`` entry points, one per operand format, each
   branching its forward on ``spec.method`` and sharing the format's
   single backward;
-- ``eigsolve_top_k`` -- the user-facing dispatcher: validity check,
-  ``auto`` policy, cuSolver-robust device routing, and (for ``eigh``)
-  the dense full-spectrum solve sliced to the extremal top-k.
+- :func:`eigsolve_top_k` -- the user-facing dispatcher: validity check,
+  the ``'auto'`` policy, cuSolver-robust device routing, and (for the
+  ``'eigh'`` method) the dense full-spectrum solve sliced to the extremal
+  top-k.
 
-``eigh`` is folded in *only in its extremal role* (full ``safe_eigh``
-then slice top-k).  The full-spectrum uses of ``safe_eigh`` (``spd``,
-``reml``, ``lomb_scargle``) keep calling it directly; this module is
-built *on* ``safe_eigh``, it does not subsume it.
+The ``'eigh'`` method is folded in *only in its extremal role* (a full
+:func:`~nitrix.linalg._solver.safe_eigh` solve then slice to top-k).  The
+full-spectrum uses of ``safe_eigh`` keep calling it directly; this module
+is built *on* ``safe_eigh``, it does not subsume it.
 """
 
 from __future__ import annotations
@@ -232,15 +231,39 @@ def _subspace_vjp_kernel(
     g_eigvecs: Float[Array, 'n k'],
     eps_clamp: float,
 ) -> Float[Array, 'k k']:
-    """The ``K = diag(g_lambda) + S ⊙ F`` core of the implicit VJP.
+    """Build the :math:`k \\times k` core matrix of the implicit VJP.
 
-    ``F[i, j] = 1 / (lambda_j - lambda_i)`` (zero on the diagonal and
-    where ``|lambda_j - lambda_i| < eps_clamp``); ``S`` is the
-    antisymmetric part of the projected eigenvector cotangent.  Shared by
-    every method (the gradient depends only on the converged eigenpair)
-    and every format (the format-specific projection applies ``V K Vᵀ``
-    or its sparsity restriction on top).  See
-    ``docs/design/lobpcg-implicit-vjp.md``.
+    The core is :math:`K = \\operatorname{diag}(g_\\lambda) + S \\odot F`,
+    where :math:`F_{ij} = 1 / (\\lambda_j - \\lambda_i)` (zero on the
+    diagonal and wherever :math:`|\\lambda_j - \\lambda_i| <` ``eps_clamp``),
+    and :math:`S` is the antisymmetric part of the projected eigenvector
+    cotangent :math:`V^{\\top} \\bar{V}`.  This matrix is shared by every
+    method (the gradient depends only on the converged eigenpair) and every
+    operand format (the format-specific projection applies
+    :math:`V K V^{\\top}`, or its sparsity restriction, on top).
+
+    Parameters
+    ----------
+    eigvals : Float[Array, 'k']
+        Converged eigenvalues :math:`\\lambda`, largest-first.
+    eigvecs : Float[Array, 'n k']
+        Converged eigenvectors :math:`V`, column ``j`` matching
+        ``eigvals[j]``.
+    g_eigvals : Float[Array, 'k']
+        Cotangent :math:`g_\\lambda` of the eigenvalues.
+    g_eigvecs : Float[Array, 'n k']
+        Cotangent :math:`\\bar{V}` of the eigenvectors.
+    eps_clamp : float
+        Threshold below which an eigenvalue gap
+        :math:`|\\lambda_j - \\lambda_i|` is treated as degenerate; the
+        corresponding entry of :math:`F` is zeroed to avoid division by a
+        near-vanishing gap.
+
+    Returns
+    -------
+    Float[Array, 'k k']
+        The core matrix :math:`K` combining eigenvalue and eigenvector
+        cotangents.
     """
     k = eigvals.shape[0]
     diff = eigvals[None, :] - eigvals[:, None]
@@ -256,7 +279,23 @@ def _project_dense(
     K: Float[Array, 'k k'],
     eigvecs: Float[Array, 'n k'],
 ) -> Float[Array, 'n n']:
-    """``dM = V K Vᵀ`` -- symmetric by construction."""
+    """Reconstruct the dense operand cotangent :math:`\\bar{M} = V K V^{\\top}`.
+
+    Symmetric by construction.
+
+    Parameters
+    ----------
+    K : Float[Array, 'k k']
+        The :math:`k \\times k` core matrix from
+        :func:`_subspace_vjp_kernel`.
+    eigvecs : Float[Array, 'n k']
+        Converged eigenvectors :math:`V`.
+
+    Returns
+    -------
+    Float[Array, 'n n']
+        The dense cotangent :math:`V K V^{\\top}` w.r.t. the operator.
+    """
     return eigvecs @ K @ eigvecs.T
 
 
@@ -265,16 +304,38 @@ def _project_ell(
     eigvecs: Float[Array, 'n k'],
     indices: Int[Array, 'n k_max'],
 ) -> Float[Array, 'n k_max']:
-    """Project ``V K Vᵀ`` onto the ELL pattern:
+    """Project the operand cotangent :math:`V K V^{\\top}` onto the ELL pattern.
+
+    Only the stored entries of the sparse pattern receive gradient:
     ``g_values[i, p] = (V K)[i, :] @ V[indices[i, p], :]``.
 
-    This is **unchanged** under the ``promise_symmetry=False`` symmetric
-    forward, and exactly correct for it: the implicit-VJP cotangent
-    ``G = V K Vᵀ`` is symmetric, and a stored ``values[i, p]`` enters
-    ``sym(A)`` at both ``[i, c]`` and ``[c, i]`` (each ∂ = ½, ``c =
-    indices[i, p]``), so ``∂L/∂values[i, p] = ½G[i, c] + ½G[c, i] = G[i, c]``
-    -- precisely the entry this projection returns.  The symmetrisation
-    lives entirely in the *forward* matvec; the backward needs no change.
+    This projection is **unchanged** under the ``promise_symmetry=False``
+    symmetric forward, and exactly correct for it: the implicit-VJP
+    cotangent :math:`G = V K V^{\\top}` is symmetric, and a stored
+    ``values[i, p]`` enters :math:`\\operatorname{sym}(A)` at both
+    :math:`[i, c]` and :math:`[c, i]` (each contributing :math:`\\tfrac12`,
+    with :math:`c =` ``indices[i, p]``), so
+    :math:`\\partial L / \\partial \\text{values}[i, p]
+    = \\tfrac12 G[i, c] + \\tfrac12 G[c, i] = G[i, c]` -- precisely the entry
+    this projection returns.  The symmetrisation lives entirely in the
+    *forward* matvec; the backward needs no change.
+
+    Parameters
+    ----------
+    K : Float[Array, 'k k']
+        The :math:`k \\times k` core matrix from
+        :func:`_subspace_vjp_kernel`.
+    eigvecs : Float[Array, 'n k']
+        Converged eigenvectors :math:`V`.
+    indices : Int[Array, 'n k_max']
+        Column indices of the ELL sparsity pattern; row ``i`` stores up to
+        ``k_max`` nonzero columns.
+
+    Returns
+    -------
+    Float[Array, 'n k_max']
+        Cotangent for the stored ELL ``values``, one entry per stored
+        nonzero.
     """
     VK = eigvecs @ K
     V_at_idx = eigvecs[indices]
@@ -287,8 +348,29 @@ def _project_sectioned(
     indices_tuple: _IndicesTuple,
     row_groups_tuple: _RowGroupsTuple,
 ) -> _ValuesTuple:
-    """Per-section ELL projection, reading the mapped global row index
-    from ``row_groups[s]``."""
+    """Project the operand cotangent onto a SectionedELL operator.
+
+    Applies the ELL projection of :func:`_project_ell` per section,
+    reading each section's mapped global row indices from the corresponding
+    entry of ``row_groups_tuple``.
+
+    Parameters
+    ----------
+    K : Float[Array, 'k k']
+        The :math:`k \\times k` core matrix from
+        :func:`_subspace_vjp_kernel`.
+    eigvecs : Float[Array, 'n k']
+        Converged eigenvectors :math:`V`.
+    indices_tuple : tuple of Int[Array, 'n_s k_max_s']
+        Per-section ELL column indices.
+    row_groups_tuple : tuple of Int[Array, 'n_s']
+        Per-section maps from local section rows to global operator rows.
+
+    Returns
+    -------
+    tuple of Float[Array, 'n_s k_max_s']
+        Cotangent for each section's stored ``values``.
+    """
     VK = eigvecs @ K
     g_values = []
     for idx, row_idx in zip(indices_tuple, row_groups_tuple):
@@ -309,8 +391,26 @@ def _run_lobpcg_method(
     n_iters: int,
     tol: Optional[float],
 ) -> _EigPair:
-    """Plain LOBPCG.  ``operator`` is a dense array (passed through for the
-    blocked-matmul fast path) or a matvec callable (ELL / sectioned)."""
+    """Run plain LOBPCG to recover the top-k eigenpairs.
+
+    Parameters
+    ----------
+    operator : array_like or callable
+        Either a dense array (passed through directly for the
+        blocked-matmul fast path) or a matvec callable ``X -> M @ X``
+        (ELL / sectioned formats).
+    X0 : Float[Array, 'n k']
+        Initial guess subspace of ``k`` columns.
+    n_iters : int
+        Maximum number of LOBPCG iterations.
+    tol : float or None
+        Convergence tolerance; ``None`` uses the LOBPCG default.
+
+    Returns
+    -------
+    tuple of (Float[Array, 'k'], Float[Array, 'n k'])
+        Eigenvalues (largest-first) and matching eigenvectors.
+    """
     eigvals, eigvecs, _ = lobpcg_standard(operator, X0, m=n_iters, tol=tol)
     return cast(_EigPair, (eigvals, eigvecs))
 
@@ -322,10 +422,32 @@ def _run_shift_invert_method(
     outer_iters: int,
     cg_iters: int,
 ) -> _EigPair:
-    """Shift-invert on ``L = I - M`` via inner CG.  Matvec-only, so it
-    serves any operand format.  For ``sigma < 0`` the shifted Laplacian is
-    SPD and CG-solvable; LOBPCG on ``(L - sigma I)^{-1}`` recovers ``M``'s
-    largest eigenpairs in few outer iterations on clustered spectra."""
+    """Recover the top-k eigenpairs by shift-invert on :math:`L = I - M`.
+
+    The inner solves use conjugate gradients, so the method needs only a
+    matvec and serves any operand format.  For ``sigma < 0`` the shifted
+    Laplacian is SPD and CG-solvable; running LOBPCG on
+    :math:`(L - \\sigma I)^{-1}` recovers the largest eigenpairs of
+    :math:`M` in few outer iterations on clustered spectra.
+
+    Parameters
+    ----------
+    apply : callable
+        Matvec ``X -> M @ X`` of the (symmetric) operator.
+    X0 : Float[Array, 'n k']
+        Initial guess subspace of ``k`` columns.
+    sigma : float
+        Spectral shift; a negative value keeps the shifted Laplacian SPD.
+    outer_iters : int
+        Number of outer LOBPCG iterations on the shift-inverted operator.
+    cg_iters : int
+        Maximum conjugate-gradient iterations per inner solve.
+
+    Returns
+    -------
+    tuple of (Float[Array, 'k'], Float[Array, 'n k'])
+        Eigenvalues of :math:`M` (largest-first) and matching eigenvectors.
+    """
 
     def shifted(y: Array) -> Array:
         return (1.0 - sigma) * y - apply(y)
@@ -347,8 +469,32 @@ def _run_poly_method(
     shift: float,
     outer_iters: int,
 ) -> _EigPair:
-    """Shifted-power spectral filter ``(M + shift I)^degree``.  Matvec-only;
-    eigenvalues recovered by the Rayleigh quotient."""
+    """Recover the top-k eigenpairs via a shifted-power spectral filter.
+
+    LOBPCG is run against the polynomial filter
+    :math:`(M + \\text{shift} \\cdot I)^{\\text{degree}}`, which amplifies
+    the extremal end of the spectrum; the filter needs only a matvec, so
+    the method serves any operand format.  Eigenvalues are recovered from
+    the converged vectors by the Rayleigh quotient.
+
+    Parameters
+    ----------
+    apply : callable
+        Matvec ``X -> M @ X`` of the (symmetric) operator.
+    X0 : Float[Array, 'n k']
+        Initial guess subspace of ``k`` columns.
+    degree : int
+        Degree of the shifted-power filter.
+    shift : float
+        Additive spectral shift applied inside the filter.
+    outer_iters : int
+        Number of LOBPCG iterations on the filtered operator.
+
+    Returns
+    -------
+    tuple of (Float[Array, 'k'], Float[Array, 'n k'])
+        Eigenvalues of :math:`M` (largest-first) and matching eigenvectors.
+    """
 
     def filt(x: Array) -> Array:
         y = x
@@ -370,8 +516,29 @@ def _forward_for_spec(
     lobpcg_operator: Any,
     X0: Float[Array, 'n k'],
 ) -> _EigPair:
-    """Run the iterative method selected by ``spec.method`` (a static,
-    trace-time branch) against the operand's matvec."""
+    """Dispatch to the iterative method selected by ``spec.method``.
+
+    The branch on ``spec.method`` is static (resolved at trace time). Only
+    the iterative methods (``'lobpcg'``, ``'shift_invert'``, ``'poly'``)
+    are handled here; a non-iterative method raises ``ValueError``.
+
+    Parameters
+    ----------
+    spec : SolverSpec
+        Static solver configuration selecting the method and its knobs.
+    apply : callable
+        Matvec ``X -> M @ X``, used by the shift-invert and poly methods.
+    lobpcg_operator : array_like or callable
+        Operator handed to plain LOBPCG: a dense array (blocked-matmul fast
+        path) or a matvec callable.
+    X0 : Float[Array, 'n k']
+        Initial guess subspace of ``k`` columns.
+
+    Returns
+    -------
+    tuple of (Float[Array, 'k'], Float[Array, 'n k'])
+        Eigenvalues (largest-first) and matching eigenvectors.
+    """
     if spec.method == 'lobpcg':
         return _run_lobpcg_method(lobpcg_operator, X0, spec.n_iters, spec.tol)
     if spec.method == 'shift_invert':
@@ -403,7 +570,32 @@ def _sectioned_matvec(
     n_cols: int,
     n_rows: int,
 ) -> Float[Array, 'n_rows k']:
-    """SectionedELL matvec: per-bucket matmul + scatter-back."""
+    """Apply a SectionedELL operator to a block of vectors.
+
+    Each section (bucket) contributes a per-bucket ELL matmul whose result
+    is scattered back into the shared ``n_rows`` output axis using that
+    section's global row indices.
+
+    Parameters
+    ----------
+    values_tuple : tuple of Float[Array, 'n_s k_max_s']
+        Per-section stored nonzero values.
+    indices_tuple : tuple of Int[Array, 'n_s k_max_s']
+        Per-section ELL column indices.
+    row_groups_tuple : tuple of Int[Array, 'n_s']
+        Per-section maps from local section rows to global output rows.
+    X : Float[Array, 'n k']
+        Right operand: a block of ``k`` column vectors.
+    n_cols : int
+        Number of columns of the operator (matched against ``X``'s rows).
+    n_rows : int
+        Number of rows of the operator, i.e. the output row dimension.
+
+    Returns
+    -------
+    Float[Array, 'n_rows k']
+        The product :math:`A X`.
+    """
     out = jnp.zeros((n_rows,) + X.shape[1:], dtype=X.dtype)
     for vals, idx, row_idx in zip(
         values_tuple, indices_tuple, row_groups_tuple
@@ -428,12 +620,38 @@ def _sectioned_rmatvec(
     n_cols: int,
     n_rows: int,
 ) -> Float[Array, 'n_cols k']:
-    """SectionedELL adjoint matvec ``Aᵀ X``: per-bucket gather of the source
-    rows + scatter into the shared ``n_cols`` axis, summed over buckets.
+    """Apply the SectionedELL adjoint operator :math:`A^{\\top} X`.
 
-    The tuple-level companion of ``sparse.sectioned_semiring_ell_rmatvec``
-    (kept here so the ``custom_vjp`` forward runs on the same flat arrays it
-    differentiates, mirroring ``_sectioned_matvec``)."""
+    Each section gathers its source rows from ``X`` and scatters into the
+    shared ``n_cols`` axis; the contributions are summed over sections.
+
+    This is the tuple-level companion of
+    :func:`~nitrix.sparse.sectioned_semiring_ell_rmatvec`, kept here so the
+    ``custom_vjp`` forward runs on the same flat arrays it differentiates,
+    mirroring :func:`_sectioned_matvec`.
+
+    Parameters
+    ----------
+    values_tuple : tuple of Float[Array, 'n_s k_max_s']
+        Per-section stored nonzero values.
+    indices_tuple : tuple of Int[Array, 'n_s k_max_s']
+        Per-section ELL column indices.
+    row_groups_tuple : tuple of Int[Array, 'n_s']
+        Per-section maps from local section rows to global operator rows.
+    X : Float[Array, 'n k']
+        Right operand: a block of ``k`` column vectors (indexed by operator
+        rows).
+    n_cols : int
+        Number of columns of the operator, i.e. the output row dimension of
+        the adjoint product.
+    n_rows : int
+        Number of rows of the operator.
+
+    Returns
+    -------
+    Float[Array, 'n_cols k']
+        The adjoint product :math:`A^{\\top} X`.
+    """
     out = jnp.zeros((n_cols,) + X.shape[1:], dtype=X.dtype)
     for vals, idx, row_idx in zip(
         values_tuple, indices_tuple, row_groups_tuple
@@ -459,9 +677,25 @@ def _eig_top_k_dense(
     X0: Float[Array, 'n k'],
     spec: SolverSpec,
 ) -> _EigPair:
-    """Iterative top-k for a concrete dense symmetric ``M``; diff w.r.t.
-    ``M``.  Forward branches on ``spec.method``; backward is the shared
-    dense projection."""
+    """Iterative top-k eigenpairs of a concrete dense symmetric operator.
+
+    Differentiable w.r.t. ``M``.  The forward branches on ``spec.method``;
+    the backward is the shared dense projection (:func:`_project_dense`).
+
+    Parameters
+    ----------
+    M : Float[Array, 'n n']
+        Concrete dense symmetric operator.
+    X0 : Float[Array, 'n k']
+        Initial guess subspace of ``k`` columns.
+    spec : SolverSpec
+        Static solver configuration (rides ``nondiff_argnums``).
+
+    Returns
+    -------
+    tuple of (Float[Array, 'k'], Float[Array, 'n k'])
+        Eigenvalues (largest-first) and matching eigenvectors.
+    """
     return _forward_for_spec(spec, lambda X: M @ X, M, X0)
 
 
@@ -502,8 +736,29 @@ def _eig_top_k_ell(
     n_cols: int,
     spec: SolverSpec,
 ) -> _EigPair:
-    """Iterative top-k for an ELL-stored operator; diff w.r.t. ``values``
-    (projected onto the sparsity pattern)."""
+    """Iterative top-k eigenpairs of an ELL-stored operator.
+
+    Differentiable w.r.t. ``values``, with the gradient projected onto the
+    stored sparsity pattern (:func:`_project_ell`).
+
+    Parameters
+    ----------
+    values : Float[Array, 'n k_max']
+        Stored nonzero values of the ELL operator.
+    indices : Int[Array, 'n k_max']
+        Column indices of the ELL sparsity pattern.
+    X0 : Float[Array, 'n k']
+        Initial guess subspace of ``k`` columns.
+    n_cols : int
+        Number of columns of the operator (rides ``nondiff_argnums``).
+    spec : SolverSpec
+        Static solver configuration (rides ``nondiff_argnums``).
+
+    Returns
+    -------
+    tuple of (Float[Array, 'k'], Float[Array, 'n k'])
+        Eigenvalues (largest-first) and matching eigenvectors.
+    """
     return _ell_forward(values, indices, X0, n_cols, spec)
 
 
@@ -593,8 +848,31 @@ def _eig_top_k_sectioned(
     n_cols: int,
     spec: SolverSpec,
 ) -> _EigPair:
-    """Iterative top-k for a SectionedELL operator; diff w.r.t. each
-    section's ``values`` independently."""
+    """Iterative top-k eigenpairs of a SectionedELL operator.
+
+    Differentiable w.r.t. each section's ``values`` independently
+    (:func:`_project_sectioned`).
+
+    Parameters
+    ----------
+    values_tuple : tuple of Float[Array, 'n_s k_max_s']
+        Per-section stored nonzero values.
+    indices_tuple : tuple of Int[Array, 'n_s k_max_s']
+        Per-section ELL column indices.
+    row_groups_tuple : tuple of Int[Array, 'n_s']
+        Per-section maps from local section rows to global operator rows.
+    X0 : Float[Array, 'n k']
+        Initial guess subspace of ``k`` columns.
+    n_cols : int
+        Number of columns of the operator (rides ``nondiff_argnums``).
+    spec : SolverSpec
+        Static solver configuration (rides ``nondiff_argnums``).
+
+    Returns
+    -------
+    tuple of (Float[Array, 'k'], Float[Array, 'n k'])
+        Eigenvalues (largest-first) and matching eigenvectors.
+    """
     return _sectioned_forward(
         values_tuple,
         indices_tuple,
@@ -734,16 +1012,51 @@ def _dtype_of(operand: EigOperand) -> Any:
 
 
 def _resolve_method(method: Method, fmt: _Format) -> Method:
-    """``auto`` -> ``eigh`` for dense, ``lobpcg`` for sparse.  Format-based
-    only (static, JIT-stable); no runtime tracer inspection."""
+    """Resolve the ``'auto'`` method policy against the operand format.
+
+    ``'auto'`` becomes ``'eigh'`` for a dense operand and ``'lobpcg'`` for
+    any sparse operand; any explicit method passes through unchanged.  The
+    decision is format-based only (static and JIT-stable); it never
+    inspects a runtime tracer.
+
+    Parameters
+    ----------
+    method : Method
+        Requested method, one of ``'auto'``, ``'eigh'``, ``'lobpcg'``,
+        ``'shift_invert'``, ``'poly'``.
+    fmt : {'dense', 'ell', 'sectioned'}
+        Operand storage format.
+
+    Returns
+    -------
+    Method
+        The concrete (non-``'auto'``) method to run.
+    """
     if method != 'auto':
         return method
     return 'eigh' if fmt == 'dense' else 'lobpcg'
 
 
 def _device_put_operand(operand: EigOperand, target: Any) -> EigOperand:
-    """Move all array fields of an operand to ``target`` (dense / ELL /
-    SectionedELL); non-array fields pass through."""
+    """Move all array fields of an operand onto a target device.
+
+    Handles all three operand formats (dense array, ELL, SectionedELL),
+    rebuilding the sparse containers with device-placed array fields;
+    non-array fields (shapes, identity, row groups) pass through unchanged.
+
+    Parameters
+    ----------
+    operand : EigOperand
+        Dense array, ``ELL``, or ``SectionedELL`` operator.
+    target : Any
+        Device (or sharding) to place the operand's arrays onto.
+
+    Returns
+    -------
+    EigOperand
+        The operand with its array fields on ``target``, same format as the
+        input.
+    """
     if isinstance(operand, ELL):
         return ELL(
             values=jax.device_put(operand.values, target),
@@ -778,8 +1091,30 @@ def _initial_subspace(
     device: Any,
     dtype: Any,
 ) -> Float[Array, 'n k']:
-    """Random initial subspace on the solver device, dtype-matched to the
-    operator (so the x64 backward returns a matching cotangent dtype)."""
+    """Draw a random initial subspace for an iterative solver.
+
+    The subspace is placed on the solver device and dtype-matched to the
+    operator, so that the (x64) backward returns a cotangent of matching
+    dtype.
+
+    Parameters
+    ----------
+    n : int
+        Number of rows (operator dimension).
+    k : int
+        Number of columns, i.e. the requested subspace / eigenpair count.
+    seed : int
+        PRNG seed for the random normal initialisation.
+    device : Any
+        Device (or sharding) to place the subspace onto.
+    dtype : Any
+        Floating-point dtype for the subspace, matched to the operator.
+
+    Returns
+    -------
+    Float[Array, 'n k']
+        The random initial subspace.
+    """
     key = jax.random.key(seed)
     return cast(
         Float[Array, 'n k'],
@@ -791,7 +1126,25 @@ def _eigh_top_k(
     M: Float[Array, '... n n'],
     k: int,
 ) -> _EigPair:
-    """Dense full ``safe_eigh`` sliced to the ``k`` largest, largest-first."""
+    """Return the ``k`` largest eigenpairs of a dense symmetric operator.
+
+    Computes the full symmetric eigendecomposition with
+    :func:`~nitrix.linalg._solver.safe_eigh` (which returns eigenvalues in
+    ascending order) and slices the ``k`` largest, largest-first.
+
+    Parameters
+    ----------
+    M : Float[Array, '... n n']
+        Dense symmetric operator, optionally batched over leading axes.
+    k : int
+        Number of largest eigenpairs to return.
+
+    Returns
+    -------
+    tuple of (Float[Array, 'k'], Float[Array, 'n k'])
+        The ``k`` largest eigenvalues (largest-first) and matching
+        eigenvectors, with any leading batch axes preserved.
+    """
     eigvals, eigvecs = safe_eigh(M)  # ascending
     top_vals = eigvals[..., ::-1][..., :k]
     top_vecs = eigvecs[..., ::-1][..., :k]
@@ -838,15 +1191,16 @@ def eigsolve_top_k(
     Parameters
     ----------
     operand
-        Symmetric operator: dense ``(..., n, n)``, ``ELL``, or
-        ``SectionedELL``.  The iterative methods (and shift-invert's inner
-        CG) assume a symmetric operator.  For dense input the caller owns
-        symmetry (symmetrise ``M`` first).  For ELL / SectionedELL, set
-        ``spec.promise_symmetry=False`` when the *stored* operator is not
-        guaranteed symmetric -- e.g. an affinity sparsified by top-k-per-row
-        (``ell_from_dense``), whose pattern is generally asymmetric -- and
-        the forward will apply the symmetric part ``½(A X + Aᵀ X)`` instead
-        of trusting the stored pattern.  Leaving it ``True`` (the default)
+        Symmetric operator: dense ``(..., n, n)``, :class:`~nitrix.sparse.ELL`,
+        or :class:`~nitrix.sparse.SectionedELL`.  The iterative methods (and
+        shift-invert's inner CG) assume a symmetric operator.  For dense
+        input the caller owns symmetry (symmetrise ``M`` first).  For ELL /
+        SectionedELL, set ``spec.promise_symmetry=False`` when the *stored*
+        operator is not guaranteed symmetric -- e.g. an affinity sparsified
+        by top-k-per-row (:func:`~nitrix.sparse.ell_from_dense`), whose
+        pattern is generally asymmetric -- and the forward will apply the
+        symmetric part :math:`\\tfrac12 (A X + A^{\\top} X)` instead of
+        trusting the stored pattern.  Leaving it ``True`` (the default)
         applies the stored matvec directly and is correct only when the
         operator really is symmetric (regular meshes / grids).
     k
@@ -860,16 +1214,19 @@ def eigsolve_top_k(
 
     Returns
     -------
-    ``EigPair(values, vectors)`` -- ``values`` shape ``(k,)`` largest-first,
-    ``vectors`` shape ``(n, k)``.
+    EigPair
+        Named tuple ``EigPair(values, vectors)`` with ``values`` of shape
+        ``(k,)`` (largest-first) and ``vectors`` of shape ``(n, k)``.  Any
+        leading batch axes of a dense ``operand`` are preserved.
 
     Notes
     -----
     Differentiable w.r.t. ``operand`` (dense ``M``; ELL / SectionedELL
-    ``values``) for every method: ``eigh`` via the native ``eigh`` VJP, the
-    iterative methods via the shared implicit VJP.  ``skip_trivial`` /
-    spectral-convention post-processing is the *caller's* concern -- this
-    returns the raw extremal top-k.
+    ``values``) for every method: the ``'eigh'`` method via the native
+    symmetric-eigendecomposition VJP, the iterative methods via the shared
+    implicit VJP.  Any ``skip_trivial`` / spectral-convention
+    post-processing is the *caller's* concern -- this returns the raw
+    extremal top-k.
     """
     if spec is None:
         spec = SolverSpec.auto()

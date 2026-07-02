@@ -1,0 +1,45 @@
+---
+title: "bending_energy"
+generated: true
+description: "Thin-plate (second-order) bending penalty $ | nabla^2 u |^2$."
+---
+
+[‹ back to `nitrix.register.regulariser`](../nitrix-register-regulariser.qmd)
+
+<!-- nitrix:gen sig:bending_energy -->
+```python
+bending_energy(field: Float[Array, '*spatial ndim'], *, reduction: Reduction = 'mean') -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:bending_energy -->
+Thin-plate (second-order) bending penalty $\|\nabla^2 u\|^2$.
+
+The squared Frobenius norm of the per-voxel Hessian (all second
+partials $\partial^2 u_c / \partial x_a \partial x_b$),
+computed by differentiating the displacement Jacobian a second time.
+Unlike [`gradient_smoothness`](../nitrix-register-regulariser/gradient_smoothness.qmd) it does not penalise a uniform
+(affine) flow -- only curvature.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:bending_energy -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `field` | `Float` | `*spatial` × `ndim` | — | Channels-last displacement field `(*spatial, ndim)`, with the trailing axis holding the `ndim` displacement components. |
+| `reduction` | `Reduction` | — | `'mean'` | How the per-voxel energy is reduced: `"mean"` (default) or `"sum"` collapse the spatial axes to a scalar, while `"none"` returns the unreduced per-voxel energy map. |
+
+**Returns** `Float` — shape `...`. The scalar total (for `"mean"` / `"sum"`) or the per-voxel energy map of shape `(*spatial,)` (for `"none"`).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:bending_energy -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `ndim` | number of spatial dimensions |
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

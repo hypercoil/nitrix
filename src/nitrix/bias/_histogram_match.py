@@ -5,12 +5,13 @@
 Nyul-Udupa landmark histogram matching.
 
 Remap a ``source`` image's intensities so its CDF matches that of a
-``reference`` image.  Nyul & Udupa (1999), "On Standardizing the MR Image
-Intensity Scale" (IEEE TMI): pick ``N`` landmarks at evenly-spaced
-quantile positions on both CDFs, then apply a piecewise-linear
-interpolant from source-landmark to reference-landmark intensities.
+``reference`` image.  Following Nyul & Udupa (1999), "On Standardizing
+the MR Image Intensity Scale", *Magnetic Resonance in Medicine* 42(6):
+1072-1081: pick :math:`N` landmarks at evenly-spaced quantile positions
+on both CDFs, then apply a piecewise-linear interpolant from
+source-landmark to reference-landmark intensities.
 
-Distinct from ``sharpen_histogram`` (N3 Wiener log-histogram
+Distinct from :func:`sharpen_histogram` (N3 Wiener log-histogram
 *deconvolution* of a single image's histogram against a Gaussian PSF, to
 de-blur within-image contrast).  Histogram *matching* operates on two
 images and remaps one toward the other's distribution; it does not
@@ -26,25 +27,25 @@ ITK parity target.  The implementation is the ITK
   so no extrapolation regime is needed.
 - With ``threshold_at_mean=True`` (ITK default) **and** no explicit
   weight, the image mean is inserted as an additional landmark right
-  after the lower extremum: the landmark array becomes ``[image.min(),
-  image.mean(), m_1, ..., m_N, image.max()]``, with match points
-  ``m_1..m_N`` at evenly-spaced quantile positions on the
-  above-mean voxels.  This is what ITK's ``ThresholdAtMeanIntensityOn``
+  after the lower extremum: the landmark array becomes
+  :math:`[\\min, \\operatorname{mean}, m_1, \\ldots, m_N, \\max]`, with
+  match points :math:`m_1, \\ldots, m_N` at evenly-spaced quantile
+  positions on the above-mean voxels.  This is what ITK's
+  ``ThresholdAtMeanIntensityOn``
   actually does -- the mean is **both** the histogram threshold *and* a
   literal landmark, so every below-mean voxel is interpolated between
   ``(image.min(), image.mean())`` instead of being lumped into the
   above-mean ladder.
 - With ``threshold_at_mean=False`` (or an explicit weight given), the
-  landmark array is the simpler ``[image.min(), m_1, ..., m_N,
-  image.max()]`` with match points on the full (or weight-filtered)
-  population.
+  landmark array is the simpler :math:`[\\min, m_1, \\ldots, m_N, \\max]`
+  with match points on the full (or weight-filtered) population.
 
 Static shapes throughout (``n_histogram_levels`` and ``n_match_points``
 are fixed at trace time; the weighting is a multiplicative mask, not a
 boolean-index resize), so the op JITs cleanly.
 
 Not differentiable through the histogram binning (piecewise constant in
-source values) -- the same posture as ``sharpen_histogram``.  Gradients
+source values) -- the same posture as :func:`sharpen_histogram`.  Gradients
 flow through reference landmarks via ``jnp.interp``'s autograd; the
 landmark identification step is treated as a constant.
 
@@ -70,7 +71,22 @@ __all__ = [
 def _validate_hist_params(
     n_match_points: int, n_histogram_levels: int
 ) -> None:
-    """Shared static-argument validation for the fit / apply / convenience."""
+    """Shared static-argument validation for the fit / apply / convenience.
+
+    Parameters
+    ----------
+    n_match_points
+        Number of interior quantile landmarks requested.  Must be at
+        least ``1``.
+    n_histogram_levels
+        Histogram resolution (bin count) requested.  Must be at least
+        ``2``.
+
+    Raises
+    ------
+    ValueError
+        If ``n_match_points < 1`` or ``n_histogram_levels < 2``.
+    """
     if n_match_points < 1:
         raise ValueError(f'n_match_points must be >= 1, got {n_match_points}')
     if n_histogram_levels < 2:
@@ -92,13 +108,42 @@ def _match_points(
     """Quantile-positioned landmark intensities from a weighted histogram.
 
     Builds an ``n_bins``-resolution histogram of ``image`` weighted by
-    ``weight`` over the interval ``[bin_min, bin_max]``, then for each
-    of ``n_match_points`` cumulative-frequency targets
-    ``i / (n_match_points + 1)`` (``i = 1..n_match_points``) locates the
+    ``weight`` over the interval
+    :math:`[\\text{bin\\_min}, \\text{bin\\_max}]`, then for each of
+    ``n_match_points`` cumulative-frequency targets
+    :math:`i / (\\text{n\\_match\\_points} + 1)`
+    (:math:`i = 1, \\ldots, \\text{n\\_match\\_points}`) locates the
     intensity at which the cumulative frequency equals the target
-    exactly, via ``searchsorted`` + linear interpolation across the bin
-    boundary.  The latter sub-bin step is what makes the landmarks not
-    quantised to ``(bin_max - bin_min) / n_bins`` precision.
+    exactly, via ``searchsorted`` plus linear interpolation across the
+    bin boundary.  The latter sub-bin step is what makes the landmarks
+    not quantised to
+    :math:`(\\text{bin\\_max} - \\text{bin\\_min}) / \\text{n\\_bins}`
+    precision.
+
+    Parameters
+    ----------
+    image
+        Intensity values, of arbitrary shape; flattened internally into a
+        single population.
+    weight
+        Per-voxel weights broadcastable / matching ``image`` in shape.
+        Only the weighted contribution enters the histogram, so
+        zero-weighted voxels do not affect the located landmarks.
+    bin_min, bin_max
+        Scalar lower and upper edges of the histogram interval.
+    n_bins
+        Histogram resolution (number of bins).
+    n_match_points
+        Number of interior quantile landmarks to locate.
+    dtype
+        Working floating dtype for the histogram accumulation and
+        interpolation.
+
+    Returns
+    -------
+    Float[Array, 'n_match_points']
+        The landmark intensities, one per cumulative-frequency target, in
+        ascending quantile order.
     """
     flat = image.reshape(-1).astype(dtype)
     w = weight.reshape(-1).astype(dtype)
@@ -143,12 +188,43 @@ def _landmarks_for(
 ) -> Tuple[Float[Array, '...'], bool]:
     """Build the full landmark array for one image.
 
-    Returns ``(landmarks, has_mean)`` -- the array is one entry longer
-    when the mean is inserted as an extra landmark (the ITK
-    ``ThresholdAtMeanIntensityOn``-with-no-explicit-weight case).
-    Both source and reference must agree on ``has_mean`` (or the apply
-    step would be malformed) -- the caller is responsible for
-    consistency.
+    Resolves the outer extrema, the optional mean landmark, and the
+    interior quantile match points into a single ascending landmark
+    vector.  Both source and reference must agree on whether the mean
+    landmark is present (or the apply step would be malformed) -- the
+    caller is responsible for consistency.
+
+    Parameters
+    ----------
+    image
+        Intensity values, of arbitrary shape; treated as a single
+        population.
+    weight
+        Optional per-voxel weights broadcastable to ``image``.  When
+        ``None`` (and ``threshold_at_mean`` is set), the above-mean mask
+        is used and the mean is inserted as a landmark; when ``None`` and
+        ``threshold_at_mean`` is ``False``, every voxel contributes
+        uniformly.  A supplied weight overrides the mean-thresholding
+        behaviour.
+    threshold_at_mean
+        When ``True`` and no explicit ``weight`` is given, restrict the
+        match-point histogram to above-mean voxels and insert the mean as
+        an extra landmark just above the lower extremum.
+    n_bins
+        Histogram resolution (number of bins) for match-point location.
+    n_match_points
+        Number of interior quantile landmarks.
+    dtype
+        Working floating dtype.
+
+    Returns
+    -------
+    landmarks : Float[Array, '...']
+        The ascending landmark vector: ``(n_match_points + 2,)``, or
+        ``(n_match_points + 3,)`` when the mean landmark is inserted.
+    has_mean : bool
+        Whether the mean landmark was inserted (the ITK
+        ``ThresholdAtMeanIntensityOn``-with-no-explicit-weight case).
     """
     image = image.astype(dtype)
     bin_min = jnp.min(image)
@@ -417,8 +493,8 @@ def histogram_match(
     histogram_match_fit, histogram_match_apply :
         The two phases this composes.  ``histogram_match(source,
         reference)`` is exactly ``histogram_match_apply(source,
-        histogram_match_fit(reference))`` (the §6.5 fit/apply seam) -- use
-        the split when one reference is matched to **many** sources, so the
+        histogram_match_fit(reference))`` (the fit/apply seam) -- use the
+        split when one reference is matched to **many** sources, so the
         ~9 reference landmarks are derived once instead of per call.
     sharpen_histogram :
         N3 Wiener log-histogram deconvolution -- a different op on a

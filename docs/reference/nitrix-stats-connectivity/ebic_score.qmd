@@ -1,0 +1,56 @@
+---
+title: "ebic_score"
+generated: true
+description: "Extended Bayesian information criterion of a precision estimate."
+---
+
+[‹ back to `nitrix.stats.connectivity`](../nitrix-stats-connectivity.qmd)
+
+<!-- nitrix:gen sig:ebic_score -->
+```python
+ebic_score(theta: Float[Array, 'p p'], S: Float[Array, 'p p'], n: int | Float[Array, ''], *, gamma: float = 0.5, edge_tol: float = 1e-08) -> Float[Array, '']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:ebic_score -->
+Extended Bayesian information criterion of a precision estimate.
+
+Evaluates the extended BIC of Foygel and Drton (2010),
+
+$$
+\mathrm{EBIC}_\gamma = n\,(\operatorname{tr}(S \Theta)
+- \log\det\Theta) + E \log n + 4 \gamma E \log p,
+$$
+
+where $E$ is the number of off-diagonal edges (upper-triangle entries
+with $\lvert\theta\rvert >$ `edge_tol`, counted once).  The
+Gaussian-graphical-model term
+$-2\,\ell = n\,(\operatorname{tr}(S \Theta) - \log\det\Theta)$
+uses the cuSOLVER-free rolled-Cholesky $\log\det$.  The parameter
+$\gamma \in [0, 1]$ tunes the extra sparsity prior
+($\gamma = 0$ recovers the plain BIC); select the path point with the
+smallest score.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:ebic_score -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `theta` | `Float` | `p` × `p` | — | Precision (inverse covariance) estimate to score. |
+| `S` | `Float` | `p` × `p` | — | Sample covariance matrix that produced `theta`. |
+| `n` | `int | Float[Array, '']` | — | — | Number of observations underlying `S`. |
+| `gamma` | `float` | — | `0.5` | Extended-BIC sparsity-prior weight $\gamma \in [0, 1]$; `gamma = 0` recovers the plain BIC. Default `0.5`. |
+| `edge_tol` | `float` | — | `1e-08` | Magnitude threshold above which an off-diagonal entry counts as an edge. Default `1e-8`. |
+
+**Returns** `Float` — shape —. The scalar extended-BIC score; lower is better.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:ebic_score -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

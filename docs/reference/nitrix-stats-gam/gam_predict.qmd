@@ -1,0 +1,49 @@
+---
+title: "gam_predict"
+generated: true
+description: "Per-element GAM prediction on (new) covariates."
+---
+
+[‹ back to `nitrix.stats.gam`](../nitrix-stats-gam.qmd)
+
+<!-- nitrix:gen sig:gam_predict -->
+```python
+gam_predict(result: GAMResult, smooths: Sequence[Smooth], x_smooths: Sequence[Any], *, parametric: Optional[Float[Array, 'N q']] = None, type: Literal['response', 'link'] = 'response') -> Float[Array, 'V N']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:gam_predict -->
+Per-element GAM prediction on (new) covariates.
+
+Reassembles the fitted design `[intercept | parametric | B_1(x_1) | ...]`
+at the new covariates -- evaluating each smooth's basis at `x_smooths[k]`
+with the **same** fitted knots/penalty (`smooth.eval_design`, the
+machinery [`smooth_partial_effect`](../nitrix-stats-gam/smooth_partial_effect.qmd) uses for one block) and the stored
+`result.col_slices` / `result.intercept` layout -- then returns
+`eta = design @ coef` (`type='link'`) or `family.linkinv(eta)`
+(`type='response'`, default).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:gam_predict -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `result` | `GAMResult` | — | — | A [`GAMResult`](../nitrix-stats-gam/GAMResult.qmd) from [`gam_fit`](../nitrix-stats-gam/gam_fit.qmd). |
+| `smooths` | `Sequence[Smooth]` | — | — | The same [`SmoothBasis`](../nitrix-stats-basis/SmoothBasis.qmd) terms passed to [`gam_fit`](../nitrix-stats-gam/gam_fit.qmd), in the same order (used here only to evaluate the basis at the new covariates). |
+| `x_smooths` | `Sequence[Any]` | — | — | New covariate(s) per smooth (one entry per `smooths` term, each in the form that `smooth.eval_design` accepts -- an `(N,)` grid, a tuple of per-margin grids for a tensor smooth, or integer level indices for a random-effect basis). All terms must evaluate to the same row count `N`. |
+| `parametric` | `Optional[Float[Array, 'N q']]` | — | `None` | `(N, q)` parametric design at the new covariates; `None` if the fit had none. Must match the fit's parametric column count. |
+| `type` | `Literal['response', 'link']` | — | `'response'` | `'response'` (the mean, via the link inverse) or `'link'` (the linear predictor `eta`). |
+
+**Returns** `Float` — shape `V` × `N`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:gam_predict -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `N` | observations — time points, subjects, or sampled points |
+<!-- nitrix:/gen -->

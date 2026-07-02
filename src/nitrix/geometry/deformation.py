@@ -5,29 +5,35 @@
 Deformation- and velocity-field algebra.
 
 The operations the diffeomorphic (log-Demons) recipe needs on top of the
-SVF stack (``integrate_velocity_field`` is the exponential ``exp(v)``):
+stationary-velocity-field stack (:func:`~nitrix.geometry.integrate_velocity_field`
+is the exponential :math:`\\exp(v)`):
 
-- ``compose_displacement`` -- compose two displacement fields,
-  ``(id + u) ∘ (id + v)``, the warp-by-then-warp operation.
-- ``compose_velocity`` -- the BCH approximation of the velocity whose
-  exponential is ``exp(v) ∘ exp(u)`` (the log-domain update); first
-  order is plain addition, second order adds ½ the Lie bracket.
-- ``invert_displacement`` -- the inverse displacement, as the fixed
-  point ``s_inv = -s ∘ (id + s_inv)`` (``numerics.fixed_point_solve``,
-  so it is differentiable).
-- ``field_log`` -- the stationary-velocity *logarithm* of a deformation
-  (the inverse of ``integrate_velocity_field``), by inverse scaling-and-
-  squaring; the dense analogue of ``linalg.matrix_log``.  Recovers an SVF
-  parameterisation of a deformation solved directly in the group (the
-  greedy registration path).  **``exp`` is not surjective** -- a general
-  diffeomorphism (e.g. a greedy composition of many non-commuting warps)
-  is *not* ``exp(v)`` for any single stationary ``v`` -- so ``field_log``
-  returns the **best SVF fit**: the round-trip ``exp(field_log(φ)) == φ``
-  is exact by construction, but ``field_log`` is a true inverse of ``exp``
-  only on the SVF submanifold (a nonzero fit residual off it).
+- :func:`compose_displacement` -- compose two displacement fields,
+  :math:`(\\mathrm{id} + u) \\circ (\\mathrm{id} + v)`, the warp-by-then-warp
+  operation.
+- :func:`compose_velocity` -- the Baker-Campbell-Hausdorff approximation of
+  the velocity whose exponential is :math:`\\exp(v) \\circ \\exp(u)` (the
+  log-domain update); first order is plain addition, second order adds half
+  the Lie bracket.
+- :func:`invert_displacement` -- the inverse displacement, as the fixed
+  point :math:`s_{\\mathrm{inv}} = -s \\circ (\\mathrm{id} + s_{\\mathrm{inv}})`
+  (via :func:`~nitrix.numerics.fixed_point_solve`, so it is differentiable).
+- :func:`field_log` -- the stationary-velocity *logarithm* of a deformation
+  (the inverse of :func:`~nitrix.geometry.integrate_velocity_field`), by
+  inverse scaling-and-squaring; the dense analogue of
+  :func:`~nitrix.linalg.matrix_log`.  Recovers a stationary-velocity-field
+  parameterisation of a deformation solved directly in the group (the greedy
+  registration path).  The exponential is not surjective -- a general
+  diffeomorphism (e.g. a greedy composition of many non-commuting warps) is
+  *not* :math:`\\exp(v)` for any single stationary :math:`v` -- so
+  :func:`field_log` returns the *best stationary-velocity-field fit*: the
+  round-trip :math:`\\exp(\\mathrm{field\\_log}(\\varphi)) = \\varphi` is exact
+  by construction, but :func:`field_log` is a true inverse of the exponential
+  only on the stationary-velocity-field submanifold (a nonzero fit residual
+  off it).
 
-Channel-last fields ``(*spatial, ndim)``; coordinates index-space
-(``identity_grid`` convention).
+Channel-last fields ``(*spatial, ndim)``; coordinates are in index space
+(the :func:`~nitrix.geometry.identity_grid` convention).
 """
 
 from __future__ import annotations
@@ -55,10 +61,13 @@ def compose_displacement(
     *,
     mode: BoundaryMode = 'nearest',
 ) -> Float[Array, '*spatial ndim']:
-    """Displacement of ``(id + outer) ∘ (id + inner)``.
+    """Displacement of the composed deformation
+    :math:`(\\mathrm{id} + \\mathrm{outer}) \\circ (\\mathrm{id} + \\mathrm{inner})`.
 
-    The composed deformation maps ``x -> x + inner(x) + outer(x +
-    inner(x))``, so the displacement is ``inner + outer∘(id + inner)``.
+    The composed deformation maps
+    :math:`x \\mapsto x + \\mathrm{inner}(x) + \\mathrm{outer}(x + \\mathrm{inner}(x))`,
+    so the displacement is
+    :math:`\\mathrm{inner} + \\mathrm{outer} \\circ (\\mathrm{id} + \\mathrm{inner})`.
     Warping an image by the result equals warping by ``inner`` then by
     ``outer``.
 
@@ -71,6 +80,12 @@ def compose_displacement(
         Boundary mode for sampling ``outer`` at the deformed positions
         (default ``"nearest"`` -- edge-replicate, the flow-field
         convention).
+
+    Returns
+    -------
+    Float[Array, '*spatial ndim']
+        The displacement field of the composed deformation,
+        ``(*spatial, ndim)``.
     """
     spatial_shape = inner.shape[:-1]
     grid = identity_grid(spatial_shape, dtype=inner.dtype) + inner
@@ -81,7 +96,24 @@ def compose_displacement(
 def _grad_field(
     field: Float[Array, '*spatial ndim'],
 ) -> Float[Array, '*spatial ndim ndim']:
-    """Spatial Jacobian ``∂ field_i / ∂ x_j`` (``[..., i, j]``)."""
+    """Spatial Jacobian :math:`\\partial\\, \\mathrm{field}_i / \\partial x_j`.
+
+    Differentiates the displacement (not the full deformation): the
+    identity is subtracted from the deformation Jacobian so that a zero
+    field yields a zero matrix.
+
+    Parameters
+    ----------
+    field
+        Displacement field, ``(*spatial, ndim)``.
+
+    Returns
+    -------
+    Float[Array, '*spatial ndim ndim']
+        The Jacobian of the displacement, ``(*spatial, ndim, ndim)``,
+        with entry ``[..., i, j]`` equal to
+        :math:`\\partial\\, \\mathrm{field}_i / \\partial x_j`.
+    """
     ndim = field.shape[-1]
     eye = jnp.eye(ndim, dtype=field.dtype)
     return jacobian_displacement(field) - eye
@@ -91,7 +123,20 @@ def _lie_bracket(
     v: Float[Array, '*spatial ndim'],
     u: Float[Array, '*spatial ndim'],
 ) -> Float[Array, '*spatial ndim']:
-    """Lie bracket ``[v, u] = (v·∇)u - (u·∇)v`` of two velocity fields."""
+    """Lie bracket
+    :math:`[v, u] = (v \\cdot \\nabla) u - (u \\cdot \\nabla) v` of two velocity
+    fields.
+
+    Parameters
+    ----------
+    v, u
+        Stationary velocity fields, ``(*spatial, ndim)``.
+
+    Returns
+    -------
+    Float[Array, '*spatial ndim']
+        The Lie bracket :math:`[v, u]`, ``(*spatial, ndim)``.
+    """
     du = _grad_field(u)
     dv = _grad_field(v)
     du_v = jnp.einsum('...ij,...j->...i', du, v)
@@ -105,17 +150,37 @@ def compose_velocity(
     *,
     order: int = 1,
 ) -> Float[Array, '*spatial ndim']:
-    """BCH composition of stationary velocity fields.
+    """Baker-Campbell-Hausdorff composition of stationary velocity fields.
 
-    Approximates the velocity ``z`` with ``exp(z) ≈ exp(v) ∘ exp(u)``:
+    Approximates the velocity :math:`z` for which
+    :math:`\\exp(z) \\approx \\exp(v) \\circ \\exp(u)`:
 
-    - ``order == 1`` -- ``z = v + u`` (the standard additive log-domain
+    - ``order == 1`` -- :math:`z = v + u` (the standard additive log-domain
       update; exact when the fields commute).
-    - ``order == 2`` -- ``z = v + u + ½ [v, u]`` (the first
+    - ``order == 2`` -- :math:`z = v + u + \\tfrac{1}{2} [v, u]` (the first
       Baker-Campbell-Hausdorff correction).
 
-    Default ``order == 1``: the additive update most diffeomorphic-demons
-    implementations use.
+    Parameters
+    ----------
+    v, u
+        Stationary velocity fields to compose, ``(*spatial, ndim)``.  The
+        result approximates the velocity of the exponential
+        :math:`\\exp(v) \\circ \\exp(u)`.
+    order
+        Order of the Baker-Campbell-Hausdorff expansion: ``1`` (default)
+        for the plain additive update most diffeomorphic-demons
+        implementations use, or ``2`` to add half the Lie bracket.
+
+    Returns
+    -------
+    Float[Array, '*spatial ndim']
+        The composed stationary velocity field :math:`z`,
+        ``(*spatial, ndim)``.
+
+    Raises
+    ------
+    ValueError
+        If ``order`` is neither ``1`` nor ``2``.
     """
     if order == 1:
         return v + u
@@ -160,46 +225,57 @@ def invert_displacement(
     Float[Array, '*spatial ndim']
     | tuple[Float[Array, '*spatial ndim'], Float[Array, '']]
 ):
-    """Inverse displacement field of ``φ = id + s``.
+    """Inverse displacement field of the deformation
+    :math:`\\varphi = \\mathrm{id} + s`.
 
-    Returns ``s_inv`` with ``(id + s) ∘ (id + s_inv) ≈ id``, found as the
-    fixed point ``s_inv = -s ∘ (id + s_inv)`` via
-    ``numerics.fixed_point_solve`` (so it is differentiable w.r.t. ``s``
-    by the implicit-function theorem).  Converges geometrically with
-    factor ``‖∇s‖`` (the diffeomorphic regime ``‖∇s‖ < 1``) -- fast for the
+    Returns ``s_inv`` with
+    :math:`(\\mathrm{id} + s) \\circ (\\mathrm{id} + s_{\\mathrm{inv}}) \\approx \\mathrm{id}`,
+    found as the fixed point
+    :math:`s_{\\mathrm{inv}} = -s \\circ (\\mathrm{id} + s_{\\mathrm{inv}})` via
+    :func:`~nitrix.numerics.fixed_point_solve` (so it is differentiable with
+    respect to ``s`` by the implicit-function theorem).  The iteration
+    converges geometrically with factor :math:`\\lVert \\nabla s \\rVert` (the
+    diffeomorphic regime :math:`\\lVert \\nabla s \\rVert < 1`) -- fast for the
     smoothed deformations registration produces.
 
-    **Robustness (B5): ``return_residual``, not a silent ``max_iter``.**
-    The failure mode is a *silent* non-converged inverse returned at the
-    iteration cap (a stiff ``‖∇s‖ → 1`` deformation).  ``return_residual``
-    returns the realised inversion error so the caller can assert
-    convergence rather than trust it; for a genuinely stiff fixed point
-    (where plain Picard plateaus) pass ``acceleration='anderson'`` (a
-    quasi-Newton mixing that converges where Picard stalls).  Plain Picard
-    is the default because it is faster *and* more accurate on the
-    smoothed (non-stiff) regime registration actually hits -- Anderson
-    helps only once Picard genuinely stalls.
+    The failure mode of a bare iteration cap is a *silent* non-converged
+    inverse returned at ``max_iter`` (a stiff
+    :math:`\\lVert \\nabla s \\rVert \\to 1` deformation).  Setting
+    ``return_residual`` returns the realised inversion error so the caller
+    can assert convergence rather than trust it; for a genuinely stiff fixed
+    point (where plain Picard plateaus) pass ``acceleration='anderson'`` (a
+    quasi-Newton mixing that converges where Picard stalls).  Plain Picard is
+    the default because it is faster *and* more accurate on the smoothed
+    (non-stiff) regime registration actually hits -- Anderson helps only once
+    Picard genuinely stalls.
 
     Parameters
     ----------
     s
         Displacement field, ``(*spatial, ndim)``.
     tol, max_iter
-        Fixed-point convergence controls.
+        Fixed-point convergence controls: the residual tolerance and the
+        iteration cap.
     mode
         Boundary mode for the inner sampling.
     acceleration
         ``'picard'`` (default) -- the plain iteration, best on the
         smoothed regime; ``'anderson'`` -- Anderson-accelerated, for a
-        stiff ``‖∇s‖ → 1`` deformation where Picard plateaus.
+        stiff :math:`\\lVert \\nabla s \\rVert \\to 1` deformation where Picard
+        plateaus.
     return_residual
         If ``True``, also return the scalar inversion residual
-        ``rms((id + s) ∘ (id + s_inv) − id)`` (zero at a perfect inverse),
-        so the caller can assert convergence rather than trust it.
+        :math:`\\mathrm{rms}\\big((\\mathrm{id} + s) \\circ (\\mathrm{id} + s_{\\mathrm{inv}}) - \\mathrm{id}\\big)`
+        (zero at a perfect inverse), so the caller can assert convergence
+        rather than trust it.
 
     Returns
     -------
-    ``s_inv`` (``return_residual=False``) or ``(s_inv, residual)``.
+    Float[Array, '*spatial ndim'] or tuple of (Float[Array, '*spatial ndim'], Float[Array, ''])
+        The inverse displacement field ``s_inv``, ``(*spatial, ndim)``, if
+        ``return_residual`` is ``False``; otherwise the pair
+        ``(s_inv, residual)`` where ``residual`` is the scalar
+        root-mean-square inversion error.
     """
     spatial_shape = s.shape[:-1]
 
@@ -229,18 +305,39 @@ def _diffeo_sqrt(
     max_iter: int,
     mode: BoundaryMode,
 ) -> Float[Array, '*spatial ndim']:
-    """Displacement of the diffeomorphism square root ``(id + s)^{1/2}``.
+    """Displacement of the diffeomorphism square root
+    :math:`(\\mathrm{id} + s)^{1/2}`.
 
-    Returns ``w`` with ``(id + w) ∘ (id + w) = id + s`` (i.e.
-    ``compose_displacement(w, w) = s``), as the **½-damped** fixed point
-    ``w ← w + ½·(s − compose_displacement(w, w))`` from ``w₀ = s/2``.
+    Returns ``w`` with
+    :math:`(\\mathrm{id} + w) \\circ (\\mathrm{id} + w) = \\mathrm{id} + s` (i.e.
+    ``compose_displacement(w, w) = s``), found as the half-damped fixed point
+    :math:`w \\leftarrow w + \\tfrac{1}{2}\\,(s - \\mathrm{compose\\_displacement}(w, w))`
+    from :math:`w_0 = s/2`.
 
-    The damping is essential *and* sufficient: the un-damped
-    ``w ← s − w∘(id+w)`` has a near-identity Jacobian of ``−I`` and
-    *oscillates*; the ½-damping makes the near-identity Jacobian ``0``
-    (``compose(w, w) ≈ 2w`` there), so the iteration is **super-linear**
-    (a residual ``~1e-10`` in well under ten steps even for a large
-    deformation) -- plain Picard, no acceleration needed.
+    The damping is essential *and* sufficient: the un-damped iteration
+    :math:`w \\leftarrow s - w \\circ (\\mathrm{id} + w)` has a near-identity
+    Jacobian of :math:`-I` and *oscillates*; the half-damping makes the
+    near-identity Jacobian :math:`0` (:math:`\\mathrm{compose}(w, w) \\approx 2w`
+    there), so the iteration is super-linear (a residual around ``1e-10`` in
+    well under ten steps even for a large deformation) -- plain Picard, no
+    acceleration needed.
+
+    Parameters
+    ----------
+    s
+        Displacement field of the deformation to take the square root of,
+        ``(*spatial, ndim)``.
+    tol, max_iter
+        Convergence controls for the fixed-point iteration: the residual
+        tolerance and the iteration cap.
+    mode
+        Boundary mode for the inner compositions.
+
+    Returns
+    -------
+    Float[Array, '*spatial ndim']
+        The displacement field ``w`` of the square-root deformation,
+        ``(*spatial, ndim)``.
     """
 
     def half_step(s_param: Array, w: Array) -> Array:
@@ -252,8 +349,24 @@ def _diffeo_sqrt(
 def _directional_grad(
     w: Float[Array, '*spatial ndim'],
 ) -> Float[Array, '*spatial ndim']:
-    """``(w·∇)w`` -- the field with component ``i`` equal to
-    ``Σ_j (∂w_i/∂x_j)·w_j`` (the first BCH log correction term)."""
+    """Directional gradient :math:`(w \\cdot \\nabla) w` of a field along
+    itself.
+
+    The first Baker-Campbell-Hausdorff correction term for the logarithm:
+    the field whose component :math:`i` equals
+    :math:`\\sum_j (\\partial w_i / \\partial x_j)\\, w_j`.
+
+    Parameters
+    ----------
+    w
+        Displacement (or velocity) field, ``(*spatial, ndim)``.
+
+    Returns
+    -------
+    Float[Array, '*spatial ndim']
+        The directional gradient :math:`(w \\cdot \\nabla) w`,
+        ``(*spatial, ndim)``.
+    """
     ndim = w.shape[-1]
     grad_w = jacobian_displacement(w) - jnp.eye(ndim, dtype=w.dtype)
     return jnp.einsum('...ij,...j->...i', grad_w, w)
@@ -268,62 +381,77 @@ def field_log(
     correction: Literal['first_order', 'bch'] = 'first_order',
     mode: BoundaryMode = 'nearest',
 ) -> Float[Array, '*spatial ndim']:
-    """Stationary-velocity logarithm of ``φ = id + displacement``.
+    """Stationary-velocity logarithm of the deformation
+    :math:`\\varphi = \\mathrm{id} + \\mathrm{displacement}`.
 
-    The inverse of ``integrate_velocity_field`` by **inverse scaling-and-
-    squaring** (the dense analogue of ``linalg.matrix_log``): take
-    ``n_sqrt`` diffeomorphism square roots until near identity, then
-    ``v ≈ 2**n_sqrt · w`` where ``w`` is the ``n_sqrt``-times square root.
+    The inverse of :func:`~nitrix.geometry.integrate_velocity_field` by
+    *inverse scaling-and-squaring* (the dense analogue of
+    :func:`~nitrix.linalg.matrix_log`): take ``n_sqrt`` diffeomorphism square
+    roots until near identity, then :math:`v \\approx 2^{n_{\\mathrm{sqrt}}} \\cdot w`
+    where :math:`w` is the ``n_sqrt``-times square root.
 
-    **``exp`` is not surjective -- the recovered ``v`` is a best fit.** A
-    general diffeomorphism (a greedy composition of non-commuting warps)
-    is *not* ``exp(v)`` for any single stationary ``v``, so ``field_log``
-    returns the **best SVF parameterisation**, not a true inverse of an
-    ``exp`` that does not exist there.  Concretely, two distinct accuracy
-    notions:
+    The exponential is not surjective, so the recovered :math:`v` is a best
+    fit.  A general diffeomorphism (a greedy composition of non-commuting
+    warps) is *not* :math:`\\exp(v)` for any single stationary :math:`v`, so
+    this function returns the *best stationary-velocity-field
+    parameterisation*, not a true inverse of an exponential that does not
+    exist there.  Concretely, two distinct accuracy notions:
 
-    - **Round-trip fidelity** -- ``integrate_velocity_field(field_log(s),
-      n_steps=n_sqrt) == id + s`` is **exact** (to ``sqrt_tol``),
-      *unconditionally* (``v/2**n_sqrt`` *is* the square-root displacement
-      by construction).  This is what reproduces the given warp -- what
-      most consumers need.
-    - **Generating-velocity fidelity** -- if ``φ = exp(v_true)`` then the
-      returned ``v = v_true + O(‖v‖² / 2**n_sqrt)`` (the log approximation,
-      §below); on a *non-SVF* ``φ`` there is no ``v_true`` and the SVF fit
-      carries a nonzero residual ``‖exp(v) − φ‖`` (measure it via the
-      round-trip if needed).
+    - **Round-trip fidelity** -- reintegrating the result reproduces the
+      input, ``integrate_velocity_field(field_log(s), n_steps=n_sqrt)`` equals
+      :math:`\\mathrm{id} + s` *exactly* (to ``sqrt_tol``) and
+      unconditionally, because :math:`v / 2^{n_{\\mathrm{sqrt}}}` *is* the
+      square-root displacement by construction.  This is what reproduces the
+      given warp -- what most consumers need.
+    - **Generating-velocity fidelity** -- if :math:`\\varphi = \\exp(v_{\\mathrm{true}})`
+      then the returned velocity is
+      :math:`v = v_{\\mathrm{true}} + O(\\lVert v \\rVert^2 / 2^{n_{\\mathrm{sqrt}}})`
+      (the logarithm approximation); on a deformation that is not a
+      stationary velocity field there is no :math:`v_{\\mathrm{true}}` and the
+      fit carries a nonzero residual :math:`\\lVert \\exp(v) - \\varphi \\rVert`
+      (measure it via the round-trip if needed).
 
-    The recovered ``v`` feeds the velocity barycentre / template machinery
-    (``geometry.velocity_mean`` / ``transform_mean``).  Differentiable
-    (fixed-point IFT) and GPU-native (no ``safe_inv``, unlike
-    ``matrix_log``).
+    The recovered velocity feeds the velocity-barycentre / template machinery
+    (:func:`~nitrix.geometry.velocity_mean` /
+    :func:`~nitrix.geometry.transform_mean`).  It is differentiable (via the
+    implicit-function theorem through the fixed points) and GPU-native (no
+    dense inverse, unlike :func:`~nitrix.linalg.matrix_log`).
 
     Parameters
     ----------
     displacement
-        The deformation as a displacement field ``s`` (``φ = id + s``),
-        ``(*spatial, ndim)``.
+        The deformation as a displacement field :math:`s`
+        (:math:`\\varphi = \\mathrm{id} + s`), ``(*spatial, ndim)``.
     n_sqrt
         Number of inverse-squaring (diffeomorphism square-root) steps.
-        Matches ``integrate_velocity_field``'s default ``n_steps`` so the
-        ``exp``/``log`` charts are consistent; the generating-velocity
-        error halves with each extra root.
+        Matches the default ``n_steps`` of
+        :func:`~nitrix.geometry.integrate_velocity_field` so the exponential
+        and logarithm charts are consistent; the generating-velocity error
+        halves with each extra root.
     sqrt_tol, sqrt_max_iter
-        Convergence controls for each square-root fixed point.
+        Convergence controls for each square-root fixed point: the residual
+        tolerance and the iteration cap.
     correction
-        ``'first_order'`` (default) -- ``v = 2**n_sqrt · w`` (``log(id+w)
-        ≈ w``); **preserves the exact round-trip**.  ``'bch'`` -- the
-        one-term correction ``v = 2**n_sqrt · (w − ½(w·∇)w)``, more
-        accurate as the *generating* velocity but it **breaks the exact
-        round-trip** (use only when the velocity is interpreted as the
-        true generator, e.g. geodesic / momentum analysis).
+        ``'first_order'`` (default) -- :math:`v = 2^{n_{\\mathrm{sqrt}}} \\cdot w`
+        (using :math:`\\log(\\mathrm{id} + w) \\approx w`); this *preserves the
+        exact round-trip*.  ``'bch'`` -- the one-term correction
+        :math:`v = 2^{n_{\\mathrm{sqrt}}} \\cdot (w - \\tfrac{1}{2}(w \\cdot \\nabla) w)`,
+        more accurate as the *generating* velocity but it *breaks the exact
+        round-trip* (use only when the velocity is interpreted as the true
+        generator, e.g. geodesic / momentum analysis).
     mode
         Boundary mode for the inner compositions (edge-replicate by
         default, the flow-field convention).
 
     Returns
     -------
-    The stationary velocity field ``v``, ``(*spatial, ndim)``.
+    Float[Array, '*spatial ndim']
+        The stationary velocity field :math:`v`, ``(*spatial, ndim)``.
+
+    Raises
+    ------
+    ValueError
+        If ``correction`` is neither ``'first_order'`` nor ``'bch'``.
     """
     w = displacement
     for _ in range(n_sqrt):

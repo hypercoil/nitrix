@@ -1,0 +1,51 @@
+---
+title: "nitrix.nn.norm"
+generated: true
+signature-hash: f6a757684c540eed
+description: "Fused LayerNorm / GroupNorm / InstanceNorm."
+listing:
+  id: nitrix-nn-norm-symbols
+  contents: "nitrix-nn-norm/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.nn.norm`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Fused LayerNorm / GroupNorm / InstanceNorm.
+
+Public [`layer_norm`](nitrix-nn-norm/layer_norm.qmd), [`group_norm`](nitrix-nn-norm/group_norm.qmd) and `instance_norm`, each
+with backend selection between a pure-JAX reference and a fused CUDA kernel.
+The JAX reference is the bit-faithful oracle and the path that ships today; the
+`pallas-cuda` backend is a fused single-pass fast path, certified numerically
+equivalent to the reference within tolerance and promoted only when profiling
+shows normalisation bandwidth on a model's critical path.
+
+Each operation carries the curse-of-depth `out_scale` hook (see the
+[`reference_layer_norm`](nitrix-nn-norm/reference_layer_norm.qmd) oracle). Until the fused kernel is available, a
+`pallas-cuda` request falls back loudly to the reference, whose XLA fusion is
+already correct and adequate.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `c` | feature channels (channels-last) |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-nn-norm-symbols}
+:::

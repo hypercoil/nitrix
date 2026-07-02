@@ -4,33 +4,39 @@
 """
 Random-effect modes (BLUPs) and conditional prediction for the LME fitters.
 
-The *apply* half of the mixed-model estimator: `lme_fit` estimates the
+The *apply* half of the mixed-model estimator: :func:`lme_fit` estimates the
 variance components and fixed effects, and this module reads off the random-
-effect modes ``b_g`` (the BLUPs) and predicts on a new design at either the
-**population** (marginal, ``X beta``) or **conditional** (subject-specific,
-``X beta + Z b_g``) level.
+effect modes :math:`b_g` (the BLUPs) and predicts on a new design at either the
+**population** (marginal, :math:`X\\beta`) or **conditional** (subject-specific,
+:math:`X\\beta + Z b_g`) level.
 
-The BLUP for a single block-diagonal-by-group factor (the R1 scalar-intercept
-and R2 random-slope tiers) is the mixed-model-equation form
+The BLUP for a single block-diagonal-by-group factor (the scalar-intercept and
+random-slope tiers) is the mixed-model-equation form
 
-    b_g = (Z_g^T Z_g / sigma_e^2 + G^{-1})^{-1} (Z_g^T r_g / sigma_e^2),
-    r = y - X beta,
+.. math::
+
+    b_g = \\left(Z_g^{\\top} Z_g / \\sigma_e^2 + G^{-1}\\right)^{-1}
+          \\left(Z_g^{\\top} r_g / \\sigma_e^2\\right),
+    \\qquad r = y - X\\beta,
 
 computed once at fit (opt-in ``retain_blups=True``) from the converged
-``(beta, G, sigma_e^2)`` and the training ``(y, X, Z, group)`` -- a post-fit
-pass that never touches the inner REML solver, so the default fit path is
-byte-identical.
+:math:`(\\beta, G, \\sigma_e^2)` and the training ``(y, X, Z, group)`` -- a
+post-fit pass that never touches the inner REML solver, so the default fit path
+is byte-identical.
 
-The structured-residual (R2 + corr) tier reuses the **same** mixed-model
-equation on **whitened** data: with ``Cov(eps_g) = sigma_e^2 R_g(rho)`` and the
-per-group whitener ``W_g`` (``W_g R_g W_g^T = I``, so ``W_g^T W_g = R_g^{-1}``),
-``Z_g^T R_g^{-1} Z_g = (W_g Z_g)^T (W_g Z_g)`` and ``Z_g^T R_g^{-1} r_g =
-(W_g Z_g)^T (W_g r_g)`` -- the standard BLUP on whitened ``(Z_g, r_g)``.  That
-pass lives in :mod:`._corrfit` (where the group/whitening layout is), sharing
-the cuSOLVER-free per-group solve (:func:`_solve_blup_system`) here.  The
-crossed (R4) and nested (R3) tiers do **not** have this single block-diagonal-
-by-group structure and are not yet covered (``retain_blups`` raises there); the
-population level works for every tier.
+The structured-residual (random-slope + correlated-residual) tier reuses the
+**same** mixed-model equation on **whitened** data: with
+:math:`\\operatorname{Cov}(\\varepsilon_g) = \\sigma_e^2 R_g(\\rho)` and the
+per-group whitener :math:`W_g` (:math:`W_g R_g W_g^{\\top} = I`, so
+:math:`W_g^{\\top} W_g = R_g^{-1}`),
+:math:`Z_g^{\\top} R_g^{-1} Z_g = (W_g Z_g)^{\\top} (W_g Z_g)` and
+:math:`Z_g^{\\top} R_g^{-1} r_g = (W_g Z_g)^{\\top} (W_g r_g)` -- the standard
+BLUP on whitened :math:`(Z_g, r_g)`.  That pass lives in the correlated-residual
+fitting module (where the group/whitening layout is), sharing the cuSOLVER-free
+per-group solve (:func:`_solve_blup_system`) here.  The crossed and nested tiers
+do **not** have this single block-diagonal-by-group structure and are not yet
+covered (``retain_blups`` raises there); the population level works for every
+tier.
 """
 
 from __future__ import annotations
@@ -53,14 +59,35 @@ def _solve_blup_system(
     rhs: Float[Array, 'q r'],
     r_dim: int,
 ) -> Float[Array, 'q r']:
-    """Per-group mixed-model-equation solve ``b_g = a_g^{-1} rhs_g``.
+    """Per-group mixed-model-equation solve :math:`b_g = a_g^{-1} \\mathrm{rhs}_g`.
 
-    The shared cuSOLVER-free atom of every BLUP: ``a_g = Z_g^T Sigma_g^{-1} Z_g +
-    G^{-1}`` and ``rhs_g = Z_g^T Sigma_g^{-1} r_g`` per group, vmapped over the
-    ``q`` groups via the ``r x r`` ``small_inv_logdet`` solve.  ``_blups_standard``
-    (segment-sum Grams, ``Sigma = sigma_e^2 I``) and ``_corrfit._blups_corr``
-    (whitened Grams, ``Sigma = sigma_e^2 R(rho)``) assemble ``a`` / ``rhs`` in
-    their own layout and call this for the solve.
+    The shared cuSOLVER-free atom of every BLUP: with
+    :math:`a_g = Z_g^{\\top} \\Sigma_g^{-1} Z_g + G^{-1}` and
+    :math:`\\mathrm{rhs}_g = Z_g^{\\top} \\Sigma_g^{-1} r_g` per group, the mode
+    :math:`b_g` is recovered by inverting each :math:`r \\times r` system, vmapped
+    over the :math:`q` groups via :func:`~nitrix.linalg._smalllinalg.small_inv_logdet`.
+    :func:`_blups_standard` (segment-sum Grams, :math:`\\Sigma = \\sigma_e^2 I`)
+    and the correlated-residual path (whitened Grams,
+    :math:`\\Sigma = \\sigma_e^2 R(\\rho)`) assemble ``a`` / ``rhs`` in their own
+    layout and call this for the solve.
+
+    Parameters
+    ----------
+    a
+        ``(q, r, r)`` per-group left-hand-side matrices
+        :math:`Z_g^{\\top} \\Sigma_g^{-1} Z_g + G^{-1}`, one for each of the
+        ``q`` groups.
+    rhs
+        ``(q, r)`` per-group right-hand sides
+        :math:`Z_g^{\\top} \\Sigma_g^{-1} r_g`.
+    r_dim
+        Random-effect dimension :math:`r` (the block size passed to the small
+        inverse solve).
+
+    Returns
+    -------
+    Float[Array, 'q r']
+        The ``(q, r)`` per-group random-effect modes :math:`b_g`.
     """
     solved = jax.vmap(lambda av, bv: small_inv_logdet(av, r_dim)[0] @ bv)(
         a, rhs
@@ -80,12 +107,39 @@ def _blups_standard(
 ) -> Float[Array, 'V q r']:
     """Per-group random-effect modes for a single block-diagonal factor.
 
-    The mixed-model-equation BLUP ``b_g = (Z_g^T Z_g / sigma_e^2 + G^{-1})^{-1}
-    Z_g^T r_g / sigma_e^2`` (``r = y - X beta``), vectorised over elements and
-    groups via ``segment_sum`` + the cuSOLVER-free ``r x r`` solve.  Returns
-    ``(V, q, r)`` -- one ``r``-vector per (element, group).  For a scalar
-    intercept (``r = 1``) this is the shrinkage estimator ``sigma_b^2
-    sum_g(r) / (sigma_e^2 + n_g sigma_b^2)``.
+    The mixed-model-equation BLUP
+    :math:`b_g = (Z_g^{\\top} Z_g / \\sigma_e^2 + G^{-1})^{-1}
+    Z_g^{\\top} r_g / \\sigma_e^2` (with residual :math:`r = y - X\\beta`),
+    vectorised over elements and groups via segment sums and the cuSOLVER-free
+    :math:`r \\times r` solve (:func:`_solve_blup_system`).  For a scalar
+    intercept (:math:`r = 1`) this reduces to the shrinkage estimator
+    :math:`\\sigma_b^2 \\sum_g r / (\\sigma_e^2 + n_g \\sigma_b^2)`.
+
+    Parameters
+    ----------
+    Y
+        ``(V, N)`` responses: one length-``N`` observation vector per element.
+    X
+        ``(N, p)`` fixed-effect design (shared across elements).
+    beta
+        ``(V, p)`` fitted fixed-effect coefficients, one row per element.
+    z
+        ``(N, r)`` random-effect design for the block-diagonal factor.
+    group
+        ``(N,)`` integer group labels in ``0..n_groups-1`` assigning each row to
+        one of the random-effect blocks.
+    cov_re
+        ``(V, r, r)`` per-element random-effect covariance :math:`G`.
+    sigma_e_sq
+        ``(V,)`` per-element residual variance :math:`\\sigma_e^2`.
+    n_groups
+        Number of groups :math:`q` (segment count for the group reductions).
+
+    Returns
+    -------
+    Float[Array, 'V q r']
+        The per-element, per-group random-effect modes :math:`b_g`: one
+        length-``r`` vector for each (element, group) pair.
     """
     r_dim = z.shape[-1]
     resid = Y - beta @ X.T  # (V, N)
@@ -114,10 +168,23 @@ def _blups_standard(
 def ranef(result: Any) -> Float[Array, 'V q r']:
     """Random-effect modes (BLUPs) of a fitted mixed model.
 
-    Returns the per-level modes ``b_g`` stored on the result -- ``(V, q)`` for a
-    scalar random intercept, ``(V, q, r)`` for a random slope.  Available on a
-    :class:`~nitrix.stats.GLMMResult` (always) and on an LME result fitted with
-    ``lme_fit(..., retain_blups=True)``.
+    Returns the per-level modes :math:`b_g` stored on the result -- ``(V, q)``
+    for a scalar random intercept, ``(V, q, r)`` for a random slope.  Available
+    on a :class:`~nitrix.stats.GLMMResult` (always) and on an LME result fitted
+    with :func:`lme_fit` under ``retain_blups=True``.
+
+    Parameters
+    ----------
+    result
+        A fitted mixed-model result carrying a ``blups`` attribute -- a
+        :class:`~nitrix.stats.GLMMResult`, or an LME result fitted with
+        ``retain_blups=True``.
+
+    Returns
+    -------
+    Float[Array, 'V q r']
+        The per-element, per-group random-effect modes :math:`b_g` -- ``(V, q)``
+        for a scalar random intercept, ``(V, q, r)`` for a random slope.
 
     Raises
     ------
@@ -146,12 +213,40 @@ def _conditional_eta(
     z: Optional[Float[Array, 'N r']],
     group: Optional[Int[Array, ' N']],
 ) -> Float[Array, 'V N']:
-    """Linear predictor at ``X`` -- ``X beta`` (population) plus the per-row
-    random-effect contribution ``Z b_group`` (conditional).
+    """Linear predictor at a design ``X`` at the population or conditional level.
 
-    Unseen / unspecified groups fall back to the marginal mean (random mode 0):
-    ``group=None`` is the population level for every row.  Shared by
-    :func:`lme_predict` and ``glmm_predict``.
+    Returns :math:`X\\beta` at the ``'population'`` level, and adds the per-row
+    random-effect contribution :math:`Z b_{\\mathrm{group}}` at the
+    ``'conditional'`` level.  Unseen or unspecified groups fall back to the
+    marginal mean (random mode 0): ``group=None`` yields the population level for
+    every row.  Shared by :func:`lme_predict` and
+    :func:`~nitrix.stats.glmm_predict`.
+
+    Parameters
+    ----------
+    beta
+        ``(V, p)`` fitted fixed-effect coefficients, one row per element.
+    X
+        ``(N, p)`` fixed-effect design for the rows to predict.
+    level
+        ``'population'`` for the marginal mean :math:`X\\beta`, or
+        ``'conditional'`` to add the subject-specific random-effect term.
+    blups
+        ``(V, q)`` (scalar intercept) or ``(V, q, r)`` (random slope)
+        random-effect modes; required for the conditional level, ``None``
+        otherwise.
+    z
+        ``(N, r)`` random-effect design for the new rows; required for the
+        conditional level of a random-slope fit, ``None`` for a scalar intercept.
+    group
+        ``(N,)`` integer group labels indexing the fitted levels ``0..q-1``;
+        labels outside that range, or ``group=None``, fall back to the marginal
+        mean for those rows.
+
+    Returns
+    -------
+    Float[Array, 'V N']
+        The ``(V, N)`` linear predictor, one length-``N`` vector per element.
     """
     eta = beta @ X.T  # (V, N)
     if level == 'population':
@@ -193,17 +288,20 @@ def lme_predict(
 ) -> Float[Array, 'V N']:
     """Per-element LME prediction on a (new) design ``X``.
 
-    ``level='population'`` (default) returns the marginal mean ``X beta_hat``
-    (defined for **every** tier).  ``level='conditional'`` adds the
-    subject-specific random-effect contribution ``Z b_group`` using the fitted
-    modes (:func:`ranef`), so the result must come from ``lme_fit(...,
-    retain_blups=True)``.  A ``group`` label outside the fitted range (an unseen
-    subject) -- or ``group=None`` -- falls back to the marginal mean.
+    ``level='population'`` (default) returns the marginal mean
+    :math:`X\\hat{\\beta}` (defined for **every** tier).  ``level='conditional'``
+    adds the subject-specific random-effect contribution
+    :math:`Z b_{\\mathrm{group}}` using the fitted modes (:func:`ranef`), so the
+    result must come from :func:`lme_fit` under ``retain_blups=True``.  A
+    ``group`` label outside the fitted range (an unseen subject) -- or
+    ``group=None`` -- falls back to the marginal mean.
 
     Parameters
     ----------
     result
-        An LME result (``REMLResult`` / ``LMEResult`` / ...).
+        An LME result (:class:`~nitrix.stats.REMLResult`,
+        :class:`~nitrix.stats.LMEResult`, or another fitted-LME result carrying
+        ``beta_hat`` and, for the conditional level, ``blups``).
     X
         ``(N, p)`` fixed-effect design (same columns as the fit).
     z
@@ -217,8 +315,10 @@ def lme_predict(
 
     Returns
     -------
-    ``(V, N)`` predicted means.  Differentiable w.r.t. ``X`` / ``z`` (and the
-    fitted coefficients / modes).
+    Float[Array, 'V N']
+        The ``(V, N)`` predicted means, one length-``N`` vector per element.
+        Differentiable with respect to ``X`` / ``z`` (and the fitted
+        coefficients / modes).
     """
     blups = getattr(result, 'blups', None)
     return _conditional_eta(

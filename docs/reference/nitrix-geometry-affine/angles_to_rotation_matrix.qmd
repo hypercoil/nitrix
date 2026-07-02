@@ -1,0 +1,46 @@
+---
+title: "angles_to_rotation_matrix"
+generated: true
+description: "Convert Euler angles to a rotation matrix (2-D or 3-D)."
+---
+
+[‹ back to `nitrix.geometry.affine`](../nitrix-geometry-affine.qmd)
+
+<!-- nitrix:gen sig:angles_to_rotation_matrix -->
+```python
+angles_to_rotation_matrix(ang: Float[Array, '... a'], *, deg: bool = True) -> Float[Array, '... d d']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:angles_to_rotation_matrix -->
+Convert Euler angles to a rotation matrix (2-D or 3-D).
+
+In 2-D a single angle `(..., 1)` yields a `(..., 2, 2)` planar
+rotation.  In 3-D three angles `(..., 3)` yield a `(..., 3, 3)`
+right-handed intrinsic rotation $R = X\,Y\,Z$ (rotate about the
+object's x, then y, then z; the axis order reads with the matrix product
+because intrinsic rotations post-multiply -- equivalently the extrinsic
+sequence z-then-y-then-x, rightmost factor applied first).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:angles_to_rotation_matrix -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `ang` | `Float` | `...` × `a` | — | Batched Euler angles, with a trailing axis of length 1 (2-D) or 3 (3-D). |
+| `deg` | `bool` | — | `True` | If `True` (the default), `ang` is interpreted in degrees; if `False`, in radians. |
+
+**Returns** `Float` — shape `...` × `d` × `d`. Batched rotation matrices, `(..., 2, 2)` in 2-D or `(..., 3, 3)` in 3-D.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:angles_to_rotation_matrix -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `a` | *(undocumented — add to `_dimensions.yml`)* |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->

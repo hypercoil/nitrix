@@ -1,0 +1,39 @@
+---
+title: "fdr_bh"
+generated: true
+description: "Benjamini-Hochberg false-discovery-rate correction."
+---
+
+[‹ back to `nitrix.stats.inference.multiple_comparisons`](../nitrix-stats-inference-multiple_comparisons.qmd)
+
+<!-- nitrix:gen sig:fdr_bh -->
+```python
+fdr_bh(p_values: Float[Array, 'n'], *, alpha: float = 0.05) -> Tuple[Bool[Array, 'n'], Float[Array, 'n']]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:fdr_bh -->
+Benjamini-Hochberg false-discovery-rate correction.
+
+Valid under independence or positive regression dependence of the p-values.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:fdr_bh -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `p_values` | `Float` | `n` | — | Flat vector of `n` per-element p-values. |
+| `alpha` | `float` | — | `0.05` | Target false-discovery rate defining the rejection mask. Default `0.05`. |
+
+**Returns** `Tuple[Bool[Array, 'n'], Float[Array, 'n']]`. The rejection mask `p_adjusted <= alpha`. The Benjamini-Hochberg adjusted p-values (q-values), enforced monotone non-decreasing in rank.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:fdr_bh -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

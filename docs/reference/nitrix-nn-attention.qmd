@@ -1,0 +1,52 @@
+---
+title: "nitrix.nn.attention"
+generated: true
+signature-hash: 10dbe6ec5a39b851
+description: "Scaled-dot-product / flash attention."
+listing:
+  id: nitrix-nn-attention-symbols
+  contents: "nitrix-nn-attention/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.nn.attention`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Scaled-dot-product / flash attention.
+
+The public entry point [`scaled_dot_product_attention`](nitrix-nn-attention/scaled_dot_product_attention.qmd) supports
+three-level backend selection.  Under the two-tier parity contract the
+`'jax'` reference is the bit-faithful oracle and `'pallas-cuda'` is the
+fused flash path, certified equivalent to the reference ($\text{pallas-cuda}
+\approx \text{jax}$) only inside nitrix; downstream consumers pin their own
+forward-parity oracle to `backend='jax'`.
+
+Until the fused kernel lands, an explicit or auto-resolved `'pallas-cuda'`
+request falls back to the reference with a loud `NitrixBackendFallback`
+warning.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `h` | *(undocumented — add to `_dimensions.yml`)* |
+| `s` | flattened spatial sample positions |
+| `d` | spatial dimension (2 or 3) |
+| `t` | *(undocumented — add to `_dimensions.yml`)* |
+| `d_v` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-nn-attention-symbols}
+:::

@@ -1,0 +1,46 @@
+---
+title: "nitrix.signal"
+generated: true
+signature-hash: 11685e389989d588
+description: "nitrix.signal -- 1D signal-processing primitives."
+listing:
+  id: nitrix-signal-symbols
+  contents: "nitrix-signal/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.signal`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+nitrix.signal -- 1D signal-processing primitives.
+
+Submodules:
+
+- `window`     -- windowed-sample extraction utilities.
+- `filter`     -- linear filtering: polynomial detrend;
+  zero-phase frequency-domain band-pass / band-stop / low- /
+  high-pass ([`bandpass`](nitrix-signal-filter/bandpass.qmd) / [`bandstop`](nitrix-signal-filter/bandstop.qmd) / [`lowpass`](nitrix-signal-filter/lowpass.qmd) /
+  [`highpass`](nitrix-signal-filter/highpass.qmd)); and recursive Butterworth IIR ([`iir_filter`](nitrix-signal-filter/iir_filter.qmd) /
+  [`butterworth_sos`](nitrix-signal-filter/butterworth_sos.qmd) / [`sosfilt`](nitrix-signal-filter/sosfilt.qmd) / [`sosfiltfilt`](nitrix-signal-filter/sosfiltfilt.qmd)).
+- `fourier`    -- spectral utilities: product-filter,
+  analytic-signal / Hilbert transform, instantaneous frequency /
+  phase, envelope.
+- `tsconv`     -- time-series convolution (1D conv with
+  channel and batch handling matching the fMRI use case).
+- `interpolate` -- 1D / N-D interpolation utilities.
+
+This subpackage replaces `nitrix.functional.window` plus the
+`hypercoil.functional.{tsconv,interpolate}` ports.
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-signal-symbols}
+:::

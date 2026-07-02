@@ -1,39 +1,47 @@
 # -*- coding: utf-8 -*-
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
-"""
-Nested random-effects REML for a two-level hierarchy ``(1 | g1/g2)`` (tier R3).
+r"""
+Nested random-effects REML for a two-level hierarchy ``(1 | g1/g2)``.
 
-A nested design has an outer grouping factor ``g1`` (``q1`` levels) and an inner
-factor ``g2`` **nested within** ``g1`` (each inner level belongs to exactly one
-outer level; the ``q2`` distinct ``(g1, g2)`` combinations are the *sublevels*).
-The model, per voxel::
+A nested design has an outer grouping factor ``g1`` (:math:`q_1` levels) and an
+inner factor ``g2`` **nested within** ``g1`` (each inner level belongs to
+exactly one outer level; the :math:`q_2` distinct ``(g1, g2)`` combinations are
+the *sublevels*).  The model, per voxel, is
 
-    y = X beta + Z1 b1 + Z2 b2 + eps
-    b1 ~ N(0, sigma1^2 I_{q1}),  b2 ~ N(0, sigma2^2 I_{q2}),  eps ~ N(0, sigma_e^2 I)
-    V  = sigma1^2 Z1 Z1^T + sigma2^2 Z2 Z2^T + sigma_e^2 I
+.. math::
 
-Because the inner factor is nested, ``V`` is **block-diagonal across the outer
-factor** (different outer blocks share no random effect), and *within* an outer
-block it is a two-level telescoping structure: a compound-symmetry block per
-inner sublevel (``sigma_e^2 I + sigma2^2 11^T``) plus a rank-one outer term
-(``sigma1^2 11^T`` over the whole block).  Both levels invert in closed form by
-Sherman-Morrison -- the **telescoping Woodbury** -- so ``V^{-1}`` / ``log|V|``
-never form an ``N x N`` (or even ``n_i x n_i``) factor:
+    y &= X \beta + Z_1 b_1 + Z_2 b_2 + \epsilon \\
+    b_1 &\sim N(0, \sigma_1^2 I_{q_1}),\quad
+      b_2 \sim N(0, \sigma_2^2 I_{q_2}),\quad
+      \epsilon \sim N(0, \sigma_e^2 I) \\
+    V &= \sigma_1^2 Z_1 Z_1^{\top} + \sigma_2^2 Z_2 Z_2^{\top} + \sigma_e^2 I
 
-- inner: ``C_ij^{-1} = sigma_e^{-2}[I - c_ij 11^T]``, ``c_ij = sigma2^2 /
-  (sigma_e^2 + n_ij sigma2^2)`` -- a rank-one update per sublevel ``j``;
-- outer: ``V_i^{-1} = A_i^{-1} - d_i (A_i^{-1} 1)(A_i^{-1} 1)^T``,
-  ``d_i = sigma1^2 / (1 + sigma1^2 1^T A_i^{-1} 1)``, with ``A_i^{-1}`` the
-  block-diagonal inner inverse.
+Because the inner factor is nested, :math:`V` is **block-diagonal across the
+outer factor** (different outer blocks share no random effect), and *within* an
+outer block it is a two-level telescoping structure: a compound-symmetry block
+per inner sublevel (:math:`\sigma_e^2 I + \sigma_2^2 \mathbf{1}\mathbf{1}^{\top}`)
+plus a rank-one outer term (:math:`\sigma_1^2 \mathbf{1}\mathbf{1}^{\top}` over
+the whole block).  Both levels invert in closed form by Sherman-Morrison -- the
+**telescoping Woodbury** -- so :math:`V^{-1}` / :math:`\log|V|` never form an
+:math:`N \times N` (or even :math:`n_i \times n_i`) factor:
 
-Every per-block quantity (``X_i^T V_i^{-1} X_i``, ``X_i^T V_i^{-1} y_i``,
-``y_i^T V_i^{-1} y_i``, ``log|V_i|``) is assembled from **per-sublevel
-sufficient statistics** (counts and group-sums of ``X`` / ``y``) aggregated to
-the outer factor by ``segment_sum`` -- the same analytic-objective + damped
-autodiff-Newton recipe as ``_blockwoodbury`` / ``_varcomp``, over the three
-variance components ``theta = [log sigma1^2, log sigma2^2, log sigma_e^2]``.  No
-``N x N`` intermediate, cuSOLVER-free (every solve a tiny ``small_inv_logdet``).
+- inner: :math:`C_{ij}^{-1} = \sigma_e^{-2}[I - c_{ij}\mathbf{1}\mathbf{1}^{\top}]`,
+  :math:`c_{ij} = \sigma_2^2 / (\sigma_e^2 + n_{ij}\sigma_2^2)` -- a rank-one
+  update per sublevel :math:`j`;
+- outer: :math:`V_i^{-1} = A_i^{-1} - d_i (A_i^{-1}\mathbf{1})(A_i^{-1}\mathbf{1})^{\top}`,
+  :math:`d_i = \sigma_1^2 / (1 + \sigma_1^2 \mathbf{1}^{\top} A_i^{-1}\mathbf{1})`,
+  with :math:`A_i^{-1}` the block-diagonal inner inverse.
+
+Every per-block quantity (:math:`X_i^{\top} V_i^{-1} X_i`,
+:math:`X_i^{\top} V_i^{-1} y_i`, :math:`y_i^{\top} V_i^{-1} y_i`,
+:math:`\log|V_i|`) is assembled from **per-sublevel sufficient statistics**
+(counts and group-sums of ``X`` / ``y``) aggregated to the outer factor by
+``segment_sum`` -- the same analytic-objective plus damped autodiff-Newton
+recipe as the single-level variance-component solver, over the three variance
+components :math:`\theta = [\log\sigma_1^2, \log\sigma_2^2, \log\sigma_e^2]`.
+There is no :math:`N \times N` intermediate, and the path is cuSOLVER-free (every
+solve is a tiny :func:`small_inv_logdet`).
 """
 
 from __future__ import annotations
@@ -54,7 +62,7 @@ __all__ = ['NestedStats', 'nested_layout', 'fit_nested_reml']
 
 
 class NestedStats(NamedTuple):
-    """Shared (``y``-independent) sufficient statistics for a nested design."""
+    """Shared (response-independent) sufficient statistics for a nested design."""
 
     obs_sub: Int[Array, 'N']  # sublevel index per observation (0..q2-1)
     obs_outer: Int[Array, 'N']  # outer-factor index per observation (0..q1-1)
@@ -73,13 +81,36 @@ def nested_layout(
     inner: Int[Array, 'N'],
     X: Float[Array, 'N p'],
 ) -> NestedStats:
-    """Build the nested-design sufficient statistics from the two factors.
+    r"""Build the nested-design sufficient statistics from the two factors.
 
-    ``outer`` (``g1``) and ``inner`` (``g2``) are ``(N,)`` integer labels; each
-    distinct ``(outer, inner)`` pair is a sublevel (so ``inner`` may be coded
-    within-``outer`` or globally -- the pair is what counts).  The per-sublevel
-    and per-outer-level reductions of the shared design ``X`` are computed once
-    (data-independent of ``y``).
+    Each distinct ``(outer, inner)`` pair is mapped to a contiguous sublevel
+    id, and the per-sublevel and per-outer-level reductions of the shared
+    design ``X`` are computed once (they are independent of the response
+    ``y``).  These shared statistics feed the per-voxel REML fit.
+
+    Parameters
+    ----------
+    outer : Int[Array, 'N']
+        Outer grouping factor (``g1``): an integer label per observation.  The
+        number of outer levels :math:`q_1` is taken as ``outer.max() + 1``.
+    inner : Int[Array, 'N']
+        Inner grouping factor (``g2``): an integer label per observation.  Each
+        distinct ``(outer, inner)`` pair defines a sublevel, so ``inner`` may be
+        coded either within each ``outer`` level or globally -- only the pairing
+        matters.
+    X : Float[Array, 'N p']
+        The shared design matrix with ``N`` observations and ``p`` fixed-effect
+        columns.
+
+    Returns
+    -------
+    NestedStats
+        The response-independent sufficient statistics: the observation-to-
+        sublevel and observation-to-outer index maps, the outer parent of each
+        sublevel, per-sublevel observation counts and sums of ``X`` rows,
+        per-outer-level observation counts, per-outer-level sums of the outer
+        products :math:`x x^{\top}` and of the ``X`` rows, and the level counts
+        :math:`q_1` and :math:`q_2`.
     """
     o_np = np.asarray(outer)
     i_np = np.asarray(inner)
@@ -135,7 +166,47 @@ def _nll_and_beta(
     n: int,
     ridge: float,
 ) -> Tuple[Float[Array, ''], Float[Array, 'p']]:
-    """Profile REML negative log-likelihood (and ``beta_hat``) at ``theta``."""
+    r"""Profile REML negative log-likelihood (and ``beta_hat``) at ``theta``.
+
+    Evaluates the restricted (profiled) negative log-likelihood of the nested
+    two-level model at the log-variance vector ``theta``, together with the
+    generalised-least-squares fixed-effect estimate that it profiles out.  All
+    per-block quantities are assembled from the shared sufficient statistics
+    and the response reductions by the telescoping Sherman-Morrison recipe, so
+    no :math:`N \times N` matrix is ever formed.
+
+    Parameters
+    ----------
+    theta : Float[Array, '3']
+        Log-variance components
+        :math:`[\log\sigma_1^2, \log\sigma_2^2, \log\sigma_e^2]` for the outer,
+        inner, and residual variances.
+    stats : NestedStats
+        Response-independent sufficient statistics from :func:`nested_layout`.
+    sy : Float[Array, 'q2']
+        Per-sublevel sum of the response ``y``.
+    gxy : Float[Array, 'q1 p']
+        Per-outer-level sum of ``X`` rows weighted by ``y``.
+    gyy : Float[Array, 'q1']
+        Per-outer-level sum of :math:`y^2`.
+    sy1 : Float[Array, 'q1']
+        Per-outer-level sum of the response ``y``.
+    p : int
+        Number of fixed-effect columns (compile-time shape).
+    n : int
+        Number of observations ``N`` (compile-time shape).
+    ridge : float
+        Tikhonov regulariser added to the diagonal of
+        :math:`X^{\top} V^{-1} X` before it is inverted.
+
+    Returns
+    -------
+    nll : Float[Array, '']
+        The profile REML negative log-likelihood at ``theta``.
+    beta : Float[Array, 'p']
+        The generalised-least-squares fixed-effect estimate
+        :math:`\hat\beta` at ``theta``.
+    """
     s1 = jnp.exp(theta[0])  # sigma1^2 (outer)
     s2 = jnp.exp(theta[1])  # sigma2^2 (inner)
     se = jnp.exp(theta[2])  # sigma_e^2 (residual)
@@ -202,8 +273,44 @@ def _fit_one(
     n: int,
     spec: VarCompSpec,
 ) -> Tuple[Float[Array, '3'], Float[Array, 'p'], Float[Array, '']]:
-    """Single-voxel nested REML fit via the shared saddle-free Newton
-    (``_optimise.damped_newton``)."""
+    """Fit the nested REML model for a single voxel.
+
+    Minimises the profile REML negative log-likelihood over the three log-
+    variance components using the shared damped (saddle-free) Newton optimiser,
+    then re-evaluates at the optimum to recover the fixed-effect estimate and
+    the log-likelihood.
+
+    Parameters
+    ----------
+    sy : Float[Array, 'q2']
+        Per-sublevel sum of the response ``y``.
+    gxy : Float[Array, 'q1 p']
+        Per-outer-level sum of ``X`` rows weighted by ``y``.
+    gyy : Float[Array, 'q1']
+        Per-outer-level sum of :math:`y^2`.
+    sy1 : Float[Array, 'q1']
+        Per-outer-level sum of the response ``y``.
+    theta_init : Float[Array, '3']
+        Initial log-variance components for the Newton iteration.
+    stats : NestedStats
+        Response-independent sufficient statistics from :func:`nested_layout`.
+    p : int
+        Number of fixed-effect columns (compile-time shape).
+    n : int
+        Number of observations ``N`` (compile-time shape).
+    spec : VarCompSpec
+        Configuration for the variance-component solve: the ridge and the
+        Newton keyword arguments.
+
+    Returns
+    -------
+    theta : Float[Array, '3']
+        The fitted log-variance components at the REML optimum.
+    beta : Float[Array, 'p']
+        The fixed-effect estimate at the optimum.
+    log_lik : Float[Array, '']
+        The maximised restricted log-likelihood (the negated final objective).
+    """
 
     def nll(theta: Float[Array, '3']) -> Float[Array, '']:
         return _nll_and_beta(
@@ -227,10 +334,46 @@ def fit_nested_reml(
     spec: VarCompSpec = VarCompSpec(),
     block: Optional[int] = None,
 ) -> Tuple[Float[Array, 'V 3'], Float[Array, 'V p'], Float[Array, 'V']]:
-    """Batched nested-RE REML over ``V`` voxels (one two-level hierarchy).
+    r"""Fit the nested random-effects REML model over a batch of voxels.
 
-    Returns ``(theta_hat, beta_hat, log_lik)`` with ``theta = [log sigma1^2,
-    log sigma2^2, log sigma_e^2]`` (outer / inner / residual variances).
+    Applies the two-level nested variance-component fit to each of ``V`` voxels
+    that share a common design and grouping structure.  The shared sufficient
+    statistics are built once from the design; per voxel the response
+    reductions are formed and the profile REML objective is minimised over the
+    three log-variance components.  The batch is mapped in configurable blocks
+    to bound peak memory.
+
+    Parameters
+    ----------
+    Y : Float[Array, 'V N']
+        The response for each of ``V`` voxels, with ``N`` observations per
+        voxel.
+    X : Float[Array, 'N p']
+        The shared fixed-effect design matrix, common to all voxels.
+    outer : Int[Array, 'N']
+        Outer grouping factor (``g1``): an integer label per observation.
+    inner : Int[Array, 'N']
+        Inner grouping factor (``g2``), nested within ``outer``: an integer
+        label per observation.
+    theta_init : Float[Array, 'V 3']
+        Initial log-variance components per voxel.
+    spec : VarCompSpec, optional
+        Configuration for the variance-component solve (ridge and Newton
+        settings).
+    block : int, optional
+        Block size for the batched map over voxels; ``None`` maps the whole
+        batch at once.
+
+    Returns
+    -------
+    theta_hat : Float[Array, 'V 3']
+        Fitted log-variance components per voxel,
+        :math:`[\log\sigma_1^2, \log\sigma_2^2, \log\sigma_e^2]` (outer, inner,
+        residual variances).
+    beta_hat : Float[Array, 'V p']
+        Fitted fixed-effect estimates per voxel.
+    log_lik : Float[Array, 'V']
+        Maximised restricted log-likelihood per voxel.
     """
     n, p = X.shape
     stats = nested_layout(outer, inner, X)

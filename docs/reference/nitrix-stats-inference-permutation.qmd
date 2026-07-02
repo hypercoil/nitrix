@@ -1,37 +1,56 @@
 ---
 title: "nitrix.stats.inference.permutation"
 generated: true
-signature-hash: f7ecf581fdc5e717
+signature-hash: 230d3a269fbf9c71
+description: "Exchangeability operators for permutation inference."
+listing:
+  id: nitrix-stats-inference-permutation-symbols
+  contents: "nitrix-stats-inference-permutation/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
-Auto-generated scaffold for `nitrix.stats.inference.permutation` (signatures only). Replace the
-skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
-`check_reference_staleness.py` flags this page if the underlying
-signatures drift from this stub.
+Auto-generated scaffold for `nitrix.stats.inference.permutation`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
 
-## `sign_flips` {#sign_flips}
+<!-- nitrix:gen overview:__module__ -->
+Exchangeability operators for permutation inference.
 
-```python
-sign_flips(n: int, n_perm: int, key: Array, *, blocks: Optional[Int[Array, 'N']]=None) -> Float[Array, 'n_perm N']
-```
+Keyed pure generators that build the set of relabellings used by
+`randomise`-style permutation tests:
 
-``(n_perm, n)`` matrix of ``+/-1`` sign flips (row 0 = identity).
+- [`sign_flips`](nitrix-stats-inference-permutation/sign_flips.qmd) -- the $\pm 1$ sign-flip matrix for symmetric /
+  one-sample tests (the null is invariant to flipping an exchangeable
+  observation's sign).
+- [`permutations`](nitrix-stats-inference-permutation/permutations.qmd) -- the row-permutation index matrix for shuffle-based
+  tests (two-sample, regression).
 
-**Parameters** — *TODO: document each parameter.*
+Both honour **exchangeability blocks**: with a per-observation `blocks` label,
+sign flips act per *whole block* (a block flips together) and permutations act
+*within* each block (an observation can only move to a same-block position).
+The first row is always the identity (the unpermuted data), so the observed
+statistic is one of the permutations -- the standard `count / n_perm`
+convention with $p \geq 1 / n_{\mathrm{perm}}$.
 
-**Returns** — *TODO.*
+The choice of random key is left to the caller; these generators are
+deterministic given `(shape, key)`.
+<!-- nitrix:/gen -->
 
-## `permutations` {#permutations}
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
 
-```python
-permutations(n: int, n_perm: int, key: Array, *, blocks: Optional[Int[Array, 'N']]=None) -> Int[Array, 'n_perm N']
-```
+| dim | meaning |
+|---|---|
+| `n_perm` | *(undocumented — add to `_dimensions.yml`)* |
+| `N` | observations — time points, subjects, or sampled points |
+<!-- nitrix:/gen -->
 
-``(n_perm, n)`` permutation-index matrix (row 0 = identity).
+## Symbols
 
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
+::: {#nitrix-stats-inference-permutation-symbols}
+:::

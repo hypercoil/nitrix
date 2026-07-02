@@ -1,0 +1,43 @@
+---
+title: "complex_decompose"
+generated: true
+description: "Decompose a complex-valued tensor into amplitude and phase components."
+---
+
+[‹ back to `nitrix.numerics.tensor_ops`](../nitrix-numerics-tensor_ops.qmd)
+
+*Re-exported here; defined in `nitrix._internal.util`.*
+
+<!-- nitrix:gen sig:complex_decompose -->
+```python
+complex_decompose(complex: Complex[Array, ...]) -> Tuple[Float[Array, ...], Float[Array, ...]]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:complex_decompose -->
+Decompose a complex-valued tensor into amplitude and phase components.
+
+Together with
+[complex_recompose](nitrix._internal.util.complex_recompose.html), this
+function provides a uniform interface for switching between complex and
+polar representations of complex numbers. This enables us to change the
+implementation of these operations in one place when we find the most
+efficient and stable method.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:complex_decompose -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `complex` | `Complex[Array, ...]` | — | — | Complex-valued tensor. |
+
+**Returns** `Tuple[Float[Array, ...], Float[Array, ...]]`. Amplitude of each entry in the input tensor. Phase of each entry in the input tensor, in radians.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:complex_decompose -->
+### See also
+
+[`complex_recompose`](../nitrix-numerics-tensor_ops/complex_recompose.qmd)
+<!-- nitrix:/gen -->
+

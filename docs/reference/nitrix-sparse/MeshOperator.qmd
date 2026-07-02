@@ -1,0 +1,25 @@
+---
+title: "MeshOperator"
+generated: true
+description: "A sparse mesh / graph operator in either supported storage format."
+---
+
+[‹ back to `nitrix.sparse`](../nitrix-sparse.qmd)
+
+*Re-exported here; defined in `nitrix.sparse._apply`.*
+
+<!-- nitrix:gen sig:MeshOperator -->
+```python
+MeshOperator = Union[ELL, SectionedELL]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:MeshOperator -->
+A sparse mesh / graph operator in either supported storage format.
+
+The union of the two sparse operator layouts consumed by
+[`apply_operator`](../nitrix-sparse/apply_operator.qmd): a flat [`ELL`](../nitrix-sparse-ell/ELL.qmd) (near-uniform vertex degree) or a
+bucketed [`SectionedELL`](../nitrix-sparse-ell_sectioned/SectionedELL.qmd) (irregular valence).  Surface-algorithm code
+accepts this alias so it can remain agnostic to the underlying storage format.
+<!-- nitrix:/gen -->
+

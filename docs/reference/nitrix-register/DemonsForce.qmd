@@ -1,0 +1,50 @@
+---
+title: "DemonsForce"
+generated: true
+description: "Closed-form efficient-symmetric (ESM) Demons force (the Demons default)."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._force`.*
+
+<!-- nitrix:gen sig:DemonsForce -->
+```python
+class DemonsForce
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:DemonsForce -->
+Closed-form efficient-symmetric (ESM) Demons force (the Demons default).
+
+The velocity update is $u = (F - \text{warped}) \cdot J / (|J|^2 +
+\alpha^2 (F - \text{warped})^2)$ with the symmetric gradient $J =
+\tfrac{1}{2}(\nabla F + \nabla\,\text{warped})$, where $F$ is the
+fixed image.  The fixed gradient $\nabla F$ is hoisted by `bind`
+(constant across the single-sided iterations).
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:DemonsForce.bind -->
+```python
+bind(fixed: Float[Array, '*spatial'], *, ndim: int, rel_spacing: RelSpacing = None) -> _BoundDemons
+```
+<!-- nitrix:/gen -->
+
+Bind to `fixed`, precomputing its spatial gradient.
+
+<!-- nitrix:gen sig:DemonsForce.__init__ -->
+```python
+__init__(alpha: float = 0.4, backend: Backend = 'jax') -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:DemonsForce -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->
