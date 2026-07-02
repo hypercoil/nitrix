@@ -51,6 +51,10 @@ dev = [
     "hypothesis",
     "pingouin",
     "gnureadline",
+    # High-precision Bessel oracle for the directional-statistics (vMF)
+    # tests; test-only reference dep (never a runtime import; SPEC §6.2),
+    # guarded by importorskip.
+    "mpmath",
     # >= 0.21: earlier numpyro imports jax.experimental.pjit.pjit_p, removed in
     # jax 0.10.  Test-only reference dep (not a runtime import; SPEC §6.2).
     "numpyro >= 0.21.0",
@@ -150,6 +154,7 @@ dev-dependencies = [
     "hypothesis",
     "pingouin",
     "gnureadline",
+    "mpmath",  # high-precision Bessel oracle for the vMF tests (test-only)
     "numpyro>=0.21.0",  # < 0.21 imports pjit_p, removed in jax 0.10
     "communities>=3.0.0",
 ]

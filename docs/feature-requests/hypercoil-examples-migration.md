@@ -111,10 +111,12 @@ Smallest-irreducible-first, so later recipes compose earlier primitives:
    no boundary questions; unblocks #2.
 2. **`register`: functional alignment (ProMises)** — composes (1) + ELL matvecs +
    the §6.5 seam.
-3. **`stats`: vMF directional family** — the keystone; budget real effort for a
-   **validated** `log_bessel` across the full κ range + a guaranteed-acceptance
-   sampler. *(Independent of #1/#2 — ProMises uses the matrix-vMF, whose
-   normaliser never materialises.)*
+3. **`stats`: vMF directional family** ✅ SHIPPED (`nitrix.stats.directional`,
+   2026-07-02) — the keystone: a **validated** full-range `log_iv` (regime-split,
+   < 3.5e-9 vs `mpmath`, refuting the legacy large-κ-only form) + a
+   guaranteed-acceptance Wood-1994 sampler + exact-`A_p`-root `vmf_fit`. See
+   [`stats-directional-vmf`](stats-directional-vmf.md) §6. *(Independent of
+   #1/#2 — ProMises uses the matrix-vMF, whose normaliser never materialises.)*
 4. **`metrics`: DCBC** · **`augment`: synthetic generators** — independent,
    parallelisable. **`stats`: whitening** is lower-priority (the estimator
    already exists in nimox over `linalg.sympower`); its value is a findable

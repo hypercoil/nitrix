@@ -1,7 +1,8 @@
 # von Mises–Fisher directional statistics in `nitrix.stats`
 
-> **Status (2026-06-30): PROPOSED — keystone gap.** The single most important
-> item in the [`hypercoil-examples` migration](hypercoil-examples-migration.md):
+> **Status (2026-07-02): SHIPPED (`nitrix.stats.directional`).** The keystone
+> item is built and validated — see §6. The single most important item in the
+> [`hypercoil-examples` migration](hypercoil-examples-migration.md):
 > nitrix has a rich spherical **geometry** stack (`spherical_conv`,
 > `spherical_geodesic_distance`, `spectral_sphere_embedding`,
 > `spherical_parameterize`, …) and **zero spherical statistics**. Cortical
@@ -93,6 +94,44 @@ For `x ∈ Sᵖ⁻¹`, `f(x; μ, κ) = C_p(κ) exp(κ μᵀx)`,
   exact `A_p(κ)=R̄` root, not just Banerjee.
 - `vmf_sample` always returns unit-norm, valid samples (no `found=False` path);
   empirical `(μ̂, κ̂)` from samples ≈ the generating parameters.
+
+## 6. Status — SHIPPED (2026-07-02)
+
+`nitrix.stats.directional` (`src/nitrix/stats/directional.py`): `log_iv`,
+`vmf_log_prob`, `vmf_fit` (→ `VMFFit`), `vmf_sample`. Both legacy liabilities
+are resolved from the theory, not ported:
+
+- **`log_iv` is full-range**, not the legacy large-κ asymptotic. Because
+  `ν = p/2−1` is fixed by the sphere dimension it is a **static** argument, so
+  the regime is a compile-time branch: ascending series (DLMF 10.25.2) for
+  `κ ≤ 120` and the large-argument asymptotic (DLMF 10.40.1) for `κ > 120` when
+  `ν < 15`; the uniform (Debye) asymptotic (DLMF 10.41.3, terms `U₀…U₅`) for
+  `ν ≥ 15`. The κ-split feeds each branch gradient-safe inputs (clamped into its
+  valid region) so the unused branch cannot inject a NaN. Validated to
+  **< 3.5e-9** against an `mpmath` oracle over `ν ∈ [0, 300]`,
+  `κ ∈ [1e-3, 1e6]`; a dedicated test asserts the legacy leading-term form is
+  materially wrong (> 1e-2) at small κ where `log_iv` is not.
+- **`vmf_sample` has guaranteed acceptance** — a `jax.lax.while_loop` that
+  resamples the not-yet-accepted draws until all are accepted (Wood 1994; `w`
+  via the Beta envelope with `b = (−2κ + √(4κ² + (p−1)²))/(p−1)`, tangent uniform
+  on `Sᵖ⁻²`). No fixed iteration cap, no `found=False` path: every returned
+  sample is a valid unit vector (tested to 1e-6 across `p ∈ {2,3,10,64}`).
+  Non-differentiable (documented).
+- **`vmf_fit`** returns the *exact* `A_p(κ)=R̄` root — Banerjee closed-form warm
+  start refined by Newton on the exact derivative
+  `A_p'(κ) = 1 − A_p² − (p−1)/κ · A_p` (tested: residual < 1e-10, and the
+  refinement provably moves off the Banerjee value). `μ̂` is the normalised
+  (optionally weighted) resultant. The §6.5 fit; `vmf_log_prob` is the apply.
+- `vmf_log_prob` integrates to 1 over the sphere (quadrature test) and is
+  grad-finite in `μ`/`κ`; catalogued in the op-matrix (`log_iv` is pure
+  elementwise → jit-clean on all backends, unlike the eigh-based register ops).
+
+51 tests green; ruff + mypy clean. Downstream (`nimox`): the
+`VonMisesFisher(numpyro.Distribution)` wrapper, `NormSphereParameter`, and the
+parcellation emission model. Follow-ups (family growth): Watson / Bingham /
+Kent; the coordinate-kernel spatial prior construction. `docs/op_matrix.json`
+render regen deferred (ungated generated artifact; full run flakes on
+single-process XLA-CPU).
 
 ## 5. Cross-references
 

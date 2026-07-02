@@ -3130,6 +3130,81 @@ register(
         invariants=('diagonal-Gaussian NLL (log-variance parameterised)',),
     )
 )
+# --- stats (directional / von Mises-Fisher) --------------------------------
+
+
+def _log_iv_op(kappa):
+    from nitrix.stats import log_iv
+
+    return log_iv(2.0, kappa)  # nu is static (fixed by the sphere dimension)
+
+
+def _vmf_fit_op(x):
+    from nitrix.stats import vmf_fit
+
+    return vmf_fit(x).kappa  # scalar for the grad probe
+
+
+def _vmf_sample_op(key):
+    from nitrix.stats import vmf_sample
+
+    mu = jnp.asarray([1.0, 0.0, 0.0])
+    return vmf_sample(key, mu, jnp.asarray(10.0), shape=(16,))
+
+
+register(
+    OpInfo(
+        'nitrix.stats.log_iv',
+        fixture=lambda: (
+            (jax.random.uniform(_key(), (16,), minval=0.1, maxval=60.0),),
+            {},
+        ),
+        fn_override=_log_iv_op,
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=(
+            'log I_nu(kappa), full-range (series / uniform-asymptotic split)',
+        ),
+        notes='pure elementwise; jit-clean on all backends (no eigh/svd)',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.stats.vmf_log_prob',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(0), (8, 3)),
+                jax.random.normal(_key(1), (3,)),
+                5.0,
+            ),
+            {},
+        ),
+        diff_arg=1,
+        vmap_arg=0,
+        invariants=('vMF log-density: kappa mu^T x + log C_p(kappa)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.stats.vmf_fit',
+        fixture=lambda: ((jax.random.normal(_key(), (32, 3)),), {}),
+        fn_override=_vmf_fit_op,
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('vMF MLE: mu-hat + Newton on A_p(kappa)=Rbar',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.stats.vmf_sample',
+        fixture=lambda: ((_key(),), {}),
+        fn_override=_vmf_sample_op,
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('Wood-1994 vMF sampler (guaranteed acceptance)',),
+        notes='sampling; non-differentiable',
+    )
+)
 register(
     OpInfo(
         'nitrix.stats.pca_fit',
