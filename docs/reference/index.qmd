@@ -1,0 +1,181 @@
+---
+title: "API reference"
+toc: true
+---
+
+Per-module API documentation, organised by import path: signatures, named
+tensor dimensions (shapes + glossary), and — where the sibling
+`nitrix-perf-bench` has measured a kernel — a benchmark headline and table.
+Each module links to its own page, which in turn lists one page per public
+symbol.
+
+::: {.callout-important title="Work in progress"}
+These pages are **auto-generated** by `gen_reference_stubs.py` (static, from
+source `__all__` + jaxtyping annotations + perf-bench reports). Signatures,
+shapes, and benchmark figures are real; the per-parameter and overview **prose is
+still being filled**, and coverage is expanding beyond `nitrix.stats`. Not for
+final publication as-is (SPEC §6.5).
+:::
+
+## Modules
+
+<!-- nitrix:gen index-tree -->
+## `nitrix`
+
+- [`bias`](nitrix-bias.qmd) — Intensity bias-field correction.
+- [`geometry`](nitrix-geometry.qmd) — Geometric primitives for neuroimaging.
+- [`graph`](nitrix-graph.qmd) — Graph-theoretic primitives.
+- [`linalg`](nitrix-linalg.qmd) — nitrix.linalg -- linear-algebra primitives.
+- [`morphology`](nitrix-morphology.qmd) — Mathematical morphology built atop the semiring substrate.
+- [`nn`](nitrix-nn.qmd) — Functional neural-network forward-block kernels.
+- [`register`](nitrix-register.qmd) — nitrix.register -- pairwise registration recipes.
+- [`semiring`](nitrix-semiring.qmd) — KeOps-style streaming reductions over arbitrary algebras.
+- [`signal`](nitrix-signal.qmd) — nitrix.signal -- 1D signal-processing primitives.
+- [`smoothing`](nitrix-smoothing.qmd) — Edge-preserving and non-edge-preserving smoothing.
+- [`sparse`](nitrix-sparse.qmd) — nitrix.sparse -- geometry-aware sparse formats.
+- [`stats`](nitrix-stats.qmd) — Mass-univariate statistical modelling for neuroimaging.
+
+### `nitrix.augment`
+
+- [`geometric`](nitrix-augment-geometric.qmd) — Spatial augmentation transforms (N-D, channels-last).
+- [`intensity`](nitrix-augment-intensity.qmd) — Intensity-domain augmentation transforms.
+- [`synthesis`](nitrix-augment-synthesis.qmd) — Generative augmentation: synthesise images from label maps and bias fields.
+
+### `nitrix.bias`
+
+- [`correction`](nitrix-bias-correction.qmd) — Unified bias-field-correction dispatcher.
+- [`n4`](nitrix-bias-n4.qmd) — N4 bias-field correction, GPU-accelerated in pure JAX.
+
+### `nitrix.geometry`
+
+- [`affine`](nitrix-geometry-affine.qmd) — Geometric-parameter affine algebra (batched, differentiable).
+- [`algebra`](nitrix-geometry-algebra.qmd) — Transform algebra: Lie-group barycentre, geodesic interpolation, fusion.
+- [`coords`](nitrix-geometry-coords.qmd) — Coordinate utilities.
+- [`deformation`](nitrix-geometry-deformation.qmd) — Deformation- and velocity-field algebra.
+- [`differential`](nitrix-geometry-differential.qmd) — Image spatial-gradient operators.
+- [`grid`](nitrix-geometry-grid.qmd) — Regular-grid deformable-registration primitives.
+- [`intersection`](nitrix-geometry-intersection.qmd) — Triangle-mesh self-intersection detection and removal.
+- [`isosurface`](nitrix-geometry-isosurface.qmd) — Volume <-> surface conversion.
+- [`pyramid`](nitrix-geometry-pyramid.qmd) — Multi-resolution Gaussian pyramid.
+- [`sphere`](nitrix-geometry-sphere.qmd) — 2-sphere primitives.
+- [`sphere_grid`](nitrix-geometry-sphere_grid.qmd) — Parameterised-sphere (regular-grid) topology helpers.
+- [`surface`](nitrix-geometry-surface.qmd) — Surface algorithms on triangle meshes.
+- [`topology`](nitrix-geometry-topology.qmd) — Mesh topology invariants -- the genus-0 defect gate.
+- [`transform`](nitrix-geometry-transform.qmd) — Lie-group parametrisation of rigid and affine transforms.
+
+### `nitrix.graph`
+
+- [`community`](nitrix-graph-community.qmd) — Community-detection primitives.
+- [`connectopy`](nitrix-graph-connectopy.qmd) — Low-dimensional embeddings of graph nodes from spectral decompositions of (modified) Laplacians.
+- [`laplacian`](nitrix-graph-laplacian.qmd) — Graph Laplacian variants and the shared sparse-matvec machinery.
+- [`parcellation`](nitrix-graph-parcellation.qmd) — Surface functional parcellation: boundary mapping and watershed.
+
+### `nitrix.linalg`
+
+- [`decompose`](nitrix-linalg-decompose.qmd) — Randomized (sketch) low-rank SVD.
+- [`kernel`](nitrix-linalg-kernel.qmd) — Pairwise kernel and distance functions.
+- [`krylov`](nitrix-linalg-krylov.qmd) — Matrix-free Krylov solvers.
+- [`matrix`](nitrix-linalg-matrix.qmd) — Matrix utilities for symmetric matrices, diagonals, and Toeplitz structure.
+- [`matrix_function`](nitrix-linalg-matrix_function.qmd) — Matrix functions of a *general* (non-symmetric) matrix.
+- [`optimize`](nitrix-linalg-optimize.qmd) — Small-residual nonlinear least squares: Gauss-Newton & Levenberg-Marquardt.
+- [`residual`](nitrix-linalg-residual.qmd) — Residualisation via linear least squares.
+- [`solve`](nitrix-linalg-solve.qmd) — Dense linear solves: general and SPD-Cholesky.
+- [`spd`](nitrix-linalg-spd.qmd) — Symmetric positive-definite manifold operations.
+
+### `nitrix.metrics`
+
+- [`classification`](nitrix-metrics-classification.qmd) — Classification / segmentation comparison kernels.
+- [`contrastive`](nitrix-metrics-contrastive.qmd) — Contrastive / self-supervised representation kernels.
+- [`information`](nitrix-metrics-information.qmd) — Information-theoretic and variance-ratio image-similarity metrics.
+- [`intensity`](nitrix-metrics-intensity.qmd) — Intensity-based image-similarity metrics.
+- [`overlap`](nitrix-metrics-overlap.qmd) — Region-overlap segmentation metrics.
+- [`preprocess`](nitrix-metrics-preprocess.qmd) — Intensity preprocessing for registration (the fMRIPrep front-end).
+- [`surface`](nitrix-metrics-surface.qmd) — Surface-distance metrics: [`hausdorff95`](nitrix-metrics-surface/hausdorff95.qmd) and [`surface_dice`](nitrix-metrics-surface/surface_dice.qmd).
+
+### `nitrix.morphology`
+
+- [`pooling`](nitrix-morphology-pooling.qmd) — Encoder-decoder pooling primitives with index-bookkeeping.
+
+### `nitrix.nn`
+
+- [`attention`](nitrix-nn-attention.qmd) — Scaled-dot-product / flash attention.
+- [`norm`](nitrix-nn-norm.qmd) — Fused LayerNorm / GroupNorm / InstanceNorm.
+- [`ssm`](nitrix-nn-ssm.qmd) — Selective state-space scan (Mamba / S6).
+
+### `nitrix.numerics`
+
+- [`fixed_point`](nitrix-numerics-fixed_point.qmd) — Fixed-point solver with implicit differentiation.
+- [`normalize`](nitrix-numerics-normalize.qmd) — Per-tensor / per-channel intensity normalisation.
+- [`ode`](nitrix-numerics-ode.qmd) — Fixed-step ODE integrators.
+- [`spatial`](nitrix-numerics-spatial.qmd) — Volumetric shape and windowing utilities.
+- [`tensor_ops`](nitrix-numerics-tensor_ops.qmd) — Tensor shape and layout utilities.
+
+### `nitrix.register`
+
+- [`diffeomorphic`](nitrix-register-diffeomorphic.qmd) — Diffeomorphic registration recipe: log-domain Demons.
+- [`recipes`](nitrix-register-recipes.qmd) — Pairwise rigid / affine registration recipes.
+- [`regulariser`](nitrix-register-regulariser.qmd) — Explicit penalties on a displacement / velocity field.
+
+### `nitrix.semiring`
+
+- [`algebras`](nitrix-semiring-algebras.qmd) — Built-in algebras shipped with `nitrix.semiring`.
+- [`conv`](nitrix-semiring-conv.qmd) — Public [`semiring_conv`](nitrix-semiring-conv/semiring_conv.qmd) -- the convolution member of the semiring reduction family alongside [`semiring_matmul`](nitrix-semiring.qmd).
+- [`ell`](nitrix-semiring-ell.qmd) — Semiring-generalised ELL-sparse matrix multiplication.
+- [`ell_edge`](nitrix-semiring-ell_edge.qmd) — Edge-functional aggregation over ELL adjacencies.
+- [`matmul`](nitrix-semiring-matmul.qmd) — Public [`semiring_matmul`](nitrix-semiring-matmul/semiring_matmul.qmd) with three-level backend selection.
+
+### `nitrix.signal`
+
+- [`filter`](nitrix-signal-filter.qmd) — Linear filtering: polynomial detrend and frequency-domain band-pass.
+- [`fourier`](nitrix-signal-fourier.qmd) — Spectral / analytic-signal utilities.
+- [`interpolate`](nitrix-signal-interpolate.qmd) — Linear interpolation of masked time series.
+- [`lomb_scargle`](nitrix-signal-lomb_scargle.qmd) — Lomb-Scargle spectral methods for irregularly-sampled time series.
+- [`tsconv`](nitrix-signal-tsconv.qmd) — 1-D time-series convolution along the trailing axis.
+- [`window`](nitrix-signal-window.qmd) — Windowed-sample extraction.
+
+### `nitrix.smoothing`
+
+- [`bilateral`](nitrix-smoothing-bilateral.qmd) — Bounded bilateral smoothing via the semiring substrate.
+- [`gaussian`](nitrix-smoothing-gaussian.qmd) — Separable n-D Gaussian filter.
+- [`metric`](nitrix-smoothing-metric.qmd) — Feature-space metrics for the bounded bilateral filter.
+- [`susan`](nitrix-smoothing-susan.qmd) — SUSAN-style edge-preserving smoothing.
+
+### `nitrix.sparse`
+
+- [`ell`](nitrix-sparse-ell.qmd) — ELL sparse format primitives.
+- [`ell_sectioned`](nitrix-sparse-ell_sectioned.qmd) — Sectioned ELL -- bucketed-row format for variable-degree adjacencies.
+- [`grid`](nitrix-sparse-grid.qmd) — Regular-grid stencil specialisation of the ELL sparse format.
+- [`mesh`](nitrix-sparse-mesh.qmd) — Triangle-mesh sparse adjacency constructors.
+
+### `nitrix.stats`
+
+- [`basis`](nitrix-stats-basis.qmd) — Penalised spline bases for additive models.
+- [`betareg`](nitrix-stats-betareg.qmd) — Beta regression for proportions in $(0, 1)$.
+- [`connectivity`](nitrix-stats-connectivity.qmd) — Regularised covariance and sparse-precision estimators for connectivity.
+- [`covariance`](nitrix-stats-covariance.qmd) — Empirical covariance / correlation / partial / conditional measures.
+- [`gam`](nitrix-stats-gam.qmd) — Mass-univariate generalised additive (mixed) models.
+- [`gaulss`](nitrix-stats-gaulss.qmd) — Gaussian location-scale regression (`gaulss`).
+- [`gaussian`](nitrix-stats-gaussian.qmd) — Closed-form diagonal-Gaussian quantities.
+- [`glm`](nitrix-stats-glm.qmd) — Mass-univariate generalised linear models.
+- [`glmm`](nitrix-stats-glmm.qmd) — Mass-univariate generalised **linear mixed** models (GLMM) via PQL.
+- [`gp`](nitrix-stats-gp.qmd) — Mass-univariate Gaussian-process regression with lengthscale estimation.
+- [`hgp`](nitrix-stats-hgp.qmd) — Mass-univariate **hierarchical** Gaussian-process regression (multi-level GP).
+- [`inference`](nitrix-stats-inference.qmd) — nitrix.stats.inference -- permutation / cluster inference.
+- [`lme`](nitrix-stats-lme.qmd) — Voxelwise linear mixed-effects models.
+- [`ordinal`](nitrix-stats-ordinal.qmd) — Ordinal regression -- the cumulative-link (proportional-odds) model.
+- [`pca`](nitrix-stats-pca.qmd) — Principal-component analysis.
+- [`priors`](nitrix-stats-priors.qmd) — Lengthscale priors as REML regularisers (the `map_rho=` penalties).
+
+#### `nitrix.stats.inference`
+
+- [`cluster`](nitrix-stats-inference-cluster.qmd) — Cluster maps for threshold-based enhancement and inference.
+- [`multiple_comparisons`](nitrix-stats-inference-multiple_comparisons.qmd) — Multiple-comparison corrections and multi-contrast combination for mass-univariate p-value and statistic maps.
+- [`permutation`](nitrix-stats-inference-permutation.qmd) — Exchangeability operators for permutation inference.
+- [`randomise`](nitrix-stats-inference-randomise.qmd) — Permutation inference for the general linear model.
+- [`tfce`](nitrix-stats-inference-tfce.qmd) — Threshold-free cluster enhancement.
+
+#### `nitrix.stats.lme`
+
+- [`flame`](nitrix-stats-lme-flame.qmd) — FLAME-style two-level mixed-effects model for fMRI group analysis.
+- [`reml`](nitrix-stats-lme-reml.qmd) — Variance-components REML for voxelwise linear mixed-effects models.
+<!-- nitrix:/gen -->

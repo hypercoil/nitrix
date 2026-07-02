@@ -1,0 +1,48 @@
+---
+title: "recondition_eigenspaces"
+generated: true
+description: "Perturb `A` so it has no zero or degenerate eigenvalues."
+---
+
+[‹ back to `nitrix.linalg.matrix`](../nitrix-linalg-matrix.qmd)
+
+<!-- nitrix:gen sig:recondition_eigenspaces -->
+```python
+recondition_eigenspaces(A: Num[Array, '... i i'], *, psi: float, xi: float = 0.0, key: Optional['jax.Array'] = None) -> Num[Array, '... i i']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:recondition_eigenspaces -->
+Perturb `A` so it has no zero or degenerate eigenvalues.
+
+Stabilises reverse-mode differentiation through `jnp.linalg.eigh`
+and SVD on near-singular inputs.  The transformation is
+$A := A + (\psi - \xi) I + \operatorname{diag}(x)$, where
+$x \sim \operatorname{Uniform}(0, \xi)$ is drawn fresh per
+call.  The additive shift lifts zero eigenvalues away from the origin,
+while the random diagonal splits any exactly-degenerate eigenvalues so
+that the eigenvectors are well defined.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:recondition_eigenspaces -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `A` | `Num` | `...` × `i` × `i` | — | Symmetric matrix block. |
+| `psi` | `float` | — | — | Reconditioning constant for ensuring nonzero eigenvalues. Must satisfy `psi >= xi`. |
+| `xi` | `float` | — | `0.0` | Reconditioning constant for ensuring nondegenerate eigenvalues. Default `0` (no random perturbation). |
+| `key` | `Optional['jax.Array']` | — | `None` | PRNG key. Required when `xi > 0`. |
+
+**Returns** `Num` — shape `...` × `i` × `i`. The reconditioned matrix, of the same shape as `A`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:recondition_eigenspaces -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `i` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

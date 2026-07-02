@@ -1,0 +1,36 @@
+---
+title: "OrdinalResult"
+generated: true
+description: "Per-element ordinal (cumulative-link) fit output."
+---
+
+[‹ back to `nitrix.stats.ordinal`](../nitrix-stats-ordinal.qmd)
+
+<!-- nitrix:gen sig:OrdinalResult -->
+```python
+class OrdinalResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:OrdinalResult -->
+Per-element ordinal (cumulative-link) fit output.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:OrdinalResult.__init__ -->
+```python
+__init__(coef: Float[Array, 'V p'], thresholds: Float[Array, 'V Km1'], cov_coef: Float[Array, 'V p p'], log_lik: Float[Array, 'V'], n_obs: int, n_classes: int, link: str) -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:OrdinalResult -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `Km1` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

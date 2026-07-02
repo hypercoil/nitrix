@@ -1,0 +1,20 @@
+---
+title: "NEGBINOMIAL"
+generated: true
+description: "The negative-binomial family at dispersion ``1.0`` (log link) -- a default for overdispersed counts; build others with ``negbinomial(theta)``."
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+*Re-exported here; defined in `nitrix.stats._family`.*
+
+<!-- nitrix:gen sig:NEGBINOMIAL -->
+```python
+NEGBINOMIAL = negbinomial(1.0)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:NEGBINOMIAL -->
+The negative-binomial family at dispersion `1.0` (log link) -- a default for overdispersed counts; build others with `negbinomial(theta)`.
+<!-- nitrix:/gen -->
+

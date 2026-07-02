@@ -1,0 +1,47 @@
+---
+title: "toeplitz"
+generated: true
+description: "Toeplitz matrix construction with leading batch support."
+---
+
+[‹ back to `nitrix.linalg.matrix`](../nitrix-linalg-matrix.qmd)
+
+<!-- nitrix:gen sig:toeplitz -->
+```python
+toeplitz(c: Float[Array, '... mc'], r: Optional[Float[Array, '... nr']] = None, *, shape: Optional[Tuple[int, int]] = None, fill_value: float = 0.0) -> Float[Array, '... m n']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:toeplitz -->
+Toeplitz matrix construction with leading batch support.
+
+Vectorises [`toeplitz_2d`](../nitrix-linalg-matrix/toeplitz_2d.qmd) over any leading axes; both `c` and
+`r` must share the same leading batch shape.  See
+[`toeplitz_2d`](../nitrix-linalg-matrix/toeplitz_2d.qmd) for the per-sample semantics, including the
+handling of `shape` and `fill_value`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:toeplitz -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `c` | `Float` | `...` × `mc` | — | First column of each Toeplitz matrix, with arbitrary leading batch axes and a trailing length `mc`. |
+| `r` | `Optional[Float[Array, '... nr']]` | — | `None` | First row of each Toeplitz matrix, sharing the leading batch axes of `c` and with trailing length `nr`. If `None`, defaults to `c` (symmetric Toeplitz). |
+| `shape` | `Optional[Tuple[int, int]]` | — | `None` | Output `(m, n)` of each Toeplitz block. Defaults to `(mc, nr)`. |
+| `fill_value` | `float` | — | `0.0` | Fill for cells outside the support of `c` / `r`. |
+
+**Returns** `Float` — shape `...` × `m` × `n`. The batch of `(m, n)` Toeplitz matrices, carrying the shared leading batch axes of `c` and `r`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:toeplitz -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `mc` | *(undocumented — add to `_dimensions.yml`)* |
+| `m` | rows of a multi-row contrast |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

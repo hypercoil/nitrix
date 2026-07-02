@@ -7,29 +7,38 @@ Classification / segmentation comparison kernels.
 *Cross-entropy losses* (costs, minimise; ``reduction`` selects
 ``"mean"`` / ``"sum"`` / ``"none"``):
 
-- ``bce_with_logits`` -- binary cross-entropy from logits, in the
-  numerically stable ``max(x, 0) - x t + log1p(exp(-|x|))`` form (no
-  intermediate ``sigmoid`` / ``log`` that overflows for large ``|x|``).
-- ``cross_entropy_with_logits`` -- categorical cross-entropy from
+- :func:`bce_with_logits` -- binary cross-entropy from logits, in the
+  numerically stable :math:`\\max(x, 0) - x t + \\log(1 + e^{-|x|})` form
+  (no intermediate ``sigmoid`` / ``log`` that overflows for large
+  :math:`|x|`).
+- :func:`cross_entropy_with_logits` -- categorical cross-entropy from
   logits against integer class targets (``log_softmax`` + gather).
-- ``focal_loss`` -- the Lin et al. focal loss: binary cross-entropy
-  down-weighted by ``(1 - p_t) ** gamma`` so easy, well-classified
-  examples contribute little, with an optional class-balancing
-  ``alpha``.  Shares the stable binary-cross-entropy core with
-  ``bce_with_logits``.
+- :func:`focal_loss` -- the focal loss of Lin et al. (2017): binary
+  cross-entropy down-weighted by :math:`(1 - p_t)^{\\gamma}` so easy,
+  well-classified examples contribute little, with an optional
+  class-balancing :math:`\\alpha`.  Shares the stable
+  binary-cross-entropy core with :func:`bce_with_logits`.
 
 *Evaluation metrics* (reporting, not training objectives; **not
-differentiable** -- they ride ``argsort`` / ``bincount`` / ``top_k``, which
-are piecewise-constant, per SPEC §2 tenet 2's hard-output carve-out):
+differentiable** -- they ride argsort / bincount / top-``k`` operations,
+which are piecewise-constant and so carry no useful gradient):
 
-- ``roc_auc`` -- area under the ROC curve via the rank (Mann-Whitney ``U``)
-  form, so ties are tie-corrected by average ranks.  A **global** statistic:
-  score it on the *gathered* ``(scores, labels)`` (ilex ``accumulate_then_score``),
-  never as a per-batch mean (averaging AUCs is not the AUC).
-- ``confusion_matrix`` -- integer count matrix, ``row = true`` / ``col = pred``
-  (the sklearn orientation).
-- ``topk_accuracy`` -- fraction of rows whose top-``k`` predictions contain
-  the true label.
+- :func:`roc_auc` -- area under the ROC curve via the rank
+  (Mann-Whitney :math:`U`) form, so ties are tie-corrected by average
+  ranks.  A **global** statistic: score it on the *gathered*
+  ``(scores, labels)``, never as a per-batch mean (averaging AUCs is not
+  the AUC).
+- :func:`confusion_matrix` -- integer count matrix, ``row = true`` /
+  ``col = predicted`` (the sklearn orientation).
+- :func:`topk_accuracy` -- fraction of rows whose top-``k`` predictions
+  contain the true label.
+
+References
+----------
+.. [1] Lin, T.-Y., Goyal, P., Girshick, R., He, K., & Dollár, P. (2017).
+   Focal loss for dense object detection. *Proceedings of the IEEE
+   International Conference on Computer Vision (ICCV)*, 2980-2988.
+   :doi:`10.1109/ICCV.2017.324`
 """
 
 from __future__ import annotations
@@ -60,10 +69,25 @@ def _bce_with_logits(
 ) -> Float[Array, '...']:
     """Stable elementwise binary cross-entropy from logits.
 
-    ``max(x, 0) - x t + log1p(exp(-|x|))`` is the overflow-free
-    rewrite of ``-(t log σ(x) + (1 - t) log(1 - σ(x)))``: the
-    ``max`` / ``-|x|`` split keeps every term finite for large
-    ``|x|`` (the naive form computes ``log σ(x) -> log 0``).
+    :math:`\\max(x, 0) - x t + \\log(1 + e^{-|x|})` is the overflow-free
+    rewrite of :math:`-(t \\log \\sigma(x) + (1 - t) \\log(1 - \\sigma(x)))`:
+    the :math:`\\max` / :math:`-|x|` split keeps every term finite for
+    large :math:`|x|` (the naive form computes
+    :math:`\\log \\sigma(x) \\to \\log 0`).
+
+    Parameters
+    ----------
+    logits : Float[Array, '...']
+        Pre-sigmoid scores :math:`x`, of any shape.
+    targets : Float[Array, '...']
+        Soft or hard targets :math:`t` in :math:`[0, 1]`, broadcastable to
+        the shape of ``logits``.
+
+    Returns
+    -------
+    Float[Array, '...']
+        The elementwise binary cross-entropy, of the broadcast shape of
+        ``logits`` and ``targets``.
     """
     return (
         jnp.maximum(logits, 0.0)
@@ -145,13 +169,14 @@ def focal_loss(
     alpha: float = 0.25,
     reduction: Reduction = 'mean',
 ) -> Float[Array, '...']:
-    """Binary focal loss (Lin et al., 2017).
+    """Binary focal loss of Lin et al. (2017) [1]_.
 
     The stable binary cross-entropy scaled by the focusing factor
-    ``(1 - p_t) ** gamma``, where ``p_t`` is the probability assigned
-    to the true class.  ``gamma = 0`` recovers (alpha-weighted) BCE;
-    larger ``gamma`` more aggressively suppresses the loss of easy,
-    confidently-correct examples.
+    :math:`(1 - p_t)^{\\gamma}`, where :math:`p_t` is the probability
+    assigned to the true class.  ``gamma = 0`` recovers the
+    (alpha-weighted) binary cross-entropy; larger ``gamma`` more
+    aggressively suppresses the loss of easy, confidently-correct
+    examples.
 
     Parameters
     ----------
@@ -171,8 +196,16 @@ def focal_loss(
 
     Returns
     -------
-    Scalar loss (``"mean"`` / ``"sum"``) or the per-element loss
-    (``"none"``).
+    Float[Array, '...']
+        Scalar loss (``"mean"`` / ``"sum"``) or the per-element loss with
+        the shape of ``logits`` (``"none"``).
+
+    References
+    ----------
+    .. [1] Lin, T.-Y., Goyal, P., Girshick, R., He, K., & Dollár, P.
+       (2017). Focal loss for dense object detection. *Proceedings of the
+       IEEE International Conference on Computer Vision (ICCV)*, 2980-2988.
+       :doi:`10.1109/ICCV.2017.324`
     """
     bce = _bce_with_logits(logits, targets)
     p = jax.nn.sigmoid(logits)
@@ -191,13 +224,29 @@ def _binary_auc(
     scores: Float[Array, 'N'],
     positive: Array,
 ) -> Float[Array, '']:
-    """Tie-corrected binary AUROC via the Mann-Whitney ``U`` rank form.
+    """Tie-corrected binary AUROC via the Mann-Whitney :math:`U` rank form.
 
-    ``auc = (Σ rank_pos - n_pos(n_pos+1)/2) / (n_pos·n_neg)`` with **average
-    ranks** for ties.  The average (1-based) rank of each score is
-    ``(L + R + 1)/2`` where ``L`` / ``R`` are the counts strictly-less / at-most
-    (``searchsorted`` left / right) -- ``O(N log N)``, no threshold sweep.
-    Degenerate (all one class) -> ``nan``.
+    :math:`\\mathrm{auc} = (\\sum \\mathrm{rank}_{\\mathrm{pos}} -
+    n_{\\mathrm{pos}} (n_{\\mathrm{pos}} + 1) / 2) /
+    (n_{\\mathrm{pos}} \\cdot n_{\\mathrm{neg}})` with **average ranks**
+    for ties.  The average (1-based) rank of each score is
+    :math:`(L + R + 1) / 2`, where :math:`L` / :math:`R` are the counts
+    strictly-less / at-most (``searchsorted`` left / right) -- an
+    :math:`O(N \\log N)` computation with no threshold sweep.  A degenerate
+    input (all of one class) yields ``nan``.
+
+    Parameters
+    ----------
+    scores : Float[Array, 'N']
+        Decision scores for the ``N`` samples.
+    positive : Array
+        Boolean-coercible mask ``(N,)`` marking the positive-class samples.
+
+    Returns
+    -------
+    Float[Array, '']
+        The scalar area under the ROC curve, or ``nan`` when either class
+        is absent (so the denominator vanishes).
     """
     scores = scores.astype(jnp.result_type(scores, jnp.float32))
     positive = positive.astype(jnp.bool_)
@@ -248,8 +297,8 @@ def roc_auc(
     Notes
     -----
     **Global statistic, not batch-meanable.**  Score on the gathered
-    ``(scores, labels)`` (ilex ``accumulate_then_score``); a mean of per-batch
-    AUCs is not the AUC.  Non-differentiable (rank-based).
+    ``(scores, labels)`` accumulated across all batches; a mean of
+    per-batch AUCs is not the AUC.  Non-differentiable (rank-based).
     """
     scores = jnp.asarray(scores)
     labels = jnp.asarray(labels)
@@ -293,6 +342,12 @@ def confusion_matrix(
         Integer predicted / true class indices ``(N,)`` in ``[0, num_classes)``.
     num_classes
         Number of classes ``C`` (static).
+
+    Returns
+    -------
+    Int[Array, 'C C']
+        The ``(C, C)`` integer count matrix, where entry ``[i, j]`` is the
+        number of samples of true class ``i`` predicted as class ``j``.
     """
     pred = jnp.asarray(pred).reshape(-1)
     target = jnp.asarray(target).reshape(-1)

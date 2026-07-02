@@ -1,0 +1,39 @@
+---
+title: "aic"
+generated: true
+description: "Per-element Akaike information criterion $-2 ell + 2k$."
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+<!-- nitrix:gen sig:aic -->
+```python
+aic(result: GLMResult) -> Float[Array, 'V']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:aic -->
+Per-element Akaike information criterion $-2\ell + 2k$.
+
+Here $\ell$ is the maximised log-likelihood and $k$ the number
+of estimated parameters (coefficients plus a dispersion where free).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:aic -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `result` | `GLMResult` | — | — | A fitted [`GLMResult`](../nitrix-stats-glm/GLMResult.qmd) supplying the log-likelihood and parameter count. |
+
+**Returns** `Float` — shape `V`. `(V,)` Akaike information criterion, one per element.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:aic -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+<!-- nitrix:/gen -->

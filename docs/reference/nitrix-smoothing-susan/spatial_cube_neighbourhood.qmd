@@ -1,0 +1,43 @@
+---
+title: "spatial_cube_neighbourhood"
+generated: true
+description: "Build a flat-index spatial-cube adjacency."
+---
+
+[‹ back to `nitrix.smoothing.susan`](../nitrix-smoothing-susan.qmd)
+
+<!-- nitrix:gen sig:spatial_cube_neighbourhood -->
+```python
+spatial_cube_neighbourhood(spatial_shape: Tuple[int, ...], *, half: int = 1, return_validity: bool = False) -> Union[NDArray[Any], Tuple[NDArray[Any], NDArray[Any]]]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:spatial_cube_neighbourhood -->
+Build a flat-index spatial-cube adjacency.
+
+For an n-D image of shape `spatial_shape`, returns an array
+of shape `(n_voxels, (2*half + 1)**ndim)` whose row `i`
+lists the flat indices of the `(2*half + 1)`-cube spatial
+neighbours of voxel `i`.  Voxels near the boundary clamp to
+the nearest valid coordinate (so every index is in range for a
+gather), and the out-of-bounds taps are reported as invalid via
+the optional validity mask so a bilateral reduction does not
+double-count the clamped edge voxel.
+
+Returned as NumPy arrays so that [`bilateral_gaussian`](../nitrix-smoothing-bilateral/bilateral_gaussian.qmd) can
+take the adjacency as a static neighbourhood without re-tracing
+per call.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:spatial_cube_neighbourhood -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `spatial_shape` | `Tuple[int, ...]` | — | — | Image spatial extent, e.g. `(D, H, W)`. |
+| `half` | `int` | — | `1` | Half-width of the cube; total side length is `2 * half + 1`. Default `1` (a 3-cube: 27 neighbours in 3D, 9 in 2D, etc.). |
+| `return_validity` | `bool` | — | `False` | If `True`, also return a boolean validity mask `(n_voxels, k_max)` that is `False` at the out-of-bounds (clamped) taps. Pass it to [`bilateral_gaussian`](../nitrix-smoothing-bilateral/bilateral_gaussian.qmd) as its `mask` argument so boundary voxels average only over their in-bounds neighbours. |
+
+**Returns** `Union[NDArray[Any], Tuple[NDArray[Any], NDArray[Any]]]`.
+<!-- nitrix:/gen -->
+

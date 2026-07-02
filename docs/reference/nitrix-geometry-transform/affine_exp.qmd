@@ -1,0 +1,45 @@
+---
+title: "affine_exp"
+generated: true
+description: "Homogeneous affine transform from its Lie parameters."
+---
+
+[‹ back to `nitrix.geometry.transform`](../nitrix-geometry-transform.qmd)
+
+<!-- nitrix:gen sig:affine_exp -->
+```python
+affine_exp(params: Float[Array, '... p'], *, ndim: int) -> Float[Array, '... d1 d1']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:affine_exp -->
+Homogeneous affine transform from its Lie parameters.
+
+The linear block is `matrix_exp` of the `ndim x ndim`
+generator $A$ (row-major in the first $n^2$ parameters,
+where $n$ is `ndim`), guaranteeing an invertible,
+orientation-preserving map; the remaining `ndim` parameters are the
+translation, applied directly.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:affine_exp -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `params` | `Float` | `...` × `p` | — | `(..., p)` Lie parameter vector of length $p = n^2 + n$ (12 in 3-D, 6 in 2-D): the first $n^2$ entries are the row-major generator $A$, the final `ndim` the translation. |
+| `ndim` | `int` | — | — | Spatial dimensionality (2 or 3). |
+
+**Returns** `Float` — shape `...` × `d1` × `d1`. Homogeneous affine matrix, `(..., ndim + 1, ndim + 1)`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:affine_exp -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `d1` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

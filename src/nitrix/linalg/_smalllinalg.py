@@ -18,31 +18,34 @@ choice of routine matters twice over:
   cuBLAS (matmul, ``triangular_solve`` / ``trsm``) and the elementwise surface
   work.
 
-So we issue **no cuSOLVER custom-call at any ``p``**: closed-form algebra for
-``p in {1, 2}`` (the common small designs), and for ``p > 2`` a hand-Cholesky
-whose inverse goes through ``triangular_solve`` (cuBLAS ``trsm``).  Everything
-is differentiable.  ``sym_eig_jacobi`` is the matching eigendecomposition: a
-fixed-sweep cyclic Jacobi rotation (matmul-only, no cuSOLVER ``syevd``).
+So we issue **no cuSOLVER custom-call at any** :math:`p`: closed-form algebra for
+:math:`p \\in \\{1, 2\\}` (the common small designs), and for :math:`p > 2` a
+hand-Cholesky whose inverse goes through ``triangular_solve`` (cuBLAS ``trsm``).
+Everything is differentiable.  :func:`sym_eig_jacobi` is the matching
+eigendecomposition: a fixed-sweep cyclic Jacobi rotation (matmul-only, no
+cuSOLVER ``syevd``).
 
 Why a *rolled* Cholesky
 -----------------------
 
-The Cholesky loop is run as a ``lax.fori_loop`` over the ``p`` columns, **not**
-unrolled at trace time.  A trace-time unroll produces ``O(p^3)`` scalar ops in
-the graph, so compile time grows cubically in ``p`` -- negligible at ``p <= 5``
-(~0.4 s) but ruinous once ``p`` reaches 20-30 (the unrolled form measured ~29 s
-for a single ``p = 30`` inverse).  Rolling the loop makes the graph ``O(p^2)``
-(one compiled body), so compile is ~flat in ``p`` (~0.4 s at ``p = 30``);
-runtime is unchanged (still ``O(p^3)`` flops).  The closed forms for
-``p in {1, 2}`` are untouched.
+The Cholesky loop is run as a ``lax.fori_loop`` over the :math:`p` columns,
+**not** unrolled at trace time.  A trace-time unroll produces :math:`O(p^3)`
+scalar ops in the graph, so compile time grows cubically in :math:`p` --
+negligible at :math:`p \\le 5` (~0.4 s) but ruinous once :math:`p` reaches 20-30
+(the unrolled form measured ~29 s for a single :math:`p = 30` inverse).  Rolling
+the loop makes the graph :math:`O(p^2)` (one compiled body), so compile is ~flat
+in :math:`p` (~0.4 s at :math:`p = 30`); runtime is unchanged (still
+:math:`O(p^3)` flops).  The closed forms for :math:`p \\in \\{1, 2\\}` are
+untouched.
 
 Numerical precision (x64 expectation)
 -------------------------------------
 
-These kernels factor the *normal-equation* matrix ``X^T W X`` (or a per-group
-Gram), whose condition number is the **square** of the design's -- so an
-ill-conditioned design squares into a near-singular pivot.  The modified-Cholesky
-pivot floor (:func:`_pivot_rel_floor`, ``~1e2 x finfo(dtype).eps``) keeps such a
+These kernels factor the *normal-equation* matrix :math:`X^{\\top} W X` (or a
+per-group Gram), whose condition number is the **square** of the design's -- so
+an ill-conditioned design squares into a near-singular pivot.  The
+modified-Cholesky pivot floor (:func:`_pivot_rel_floor`,
+``~1e2 x finfo(dtype).eps``) keeps such a
 solve *finite and regularised* rather than ``NaN``, but it cannot restore digits
 roundoff has already lost.  For ill-conditioned designs the suite **expects
 float64** (``jax.config.update('jax_enable_x64', True)``): in float32 the floor
@@ -79,10 +82,11 @@ _PIVOT_REL_EPS_MULT = 100.0
 
 
 def _pivot_rel_floor(dtype: jnp.dtype) -> Float[Array, '']:
-    """Relative pivot floor, **dtype-aware**: ``~1e2 x finfo(dtype).eps``.
+    """Relative pivot floor, **dtype-aware**: :math:`\\sim 10^{2} \\times`
+    ``finfo(dtype).eps``.
 
-    A pivot / determinant is clamped to this fraction of the matrix's diagonal
-    scale before a ``sqrt`` / division, so a near-singular or boundary system
+    A pivot or determinant is clamped to this fraction of the matrix's diagonal
+    scale before a ``sqrt`` or division, so a near-singular or boundary system
     (where the caller's ridge was too small to keep the pivot positive against
     roundoff) yields a *regularised, finite* solve instead of a silent ``NaN``.
 
@@ -93,6 +97,19 @@ def _pivot_rel_floor(dtype: jnp.dtype) -> Float[Array, '']:
     ``1e-12`` was ~4 orders *below* fp32 eps, so in fp32 it was **inert** -- it
     could never rescue an fp32 pivot that had already gone negative -- and only
     ever did anything in fp64.
+
+    Parameters
+    ----------
+    dtype : jnp.dtype
+        Floating-point dtype of the matrix being factored; its machine epsilon
+        sets the scale of the returned floor.
+
+    Returns
+    -------
+    Float[Array, '']
+        Scalar relative floor, :math:`10^{2} \\times` the machine epsilon of
+        ``dtype``.  Callers multiply it by the matrix's diagonal scale to obtain
+        the absolute clamp.
     """
     return jnp.asarray(_PIVOT_REL_EPS_MULT * jnp.finfo(dtype).eps)
 
@@ -100,21 +117,37 @@ def _pivot_rel_floor(dtype: jnp.dtype) -> Float[Array, '']:
 def spd_inv_logdet_chol(
     A: Float[Array, 'n n'], n: int
 ) -> Tuple[Float[Array, 'n n'], Float[Array, '']]:
-    """SPD inverse + log-det via a rolled, cuSOLVER-free Cholesky.
+    """Inverse and log-determinant of a small SPD matrix via a rolled,
+    cuSOLVER-free Cholesky.
 
-    For ``n > 2`` we deliberately avoid ``jnp.linalg.{inv,cholesky,slogdet}``
+    For :math:`n > 2` we deliberately avoid ``jnp.linalg.{inv,cholesky,slogdet}``
     -- on the broken-cuSOLVER L4 their ``getrf`` / ``potrf`` custom-calls fail
-    to create a handle (cause-unknown; see the GPU-availability FR).  Instead we
-    factor ``A = L L^T`` column-by-column with a ``lax.fori_loop`` (rolled, so
-    the graph stays ``O(n^2)`` -- see the module docstring), take the inverse
-    through ``triangular_solve`` (cuBLAS ``trsm``, which *does* work on these
-    stacks), and read the log-determinant off the factor diagonal.  No cuSOLVER
-    routine is issued; everything is differentiable (``sqrt`` / division /
-    ``trsm`` all have VJPs).
+    to create a handle.  Instead we factor :math:`A = L L^{\\top}`
+    column-by-column with a ``lax.fori_loop`` (rolled, so the graph stays
+    :math:`O(n^2)` -- see the module docstring), take the inverse through
+    ``triangular_solve`` (cuBLAS ``trsm``, which *does* work on these stacks),
+    and read the log-determinant off the factor diagonal.  No cuSOLVER routine
+    is issued; everything is differentiable (``sqrt``, division and ``trsm`` all
+    have VJPs).
 
-    The column update uses ``L @ L[j]``: at column ``j`` the not-yet-filled
+    The column update uses ``L @ L[j]``: at column :math:`j` the not-yet-filled
     entries of ``L`` are zero, so the full dot automatically restricts to the
-    ``k < j`` terms of the Cholesky-Banachiewicz recurrence.
+    :math:`k < j` terms of the Cholesky-Banachiewicz recurrence.
+
+    Parameters
+    ----------
+    A : Float[Array, 'n n']
+        Symmetric positive-definite matrix to invert (callers add a ridge to
+        keep it SPD).
+    n : int
+        Static matrix dimension (a Python int, the compile-time shape).
+
+    Returns
+    -------
+    inv : Float[Array, 'n n']
+        The inverse :math:`A^{-1} = L^{-\\top} L^{-1}`.
+    log_det : Float[Array, '']
+        The log-determinant :math:`\\log \\det A = 2 \\sum_i \\log L_{ii}`.
     """
     L = spd_chol(A, n)
     log_det = 2.0 * jnp.sum(jnp.log(jnp.diagonal(L)))
@@ -127,17 +160,31 @@ def spd_inv_logdet_chol(
 
 
 def spd_chol(A: Float[Array, 'n n'], n: int) -> Float[Array, 'n n']:
-    """Lower-triangular Cholesky factor ``L`` (``A = L L^T``) of a small SPD ``A``,
-    rolled and cuSOLVER-free.
+    """Lower-triangular Cholesky factor :math:`L` (:math:`A = L L^{\\top}`) of a
+    small SPD matrix, rolled and cuSOLVER-free.
 
     The shared factor behind :func:`spd_inv_logdet_chol`: a column-by-column
-    ``lax.fori_loop`` (rolled, ``O(n^2)`` graph -- see the module docstring) using
-    only ``sqrt`` / division (all with VJPs, so it is **differentiable**).  The
-    modified-Cholesky pivot floor (relative to the diagonal scale) keeps a
-    degenerate ``A`` finite (a regularised factor) rather than ``sqrt(negative) =
-    NaN``.  Used to scale adaptive-quadrature nodes by a curvature factor
-    (``L L^T = H^{-1}``) as well as to invert / take the log-det of small SPD
-    blocks.
+    ``lax.fori_loop`` (rolled, :math:`O(n^2)` graph -- see the module docstring)
+    using only ``sqrt`` and division (all with VJPs, so it is
+    **differentiable**).  The modified-Cholesky pivot floor (relative to the
+    diagonal scale) keeps a degenerate ``A`` finite (a regularised factor)
+    rather than ``sqrt(negative) = NaN``.  Used to scale adaptive-quadrature
+    nodes by a curvature factor (:math:`L L^{\\top} = H^{-1}`) as well as to
+    invert or take the log-det of small SPD blocks.
+
+    Parameters
+    ----------
+    A : Float[Array, 'n n']
+        Symmetric positive-definite matrix to factor.  A degenerate input is
+        regularised by the pivot floor rather than producing ``NaN``.
+    n : int
+        Static matrix dimension (a Python int, the compile-time shape).
+
+    Returns
+    -------
+    Float[Array, 'n n']
+        Lower-triangular factor :math:`L` with :math:`A = L L^{\\top}` (entries
+        above the diagonal are zero).
     """
     idx = jnp.arange(n)
     floor = (
@@ -172,11 +219,26 @@ def small_inv_logdet(
 
     - ``n == 1``  -- a reciprocal and a ``log``.
     - ``n == 2``  -- the explicit symmetric inverse ``[[c,-b],[-b,a]]/det`` and
-      ``log(det)`` with ``det = a c - b^2``.
-    - ``n > 2``   -- a rolled hand-Cholesky + ``triangular_solve`` (cuBLAS
-      ``trsm``), see ``spd_inv_logdet_chol``.
+      :math:`\\log(\\det)` with :math:`\\det = a c - b^2`.
+    - ``n > 2``   -- a rolled hand-Cholesky and ``triangular_solve`` (cuBLAS
+      ``trsm``); see :func:`spd_inv_logdet_chol`.
 
     ``A`` is assumed SPD (the callers add a ridge).
+
+    Parameters
+    ----------
+    A : Float[Array, 'n n']
+        Symmetric positive-definite matrix to invert.
+    n : int
+        Static matrix dimension (a Python int, the compile-time shape) that
+        selects the closed-form or Cholesky branch.
+
+    Returns
+    -------
+    inv : Float[Array, 'n n']
+        The inverse :math:`A^{-1}`.
+    log_det : Float[Array, '']
+        The log-determinant :math:`\\log \\det A`.
     """
     tiny = jnp.finfo(A.dtype).tiny
     rel = _pivot_rel_floor(A.dtype)
@@ -202,9 +264,27 @@ def _delete_row_col(
 ) -> Float[Array, '... m m']:
     """The ``(n-1, n-1)`` minor of ``A`` with row ``i`` and column ``j`` removed.
 
-    ``i`` / ``j`` / ``n`` are Python ints (compile-time), so the kept-index
+    ``i``, ``j`` and ``n`` are Python ints (compile-time), so the kept-index
     lists are static and the gather is a plain advanced index -- traceable and
     differentiable.
+
+    Parameters
+    ----------
+    A : Float[Array, '... n n']
+        Batched square matrix (leading dimensions are broadcast).
+    i : int
+        Index of the row to remove (a Python int, compile-time).
+    j : int
+        Index of the column to remove (a Python int, compile-time).
+    n : int
+        Static matrix dimension of ``A`` (a Python int, compile-time).
+
+    Returns
+    -------
+    Float[Array, '... m m']
+        The minor with the given row and column deleted, of trailing shape
+        ``(n-1, n-1)`` (i.e. ``m = n - 1``); the leading batch dimensions are
+        preserved.
     """
     rows = [r for r in range(n) if r != i]
     cols = [c for c in range(n) if c != j]
@@ -212,12 +292,28 @@ def _delete_row_col(
 
 
 def small_det(A: Float[Array, '... n n'], n: int) -> Float[Array, '...']:
-    """Determinant of a small general ``(..., n, n)`` matrix by cofactor
-    (Laplace) expansion -- cuSOLVER-free, batched, differentiable.
+    """Determinant of a small general matrix by cofactor expansion.
+
+    Computes the determinant of a batched ``(..., n, n)`` matrix by Laplace
+    (cofactor) expansion -- cuSOLVER-free, batched over the leading dimensions,
+    and differentiable.
 
     ``n`` is a Python int (compile-time), so the expansion unrolls into pure
-    multiply / add (no ``getrf`` LU custom-call); reserved for small ``n`` as
-    the term count grows factorially.  Closed forms for ``n in {1, 2}``.
+    multiply and add (no ``getrf`` LU custom-call); it is reserved for small
+    ``n`` as the term count grows factorially.  Closed forms are used for
+    :math:`n \\in \\{1, 2\\}`.
+
+    Parameters
+    ----------
+    A : Float[Array, '... n n']
+        Batched square matrix (need not be symmetric).
+    n : int
+        Static matrix dimension (a Python int, the compile-time shape).
+
+    Returns
+    -------
+    Float[Array, '...']
+        The determinant, one scalar per leading batch element.
     """
     if n == 1:
         return A[..., 0, 0]
@@ -232,10 +328,24 @@ def small_det(A: Float[Array, '... n n'], n: int) -> Float[Array, '...']:
 
 
 def _adjugate(A: Float[Array, '... n n'], n: int) -> Float[Array, '... n n']:
-    """Adjugate (transpose of the cofactor matrix) of a small general ``A``.
+    """Adjugate (transpose of the cofactor matrix) of a small general matrix.
 
-    ``adj(A)[i, j] = (-1)^{i+j} det(minor_{j,i})``, so ``A^{-1} = adj(A) /
-    det(A)`` (Cramer).  All arithmetic, hence batched and differentiable.
+    Entrywise, :math:`\\operatorname{adj}(A)_{ij} = (-1)^{i+j}
+    \\det(\\text{minor}_{ji})`, so :math:`A^{-1} = \\operatorname{adj}(A) /
+    \\det(A)` (Cramer's rule).  Built from pure arithmetic, hence batched over
+    the leading dimensions and differentiable.
+
+    Parameters
+    ----------
+    A : Float[Array, '... n n']
+        Batched square matrix (need not be symmetric).
+    n : int
+        Static matrix dimension (a Python int, the compile-time shape).
+
+    Returns
+    -------
+    Float[Array, '... n n']
+        The adjugate matrix, matching the shape of ``A``.
     """
     if n == 1:
         return jnp.ones_like(A)
@@ -255,15 +365,34 @@ def small_inv(A: Float[Array, '... n n'], n: int) -> Float[Array, '... n n']:
     The cuSOLVER-free counterpart to :func:`small_inv_logdet` for the case the
     caller's matrix is a *general* small block (an affine, a triangular
     scale/shear factor) rather than an SPD Gram.  Closed-form adjugate inverse
-    ``A^{-1} = adj(A) / det(A)`` for ``n <= 4``: pure multiply / add / divide,
-    so it is batched over the leading dimensions, differentiable, and issues no
-    cuSOLVER custom-call (unlike ``jnp.linalg.inv``'s ``getrf``).
+    :math:`A^{-1} = \\operatorname{adj}(A) / \\det(A)` for :math:`n \\le 4`: pure
+    multiply, add and divide, so it is batched over the leading dimensions,
+    differentiable, and issues no cuSOLVER custom-call (unlike
+    ``jnp.linalg.inv``'s ``getrf``).
 
     Unlike the SPD kernels this does **not** regularise -- a singular ``A``
     yields a non-finite result, matching ``jnp.linalg.inv`` (callers supply an
     invertible matrix: an affine, or a ridged system).  Cramer's rule is exact
     to roundoff for the well-conditioned tiny matrices this serves; prefer x64
     for an ill-conditioned input (see the module docstring).
+
+    Parameters
+    ----------
+    A : Float[Array, '... n n']
+        Batched square matrix (need not be symmetric); assumed invertible.
+    n : int
+        Static matrix dimension (a Python int, the compile-time shape).  Must be
+        at most 4, else a ``ValueError`` is raised.
+
+    Returns
+    -------
+    Float[Array, '... n n']
+        The inverse :math:`A^{-1}`, matching the shape of ``A``.
+
+    Raises
+    ------
+    ValueError
+        If ``n`` exceeds the maximum dimension the adjugate inverse covers (4).
     """
     if n > _ADJ_INV_MAX_N:
         raise ValueError(
@@ -278,38 +407,59 @@ def sym_eig_jacobi(
 ) -> Tuple[Float[Array, 'n'], Float[Array, 'n n']]:
     """Symmetric eigendecomposition of a small ``(n, n)`` matrix, cuSOLVER-free.
 
-    Returns ``(evals, evecs)`` with ``A approx evecs @ diag(evals) @ evecs.T``;
-    the columns of ``evecs`` are orthonormal eigenvectors.  Eigenvalues are **not
-    sorted** (cyclic Jacobi visits pairs in a fixed order).
+    Returns ``(evals, evecs)`` with :math:`A \\approx V \\operatorname{diag}(
+    \\lambda) V^{\\top}`; the columns of ``evecs`` are orthonormal eigenvectors.
+    Eigenvalues are **not sorted** (cyclic Jacobi visits pairs in a fixed
+    order).
 
     Why a hand-rolled Jacobi.  ``jnp.linalg.eigh`` issues a ``syevd`` cuSOLVER
-    custom-call, which is dead on the dev L4 (see ``small_inv_logdet``); and
-    ``safe_eigh``'s CPU fallback is eager (not ``jit`` / ``vmap`` -able), so it
-    cannot run *inside* a per-element batched computation.  A fixed-sweep cyclic
-    Jacobi is pure arithmetic (Givens rotations): jittable, ``vmap``-clean, and
-    exact to machine precision in a handful of sweeps for the tiny ``n`` this
-    serves (an ``L x L`` contrast covariance, ``L`` a few rows;
-    ``lme_f_contrast``'s Fai-Cornelius denominator-df eigendirections).
+    custom-call, which is dead on the dev L4 (see :func:`small_inv_logdet`); and
+    :func:`~nitrix.linalg._solver.safe_eigh`'s CPU fallback is eager (not ``jit`` /
+    ``vmap`` -able), so it cannot run *inside* a per-element batched
+    computation.  A fixed-sweep cyclic Jacobi is pure arithmetic (Givens
+    rotations): jittable, ``vmap``-clean, and exact to machine precision in a
+    handful of sweeps for the tiny ``n`` this serves (an :math:`L \\times L`
+    contrast covariance, :math:`L` a few rows; the Fai-Cornelius
+    denominator-df eigendirections of :func:`~nitrix.stats.lme_f_contrast`).
 
     **Forward-only.**  The decomposition is for the value, not its gradient: a
-    naive reverse-mode sweep accumulates ``1 / off-diagonal^2`` rotation-angle
-    terms that overflow as the iteration converges (the standard hazard of
-    differentiating an iterative eigensolver).  Its sole consumer -- the
-    Satterthwaite F denominator df -- is not differentiated through (v3 §1.3), so
-    that is by design; wrap a call in ``lax.stop_gradient`` if it ever feeds a
+    naive reverse-mode sweep accumulates :math:`1 / \\text{off-diagonal}^2`
+    rotation-angle terms that overflow as the iteration converges (the standard
+    hazard of differentiating an iterative eigensolver).  Its sole consumer --
+    the Satterthwaite F denominator df -- is not differentiated through, so that
+    is by design; wrap a call in ``lax.stop_gradient`` if it ever feeds a
     differentiated path.
 
     Each rotation zeroes one off-diagonal ``A[p, q]`` via the orthogonal
-    ``J(p, q)`` (the stable smaller-root angle), applied as ``A <- J^T A J`` and
-    ``V <- V J``; ``n`` is a Python int, so the ``n(n-1)/2`` pair sweep is
-    unrolled and ``n_sweeps`` cyclic passes drive the off-diagonal to zero
-    quadratically.  ``n_sweeps=8`` reaches machine precision for ``n <= 7`` (the
-    largest matrix this serves -- a ``7``-component block-Woodbury Hessian;
-    empirically ``n = 7`` converges by ``6`` sweeps, ``n <= 5`` by ``5``).  The
-    rotation is applied as the dense ``J^T A J`` matmul rather than an explicit
-    rank-2 row/column update: the latter is fewer flops but unrolls into many
-    small dynamic-update-slice fusions that the XLA:CPU JIT fails to materialise,
-    and at this ``n`` the matmul cost is negligible.
+    :math:`J(p, q)` (the stable smaller-root angle), applied as
+    :math:`A \\leftarrow J^{\\top} A J` and :math:`V \\leftarrow V J`; ``n`` is a
+    Python int, so the :math:`n(n-1)/2` pair sweep is unrolled and ``n_sweeps``
+    cyclic passes drive the off-diagonal to zero quadratically.  ``n_sweeps=8``
+    reaches machine precision for :math:`n \\le 7` (the largest matrix this
+    serves -- a 7-component block-Woodbury Hessian; empirically :math:`n = 7`
+    converges by 6 sweeps, :math:`n \\le 5` by 5).  The rotation is applied as
+    the dense :math:`J^{\\top} A J` matmul rather than an explicit rank-2
+    row/column update: the latter is fewer flops but unrolls into many small
+    dynamic-update-slice fusions that the XLA:CPU JIT fails to materialise, and
+    at this ``n`` the matmul cost is negligible.
+
+    Parameters
+    ----------
+    A : Float[Array, 'n n']
+        Matrix to decompose; it is symmetrised as :math:`(A + A^{\\top}) / 2`
+        before the sweeps.
+    n : int
+        Static matrix dimension (a Python int, the compile-time shape).
+    n_sweeps : int, optional
+        Number of cyclic Jacobi passes over all :math:`n(n-1)/2` off-diagonal
+        pairs.  The default of 8 reaches machine precision for :math:`n \\le 7`.
+
+    Returns
+    -------
+    evals : Float[Array, 'n']
+        Eigenvalues, read off the converged diagonal (**not sorted**).
+    evecs : Float[Array, 'n n']
+        Matrix whose columns are the corresponding orthonormal eigenvectors.
     """
     A = 0.5 * (A + A.T)
     dtype = A.dtype

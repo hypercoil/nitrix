@@ -1,0 +1,61 @@
+---
+title: "selective_scan"
+generated: true
+description: "Mamba / S6 selective state-space scan with backend dispatch."
+---
+
+[‹ back to `nitrix.nn.ssm`](../nitrix-nn-ssm.qmd)
+
+<!-- nitrix:gen sig:selective_scan -->
+```python
+selective_scan(x: Float[Array, '... l d'], delta: Float[Array, '... l d'], A: Float[Array, 'd n'], B: Float[Array, '... l n'], C: Float[Array, '... l n'], D: Optional[Float[Array, 'd']] = None, *, driver: Driver = 'auto', backend: Backend = 'auto') -> Float[Array, '... l d']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:selective_scan -->
+Mamba / S6 selective state-space scan with backend dispatch.
+
+Computes the discretised selective recurrence (see
+[`reference_selective_scan`](../nitrix-nn-ssm/reference_selective_scan.qmd) for the math).  `backend` selects the
+execution engine: `'jax'` (the reference; parallel associative scan on
+GPU), `'pallas-cuda'` (the fused chunked-scan fast path, which currently
+falls back to the reference with a loud warning), or `'auto'`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:selective_scan -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Float` | `...` × `l` × `d` | — | As in [`reference_selective_scan`](../nitrix-nn-ssm/reference_selective_scan.qmd). |
+| `delta` | `Float` | `...` × `l` × `d` | — | As in [`reference_selective_scan`](../nitrix-nn-ssm/reference_selective_scan.qmd). |
+| `A` | `Float` | `d` × `n` | — | As in [`reference_selective_scan`](../nitrix-nn-ssm/reference_selective_scan.qmd). |
+| `B` | `Float` | `...` × `l` × `n` | — | As in [`reference_selective_scan`](../nitrix-nn-ssm/reference_selective_scan.qmd). |
+| `C` | `Float` | `...` × `l` × `n` | — | As in [`reference_selective_scan`](../nitrix-nn-ssm/reference_selective_scan.qmd). |
+| `D` | `Optional[Float[Array, 'd']]` | — | `None` | As in [`reference_selective_scan`](../nitrix-nn-ssm/reference_selective_scan.qmd). |
+| `driver` | `Driver` | — | `'auto'` | The numerical variant of the **reference** path (the `driver` axis): `'auto'` / `'sequential'` / `'associative'` / `'chunked'` (see [`reference_selective_scan`](../nitrix-nn-ssm/reference_selective_scan.qmd)). A non-`'auto'` `driver` selects the reference path (the fused kernel has no driver variants), so it is a contradiction to combine it with an explicit `backend='pallas-cuda'`. `nitrix.reproducible()` forces the canonical `'sequential'` *and* the reference engine (see `backend`). |
+| `backend` | `Backend` | — | `'auto'` | `'auto'` / `'pallas-cuda'` / `'jax'` execution engine. Under `nitrix.reproducible()`, `'auto'` resolves to `'jax'` (the reference), since the fused kernel is certified only to a tolerance. |
+
+**Returns** `Float` — shape `...` × `l` × `d`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:selective_scan -->
+::: {.callout-note}
+The reference path is autodiff-native (`jax.grad` flows through the
+scan).  The fused path will register a recompute-adjoint `custom_vjp`
+(the state-space analogue of the recompute-forward adjoint used in
+`nitrix.numerics`).
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:selective_scan -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `l` | *(undocumented — add to `_dimensions.yml`)* |
+| `d` | spatial dimension (2 or 3) |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

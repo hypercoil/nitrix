@@ -1,0 +1,12 @@
+---
+title: "cmass_regular_grid"
+generated: true
+description: "Alias for center_of_mass_grid."
+---
+
+[‹ back to `nitrix.geometry.grid`](../nitrix-geometry-grid.qmd)
+
+<!-- nitrix:gen sig:cmass_regular_grid -->
+`cmass_regular_grid` is an alias for [`center_of_mass_grid`](center_of_mass_grid.qmd).
+<!-- nitrix:/gen -->
+

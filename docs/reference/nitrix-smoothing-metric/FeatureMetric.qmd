@@ -1,0 +1,44 @@
+---
+title: "FeatureMetric"
+generated: true
+description: "Projection of feature differences into a metric subspace."
+---
+
+[‹ back to `nitrix.smoothing.metric`](../nitrix-smoothing-metric.qmd)
+
+<!-- nitrix:gen sig:FeatureMetric -->
+```python
+class FeatureMetric(Protocol)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:FeatureMetric -->
+Projection of feature differences into a metric subspace.
+
+The only operation the bilateral kernel requires of a metric:
+given feature differences `deltas` of shape $(\dots, d_f)$,
+return `project` of shape $(\dots, k)$ such that
+`sum(project(deltas)**2, axis=-1)` equals the quadratic form
+$\text{deltas}^{\top} M\,\text{deltas}$ for the metric
+$M$.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:FeatureMetric.project -->
+```python
+project(deltas: Float[Array, '... d_f']) -> Float[Array, '... k']
+```
+<!-- nitrix:/gen -->
+
+Project feature differences into the metric subspace.
+
+
+<!-- nitrix:gen dims:FeatureMetric -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `d_f` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

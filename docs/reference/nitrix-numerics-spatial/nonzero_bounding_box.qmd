@@ -1,0 +1,34 @@
+---
+title: "nonzero_bounding_box"
+generated: true
+description: "Bounding box of the `x > threshold` region."
+---
+
+[‹ back to `nitrix.numerics.spatial`](../nitrix-numerics-spatial.qmd)
+
+<!-- nitrix:gen sig:nonzero_bounding_box -->
+```python
+nonzero_bounding_box(x: Union[Num[Array, '*spatial'], Bool[Array, '*spatial']], *, threshold: float = 0.0) -> Tuple[Int[Array, 'ndim'], Int[Array, 'ndim']]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:nonzero_bounding_box -->
+Bounding box of the `x > threshold` region.
+
+Computes the tightest axis-aligned box enclosing every element that
+exceeds `threshold`. Only the index arithmetic is returned -- the
+crop itself has a data-dependent shape and belongs to the caller or
+container layer.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:nonzero_bounding_box -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Union[Num[Array, '*spatial'], Bool[Array, '*spatial']]` | — | — | Array to threshold. For a boolean array, `threshold` of `0.0` selects the `True` elements. |
+| `threshold` | `float` | — | `0.0` | Elements strictly greater than this value are treated as foreground. Defaults to `0.0`. |
+
+**Returns** `Tuple[Int[Array, 'ndim'], Int[Array, 'ndim']]`. Per-axis lower index of the half-open box (inclusive), of length `x.ndim`. Per-axis upper index of the half-open box (exclusive), of length `x.ndim`, so that the box spans `lo <= idx < hi` on each axis. An empty region yields `lo == hi == 0` on every axis.
+<!-- nitrix:/gen -->
+

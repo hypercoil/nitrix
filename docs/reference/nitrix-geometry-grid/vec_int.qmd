@@ -1,0 +1,12 @@
+---
+title: "vec_int"
+generated: true
+description: "Alias for integrate_velocity_field."
+---
+
+[‹ back to `nitrix.geometry.grid`](../nitrix-geometry-grid.qmd)
+
+<!-- nitrix:gen sig:vec_int -->
+`vec_int` is an alias for [`integrate_velocity_field`](integrate_velocity_field.qmd).
+<!-- nitrix:/gen -->
+

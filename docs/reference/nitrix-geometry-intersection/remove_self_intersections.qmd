@@ -1,0 +1,35 @@
+---
+title: "remove_self_intersections"
+generated: true
+description: "Reduce self-intersections by Laplacian-relaxing the offending vertices."
+---
+
+[‹ back to `nitrix.geometry.intersection`](../nitrix-geometry-intersection.qmd)
+
+<!-- nitrix:gen sig:remove_self_intersections -->
+```python
+remove_self_intersections(mesh: Mesh, *, n_iterations: int = 10, lam: float = 0.5) -> Mesh
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:remove_self_intersections -->
+Reduce self-intersections by Laplacian-relaxing the offending vertices.
+
+Each iteration detects intersecting face pairs and applies one Laplacian
+smoothing pass *restricted to the vertices of those faces*, until the mesh
+is intersection-free or `n_iterations` is reached.  The topology
+(`faces`) is preserved.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:remove_self_intersections -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mesh` | `Mesh` | — | — | Triangle mesh to clean up. |
+| `n_iterations` | `int` | — | `10` | Maximum number of relaxation passes. |
+| `lam` | `float` | — | `0.5` | Laplacian smoothing step applied to the offending vertices. |
+
+**Returns** `Mesh`. A `Mesh` with the same `faces` and relaxed `vertices`. Host-side (the detection loop is host-side); not differentiable.
+<!-- nitrix:/gen -->
+

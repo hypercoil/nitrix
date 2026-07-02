@@ -1,0 +1,142 @@
+---
+title: "distance_transform"
+generated: true
+description: "Distance transform: distance from each interior voxel to the boundary."
+---
+
+[‹ back to `nitrix.morphology`](../nitrix-morphology.qmd)
+
+*Re-exported here; defined in `nitrix.morphology._mm`.*
+
+<!-- nitrix:gen sig:distance_transform -->
+```python
+distance_transform(mask: Num[Array, '... *spatial'], *, metric: str = 'euclidean', sampling: Optional[Union[float, Sequence[float]]] = None, structuring_element: Optional[Num[Array, '*kspatial']] = None, max_iters: Optional[int] = None, backend: Backend = 'auto') -> Num[Array, '... *spatial']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:distance_transform -->
+Distance transform: distance from each interior voxel to the boundary.
+
+For each output position `i`, returns the distance to the nearest
+position where `mask` is zero (the "boundary").  Non-zero `mask`
+positions are interior; zero positions are distance zero.
+
+Two engines, selected by `metric`:
+
+- `metric="euclidean"` (**default**) -- **exact** Euclidean distance
+  transform.  Each axis pass is a tropical (min, +) matmul of the
+  per-position cost against the squared-distance matrix
+  $\mathrm{out}[p] = \min_q ( g[q] + (q - p)^2 )$
+  ([`semiring_matmul`](../nitrix-semiring.qmd) with
+  [`TROPICAL_MIN_PLUS`](../nitrix-semiring.qmd)), so the EDT runs on the
+  semiring Pallas-CUDA streaming kernel (with the JAX fallback) and is
+  reverse-mode differentiable through the min-plus matmul.  This is the
+  metric `scipy.ndimage.distance_transform_edt` computes; the result
+  matches it to floating-point round-off.
+- `metric="chebyshev"` / `"city_block"` / a custom
+  `structuring_element` -- approximate **chamfer** DT via iterated
+  [`TROPICAL_MIN_PLUS`](../nitrix-semiring.qmd) convolution, sharing the
+  tropical-semiring substrate with [`erode`](../nitrix-morphology/erode.qmd) / [`dilate`](../nitrix-morphology/dilate.qmd) and
+  converging in `max(spatial_shape)` iterations.  Reverse-mode
+  differentiable.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:distance_transform -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mask` | `Num` | `...` × `*spatial` | — | Input, `(..., *spatial)`. Non-zero positions are interior. The Euclidean engine treats every axis as spatial (the `scipy.ndimage.distance_transform_edt` convention); `vmap` to batch. |
+| `metric` | `str` | — | `'euclidean'` | `"euclidean"` (default, exact EDT), `"chebyshev"` (chessboard chamfer), or `"city_block"` (Manhattan chamfer). |
+| `sampling` | `Optional[Union[float, Sequence[float]]]` | — | `None` | Per-axis voxel spacing for the **euclidean** engine (anisotropic grids, e.g. a 1x1x3 mm MRI): a scalar (isotropic) or one value per spatial axis (`scipy.ndimage.distance_transform_edt` `sampling=` semantics). `None` (default) is unit spacing. Only the euclidean engine supports it (the chamfer engine encodes integer steps in its kernel); passing it with a chamfer `metric` / `structuring_element` raises. |
+| `structuring_element` | `Optional[Num[Array, '*kspatial']]` | — | `None` | Explicit per-step cost kernel for the chamfer engine. When given, **selects the chamfer path regardless of** `metric` and is used as the step-cost kernel. Center should be 0; neighbours encode their per-step distance contribution (1 for Chebyshev, per-axis step for city-block). |
+| `max_iters` | `Optional[int]` | — | `None` | Chamfer engine only: cap on iterations (defaults to the longest spatial extent, sufficient for exact convergence). Ignored by the Euclidean engine, which is non-iterative. |
+| `backend` | `Backend` | — | `'auto'` | `"auto"`, `"pallas-cuda"`, or `"jax"`. Selects the `semiring_matmul` backend for the Euclidean engine and the `semiring_conv` backend for the chamfer engine. |
+
+**Returns** `Num` — shape `...` × `*spatial`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:distance_transform -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **476.9 µs** (median, L4); up to **1501.81× faster** than `simpleitk.DanielssonDistanceMap`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_DISTANCE_TRANSFORM.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| distance_transform | jax-cuda12 | shape=[128, 128, 128] | `cupyx.scipy.ndimage.distance_transform_edt` | ok | 540.0 µs / 559.3 µs | 176.91 ms | 8.39 MB (hbm) | ✓ 0×tol | 1.15x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[128, 128, 128] | `nitrix-jax` | ok | 469.6 µs / 476.9 µs | 875.74 ms | 58.72 MB (hbm) | ✓ 9.1e-05×tol | 1.00x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[128, 128, 128] | `scipy.ndimage.distance_transform_edt` | ok | 310.68 ms / 324.38 ms | 339.63 ms | 8.39 MB (hbm) | ✓ 0×tol | 661.59x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[128, 128, 128] | `simpleitk.DanielssonDistanceMap` | ok | 705.26 ms / 719.08 ms | 785.04 ms | 8.39 MB (hbm) | ≈ 2.8e+02×tol | 1501.81x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[128, 128, 128],batch=16 | `cupyx.scipy.ndimage.distance_transform_edt` | ok | 10.78 ms / 10.79 ms | 226.54 ms | 134.22 MB (hbm) | ✓ 0×tol | 1.10x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[128, 128, 128],batch=16 | `nitrix-jax` | ok | 9.76 ms / 10.28 ms | 925.79 ms | 671.09 MB (hbm) | ✓ 9.1e-05×tol | 1.00x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[128, 128, 128],batch=16 | `scipy.ndimage.distance_transform_edt` | ok | 5.229 s / 5.311 s | 5.264 s | 134.22 MB (hbm) | ✓ 0×tol | 535.63x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[128, 128, 128],batch=4 | `cupyx.scipy.ndimage.distance_transform_edt` | ok | 2.68 ms / 2.68 ms | 210.77 ms | 33.55 MB (hbm) | ✓ 0×tol | 1.20x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[128, 128, 128],batch=4 | `nitrix-jax` | ok | 2.24 ms / 2.24 ms | 897.34 ms | 167.77 MB (hbm) | ✓ 9.1e-05×tol | 1.00x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[128, 128, 128],batch=4 | `scipy.ndimage.distance_transform_edt` | ok | 1.340 s / 1.350 s | 1.368 s | 33.55 MB (hbm) | ✓ 0×tol | 599.45x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[128, 128, 128],batch=8 | `cupyx.scipy.ndimage.distance_transform_edt` | ok | 5.39 ms / 5.41 ms | 273.75 ms | 67.11 MB (hbm) | ✓ 0×tol | 1.09x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[128, 128, 128],batch=8 | `nitrix-jax` | ok | 4.96 ms / 5.02 ms | 873.43 ms | 335.54 MB (hbm) | ✓ 9.1e-05×tol | 1.00x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[128, 128, 128],batch=8 | `scipy.ndimage.distance_transform_edt` | ok | 2.589 s / 2.653 s | 2.629 s | 67.11 MB (hbm) | ✓ 0×tol | 522.34x vs nitrix-jax |
+| distance_transform | jax-cpu | shape=[128, 128] | `cupyx.scipy.ndimage.distance_transform_edt` | skipped | — | — | — | — | — |
+| distance_transform | jax-cpu | shape=[128, 128] | `nitrix-jax` | ok | 1.63 ms / 1.65 ms | 139.92 ms | 713 MB (rss) | ✓ 5.2e-05×tol | 1.00x vs nitrix-jax |
+| distance_transform | jax-cpu | shape=[128, 128] | `scipy.ndimage.distance_transform_edt` | ok | 621.9 µs / 636.5 µs | 725.0 µs | 713 MB (rss) | ✓ 0×tol | 0.38x vs nitrix-jax |
+| distance_transform | jax-cpu | shape=[128, 128] | `simpleitk.DanielssonDistanceMap` | ok | 1.85 ms / 1.89 ms | 59.62 ms | 713 MB (rss) | ≈ 59×tol | 1.13x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[128, 128] | `cupyx.scipy.ndimage.distance_transform_edt` | ok | 200.9 µs / 212.2 µs | 192.14 ms | 0.07 MB (hbm) | ✓ 0×tol | 0.92x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[128, 128] | `nitrix-jax` | ok | 219.1 µs / 221.4 µs | 804.86 ms | 33.75 MB (hbm) | ✓ 9.1e-05×tol | 1.00x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[128, 128] | `scipy.ndimage.distance_transform_edt` | ok | 626.2 µs / 779.8 µs | 848.4 µs | 0.07 MB (hbm) | ✓ 0×tol | 2.86x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[128, 128] | `simpleitk.DanielssonDistanceMap` | ok | 1.88 ms / 1.92 ms | 59.39 ms | 0.07 MB (hbm) | ≈ 59×tol | 8.56x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[256, 256, 256] | `cupyx.scipy.ndimage.distance_transform_edt` | ok | 6.05 ms / 6.09 ms | 234.60 ms | 67.11 MB (hbm) | ✓ 0×tol | 0.83x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[256, 256, 256] | `nitrix-jax` | ok | 7.31 ms / 7.86 ms | 1.007 s | 335.54 MB (hbm) | ✓ 9.4e-05×tol | 1.00x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[256, 256, 256] | `scipy.ndimage.distance_transform_edt` | ok | 3.172 s / 3.197 s | 3.203 s | 67.11 MB (hbm) | ✓ 0×tol | 433.90x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[256, 256, 256] | `simpleitk.DanielssonDistanceMap` | ok | 5.657 s / 5.900 s | 6.017 s | 67.11 MB (hbm) | ≈ 3.9e+02×tol | 773.71x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[256, 256] | `cupyx.scipy.ndimage.distance_transform_edt` | ok | 244.3 µs / 249.3 µs | 166.82 ms | 0.26 MB (hbm) | ✓ 0×tol | 0.72x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[256, 256] | `nitrix-jax` | ok | 341.2 µs / 349.4 µs | 776.41 ms | 34.34 MB (hbm) | ✓ 9.4e-05×tol | 1.00x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[256, 256] | `scipy.ndimage.distance_transform_edt` | ok | 2.55 ms / 2.59 ms | 3.49 ms | 0.26 MB (hbm) | ✓ 0×tol | 7.47x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[256, 256] | `simpleitk.DanielssonDistanceMap` | ok | 6.08 ms / 6.17 ms | 66.67 ms | 0.26 MB (hbm) | ≈ 59×tol | 17.81x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[512, 512] | `cupyx.scipy.ndimage.distance_transform_edt` | ok | 332.7 µs / 340.8 µs | 199.72 ms | 1.05 MB (hbm) | ✓ 0×tol | 0.59x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[512, 512] | `nitrix-jax` | ok | 564.2 µs / 572.0 µs | 729.82 ms | 36.70 MB (hbm) | ✓ 9.4e-05×tol | 1.00x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[512, 512] | `scipy.ndimage.distance_transform_edt` | ok | 11.08 ms / 12.61 ms | 13.45 ms | 1.05 MB (hbm) | ✓ 0×tol | 19.64x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[512, 512] | `simpleitk.DanielssonDistanceMap` | ok | 22.80 ms / 23.03 ms | 77.97 ms | 1.05 MB (hbm) | ≈ 59×tol | 40.40x vs nitrix-jax |
+| distance_transform | jax-cpu | shape=[64, 64, 64] | `cupyx.scipy.ndimage.distance_transform_edt` | skipped | — | — | — | — | — |
+| distance_transform | jax-cpu | shape=[64, 64, 64] | `nitrix-jax` | ok | 12.81 ms / 13.01 ms | 183.96 ms | 713 MB (rss) | ✓ 5.4e-05×tol | 1.00x vs nitrix-jax |
+| distance_transform | jax-cpu | shape=[64, 64, 64] | `scipy.ndimage.distance_transform_edt` | ok | 28.45 ms / 28.82 ms | 33.77 ms | 713 MB (rss) | ✓ 0×tol | 2.22x vs nitrix-jax |
+| distance_transform | jax-cpu | shape=[64, 64, 64] | `simpleitk.DanielssonDistanceMap` | ok | 81.16 ms / 81.29 ms | 138.90 ms | 713 MB (rss) | ≈ 3.9e+02×tol | 6.34x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[64, 64, 64] | `cupyx.scipy.ndimage.distance_transform_edt` | ok | 235.9 µs / 239.6 µs | 173.81 ms | 1.05 MB (hbm) | ✓ 0×tol | 0.96x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[64, 64, 64] | `nitrix-jax` | ok | 245.1 µs / 254.0 µs | 826.74 ms | 36.70 MB (hbm) | ✓ 9.1e-05×tol | 1.00x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[64, 64, 64] | `scipy.ndimage.distance_transform_edt` | ok | 29.29 ms / 31.13 ms | 35.79 ms | 1.05 MB (hbm) | ✓ 0×tol | 119.51x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[64, 64, 64] | `simpleitk.DanielssonDistanceMap` | ok | 81.60 ms / 82.21 ms | 138.02 ms | 1.05 MB (hbm) | ≈ 3.9e+02×tol | 332.90x vs nitrix-jax |
+| distance_transform | jax-cpu | shape=[64, 64] | `cupyx.scipy.ndimage.distance_transform_edt` | skipped | — | — | — | — | — |
+| distance_transform | jax-cpu | shape=[64, 64] | `nitrix-jax` | ok | 261.1 µs / 268.3 µs | 151.75 ms | 713 MB (rss) | ✓ 4.9e-05×tol | 1.00x vs nitrix-jax |
+| distance_transform | jax-cpu | shape=[64, 64] | `scipy.ndimage.distance_transform_edt` | ok | 170.1 µs / 175.6 µs | 229.1 µs | 713 MB (rss) | ✓ 0×tol | 0.65x vs nitrix-jax |
+| distance_transform | jax-cpu | shape=[64, 64] | `simpleitk.DanielssonDistanceMap` | ok | 854.4 µs / 875.6 µs | 58.08 ms | 713 MB (rss) | ≈ 59×tol | 3.27x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[64, 64] | `cupyx.scipy.ndimage.distance_transform_edt` | ok | 199.9 µs / 202.9 µs | 356.84 ms | 0.02 MB (hbm) | ✓ 0×tol | 1.34x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[64, 64] | `nitrix-jax` | ok | 149.8 µs / 165.9 µs | 1.128 s | 33.60 MB (hbm) | ✓ 9.1e-05×tol | 1.00x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[64, 64] | `scipy.ndimage.distance_transform_edt` | ok | 297.7 µs / 312.3 µs | 296.0 µs | 0.02 MB (hbm) | ✓ 0×tol | 1.99x vs nitrix-jax |
+| distance_transform | jax-cuda12 | shape=[64, 64] | `simpleitk.DanielssonDistanceMap` | ok | 845.4 µs / 861.4 µs | 65.97 ms | 0.02 MB (hbm) | ≈ 59×tol | 5.64x vs nitrix-jax |
+:::
+
+*source: bench `b9647599` · nitrix `bf29b0e0`*
+::::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:distance_transform -->
+::: {.callout-note}
+The Euclidean default supersedes the historical chamfer default: a
+function named `distance_transform` is expected to compute the Euclidean
+metric (as scipy / cupy / ITK do).  Expressing the separable EDT as a
+per-axis min-plus matmul reuses the semiring substrate's Pallas-CUDA kernel
+-- on the L4 it matches `cupyx.scipy.ndimage.distance_transform_edt` at
+64^3 and beats scipy on CPU, exact, where the iterative chamfer was ~80x
+slower on GPU.  The chamfer engine is retained for non-Euclidean metrics
+and custom step-cost kernels.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:distance_transform -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

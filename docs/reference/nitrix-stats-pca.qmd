@@ -1,59 +1,86 @@
 ---
 title: "nitrix.stats.pca"
 generated: true
-signature-hash: 64a7d840ab3da177
+signature-hash: 773c0daab6d00582
+description: "Principal-component analysis."
+listing:
+  id: nitrix-stats-pca-symbols
+  contents: "nitrix-stats-pca/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
-Auto-generated scaffold for `nitrix.stats.pca` (signatures only). Replace the
-skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
-`check_reference_staleness.py` flags this page if the underlying
-signatures drift from this stub.
+Auto-generated scaffold for `nitrix.stats.pca`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
 
-## `PCAResult` {#PCAResult}
+<!-- nitrix:gen overview:__module__ -->
+Principal-component analysis.
 
-```python
-class PCAResult
-```
+[`pca_fit`](nitrix-stats-pca/pca_fit.qmd) learns an orthonormal basis ordered by explained
+variance; [`pca_transform`](nitrix-stats-pca/pca_transform.qmd) and [`pca_inverse_transform`](nitrix-stats-pca/pca_inverse_transform.qmd)
+project to and from that basis.  The basis is the eigendecomposition of
+the (sample) covariance
 
-Fitted PCA basis (a NamedTuple of arrays, not a module).
+$$
+C = X_c^{\top} X_c / (n - 1), \qquad C v_i = \lambda_i v_i
+$$
 
-*TODO: class overview.*
+with `xc` the centred data.  The $i$-th component is the
+eigenvector with the $i$-th largest eigenvalue, and
+$\lambda_i$ is the variance captured along it.
 
-## `pca_fit` {#pca_fit}
+Solvers (`solver=`):
 
-```python
-pca_fit(X: Float[Array, 'n d'], *, n_components: Optional[int]=None, center: bool=True, solver: Solver='full', n_oversamples: int=10, n_power_iterations: int=2, key: Optional[Array]=None) -> PCAResult
-```
+- `"full"` -- exact: eigendecomposition of the $(d, d)$
+  covariance.
+- `"gram"` -- exact, but via the $(n, n)$ Gram matrix
+  $X_c X_c^{\top}$ instead of the $(d, d)$ covariance; far
+  cheaper when $n \ll d$ (many features, few samples -- e.g.
+  component-correlation / CompCor on a voxel-by-time matrix).  The
+  components are recovered from the Gram eigenvectors as
+  $V = X_c^{\top} U / \Sigma$.  Bit-identical to `"full"`
+  (same spectrum, same sign convention).
+- `"randomized"` -- approximate: a randomised range finder that
+  recovers the top $k$ components in $O(n d (k + p))$
+  matmuls, for $k$ much smaller than $d$ (the regime where
+  forming / factoring the full covariance is wasteful).  Keyed (needs a
+  PRNG key).
+- `"auto"` -- pick the cheaper exact solver: `"gram"` when
+  $n < d$, else `"full"`.
 
-Fit a PCA basis to ``X`` (rows = samples, columns = features).
+Implementation notes:
 
-**Parameters** — *TODO: document each parameter.*
+- Every factorisation goes through the symmetric eigensolver
+  (`safe_eigh`), never SVD or QR.  This is deliberate: on the
+  cuSolver-affected GPU stacks SVD and QR are broken while the routed
+  eigendecomposition falls back to a device where it works.  The
+  randomised solver in particular uses the eigendecomposition-based
+  range finder (orthonormalise via the eigendecomposition of the small
+  Gram matrix) rather than the textbook QR + small-SVD, so it too stays
+  portable; its only solver calls are on tiny
+  $(k + p) \times (k + p)$ matrices, the rest is matmuls.
+- Eigenvector signs are arbitrary; they are fixed deterministically
+  (largest-magnitude entry of each component made positive, the
+  `svd_flip` convention) so a fit is reproducible across runs and
+  devices.
+<!-- nitrix:/gen -->
 
-**Returns** — *TODO.*
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
 
-## `pca_transform` {#pca_transform}
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d` | spatial dimension (2 or 3) |
+| `k` | kernel or basis components |
+<!-- nitrix:/gen -->
 
-```python
-pca_transform(X: Float[Array, 'n d'], components: Float[Array, 'k d'], mean: Float[Array, 'd']) -> Float[Array, 'n k']
-```
+## Symbols
 
-Project ``X`` onto a PCA basis: ``(X - mean) @ components.T``.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `pca_inverse_transform` {#pca_inverse_transform}
-
-```python
-pca_inverse_transform(Z: Float[Array, 'n k'], components: Float[Array, 'k d'], mean: Float[Array, 'd']) -> Float[Array, 'n d']
-```
-
-Reconstruct from PCA coordinates: ``Z @ components + mean``.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
+::: {#nitrix-stats-pca-symbols}
+:::

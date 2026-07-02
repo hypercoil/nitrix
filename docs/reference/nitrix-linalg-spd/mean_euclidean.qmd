@@ -1,0 +1,43 @@
+---
+title: "mean_euclidean"
+generated: true
+description: "Euclidean mean: the plain element-wise average."
+---
+
+[‹ back to `nitrix.linalg.spd`](../nitrix-linalg-spd.qmd)
+
+<!-- nitrix:gen sig:mean_euclidean -->
+```python
+mean_euclidean(input: Float[Array, '... batch d d'], *, axis: Union[int, Sequence[int]] = 0) -> Float[Array, '... d d']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:mean_euclidean -->
+Euclidean mean: the plain element-wise average.
+
+Provided for symmetry with the SPD-specific means.  The Euclidean mean of
+SPD matrices is itself SPD (the cone is convex), so this is geometrically
+valid; it is simply *not* the geodesic mean.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:mean_euclidean -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `input` | `Float` | `...` × `batch` × `d` × `d` | — | Batch of symmetric matrices, with each `d` by `d` matrix on the two trailing axes and one or more batch axes to average over. |
+| `axis` | `Union[int, Sequence[int]]` | — | `0` | Axis or axes over which to average (default `0`). |
+
+**Returns** `Float` — shape `...` × `d` × `d`. The element-wise mean matrix, with the averaged axes removed.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:mean_euclidean -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `batch` | leading batch axes (variadic) |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->

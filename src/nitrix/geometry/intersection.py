@@ -6,13 +6,13 @@ Triangle-mesh self-intersection detection and removal.
 
 A **host-side QA / cleanup** tool, not a differentiable kernel: a uniform-grid
 broad phase finds candidate face pairs, a segment-triangle (Moller-Trumbore)
-narrow phase confirms genuine crossings, and ``remove_self_intersections``
+narrow phase confirms genuine crossings, and :func:`remove_self_intersections`
 relaxes the offending vertices with Laplacian smoothing.
 
 **Use as a post-hoc cleanup, never inside a jitted loop.**  The broad/narrow
 phase is host-side NumPy and cannot run under ``lax.fori_loop``; surface movers
-like ``deform_to_sdf`` regularise in-loop with the jittable Laplacian fraction
-instead, and call this afterwards if a guard is wanted.
+like :func:`deform_to_sdf` regularise in-loop with the jittable Laplacian
+fraction instead, and call this afterwards if a guard is wanted.
 
 Limitation: the narrow phase detects transversal (edge-pierces-face) crossings
 -- the self-intersections a deformed surface actually produces -- but not
@@ -39,13 +39,28 @@ _EPS = 1e-9
 
 
 def _candidate_pairs(tri: NDArray[Any]) -> NDArray[Any]:
-    """Uniform-grid broad phase: candidate face-pair indices (C, 2).
+    """Uniform-grid broad phase over triangles, yielding candidate face pairs.
 
-    Faces are binned into a grid of cells ~ the median edge length; faces whose
-    AABBs share a cell are candidates.  Vectorised (Tier C / audit AI-C4): the
-    per-(face, cell) membership enumeration is numpy (no quad-nested Python
-    loop); only the within-cell pairing loops over occupied multi-face cells
-    (far fewer than faces) with a vectorised ``np.triu_indices`` per cell.
+    Faces are binned into a uniform grid whose cell size is roughly the median
+    triangle edge length; two faces whose axis-aligned bounding boxes share at
+    least one grid cell form a candidate pair for the narrow phase.  The
+    per-(face, cell) membership enumeration is fully vectorised over NumPy (no
+    quad-nested Python loop); only the within-cell pairing loops over occupied
+    multi-face cells (far fewer than the number of faces), using a vectorised
+    ``np.triu_indices`` per cell.
+
+    Parameters
+    ----------
+    tri : NDArray, shape (F, 3, 3)
+        Per-face triangle vertex coordinates: ``F`` faces, three vertices each,
+        three spatial coordinates per vertex.
+
+    Returns
+    -------
+    NDArray, shape (C, 2)
+        Integer array of ``C`` candidate face-index pairs, deduplicated and
+        ordered so that ``i < j`` in each row.  Empty (shape ``(0, 2)``) when
+        fewer than two faces are supplied or no boxes overlap.
     """
     n_faces = tri.shape[0]
     if n_faces < 2:
@@ -64,7 +79,9 @@ def _candidate_pairs(tri: NDArray[Any]) -> NDArray[Any]:
     face_id = np.repeat(np.arange(n_faces, dtype=np.int64), counts)
     start = np.zeros(n_faces + 1, dtype=np.int64)
     np.cumsum(counts, out=start[1:])
-    local = np.arange(total, dtype=np.int64) - start[face_id]  # idx within face
+    local = (
+        np.arange(total, dtype=np.int64) - start[face_id]
+    )  # idx within face
     dpm = dims[face_id]
     dz = local % dpm[:, 2]
     dy = (local // dpm[:, 2]) % dpm[:, 1]
@@ -109,7 +126,29 @@ def _seg_tri_hit(
     b: NDArray[Any],
     c: NDArray[Any],
 ) -> NDArray[Any]:
-    """Vectorised segment(p0->p1)-triangle(a,b,c) intersection (Moller-Trumbore)."""
+    """Vectorised segment-triangle intersection test (Moller-Trumbore).
+
+    Tests, for each entry of the batched inputs, whether the line segment from
+    ``p0`` to ``p1`` crosses the triangle with vertices ``a``, ``b``, ``c``.
+    The barycentric coordinates and ray parameter are computed via the
+    Moller-Trumbore algorithm; segments parallel to the triangle plane
+    (vanishing determinant, within :math:`\\varepsilon`) are treated as
+    non-intersecting.
+
+    Parameters
+    ----------
+    p0, p1 : NDArray, shape (..., 3)
+        Endpoints of the segment; each intersection is tested along
+        :math:`p_0 \\to p_1`.
+    a, b, c : NDArray, shape (..., 3)
+        The three triangle vertices, broadcast against the segment batch.
+
+    Returns
+    -------
+    NDArray of bool, shape (...)
+        ``True`` where the segment genuinely crosses the triangle interior (or
+        boundary, within :math:`\\varepsilon`), ``False`` otherwise.
+    """
     e1, e2 = b - a, c - a
     d = p1 - p0
     pv = np.cross(d, e2)
@@ -135,7 +174,27 @@ def _seg_tri_hit(
 def _pairs_intersect(
     verts: NDArray[Any], faces: NDArray[Any], pairs: NDArray[Any]
 ) -> NDArray[Any]:
-    """Boolean (C,): does each candidate face pair genuinely cross?"""
+    """Narrow phase: confirm which candidate face pairs genuinely cross.
+
+    For each candidate pair the six directed triangle edges (three from each
+    face) are tested against the opposing triangle with :func:`_seg_tri_hit`; a
+    pair is reported as crossing if any of the six edge-triangle tests hits.
+
+    Parameters
+    ----------
+    verts : NDArray, shape (V, 3)
+        Vertex coordinates for the ``V`` mesh vertices.
+    faces : NDArray, shape (F, 3)
+        Triangle connectivity: three vertex indices per face.
+    pairs : NDArray, shape (C, 2)
+        Candidate face-index pairs from the broad phase.
+
+    Returns
+    -------
+    NDArray of bool, shape (C,)
+        ``True`` for each candidate pair whose triangles transversally
+        intersect, ``False`` otherwise.
+    """
     t1 = verts[faces[pairs[:, 0]]]  # (C, 3, 3)
     t2 = verts[faces[pairs[:, 1]]]
     a1, b1, c1 = t1[:, 0], t1[:, 1], t1[:, 2]
@@ -157,14 +216,15 @@ def find_self_intersections(mesh: Mesh) -> Int[Array, 'n_pairs 2']:
 
     Parameters
     ----------
-    mesh
-        Triangle mesh.
+    mesh : Mesh
+        Triangle mesh to inspect.
 
     Returns
     -------
-    ``(n_pairs, 2)`` integer array of intersecting face-index pairs
-    (``i < j``); empty if the mesh is intersection-free.  Host-side; not
-    differentiable.
+    Int[Array, 'n_pairs 2']
+        Integer array of intersecting face-index pairs (``i < j`` per row);
+        empty (shape ``(0, 2)``) if the mesh is intersection-free.  Host-side;
+        not differentiable.
     """
     verts = np.asarray(mesh.vertices, dtype=np.float64)
     faces = np.asarray(mesh.faces)
@@ -198,17 +258,18 @@ def remove_self_intersections(
 
     Parameters
     ----------
-    mesh
-        Triangle mesh.
-    n_iterations
-        Maximum relaxation passes.
-    lam
-        Laplacian smoothing step for the offending vertices.
+    mesh : Mesh
+        Triangle mesh to clean up.
+    n_iterations : int, optional
+        Maximum number of relaxation passes.
+    lam : float, optional
+        Laplacian smoothing step applied to the offending vertices.
 
     Returns
     -------
-    ``Mesh`` with the same ``faces`` and relaxed ``vertices``.  Host-side
-    (the detection loop is host-side); not differentiable.
+    Mesh
+        A :class:`Mesh` with the same ``faces`` and relaxed ``vertices``.
+        Host-side (the detection loop is host-side); not differentiable.
     """
     verts = mesh.vertices
     faces = mesh.faces

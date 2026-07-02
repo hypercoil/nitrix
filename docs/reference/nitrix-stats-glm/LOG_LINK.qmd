@@ -1,0 +1,20 @@
+---
+title: "LOG_LINK"
+generated: true
+description: "The log link :math:`g( mu) =  log  mu`."
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+*Re-exported here; defined in `nitrix.stats._family`.*
+
+<!-- nitrix:gen sig:LOG_LINK -->
+```python
+LOG_LINK = Link(name='log', link=_log_link, linkinv=_safe_exp, mu_eta=_safe_exp, eta_bound=_ETA_MAX)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:LOG_LINK -->
+The log link $g(\mu) = \log \mu$.
+<!-- nitrix:/gen -->
+

@@ -1,0 +1,44 @@
+---
+title: "overlap_add"
+generated: true
+description: "Normalise an accumulated overlap-add."
+---
+
+[‹ back to `nitrix.numerics.spatial`](../nitrix-numerics-spatial.qmd)
+
+<!-- nitrix:gen sig:overlap_add -->
+```python
+overlap_add(weighted_sum: Float[Array, '...'], weight: Float[Array, '...'], *, eps: float = 1e-08) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:overlap_add -->
+Normalise an accumulated overlap-add.
+
+Computes the weighted mean
+$\mathrm{weighted\_sum} / \max(\mathrm{weight}, \epsilon)$,
+the finalisation step of weighted patch stitching. The orchestrator
+accumulates `weighted_sum += w * patch` and `weight += w` over the
+tiles, and `eps` guards voxels that no patch covered.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:overlap_add -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `weighted_sum` | `Float` | `...` | — | Accumulated sum of `weight * patch` contributions over all tiles. |
+| `weight` | `Float` | `...` | — | Accumulated sum of the patch weights over all tiles, broadcast- compatible with `weighted_sum`. |
+| `eps` | `float` | — | `1e-08` | Lower bound on the denominator, guarding voxels covered by no patch (zero accumulated weight). Defaults to `1e-8`. |
+
+**Returns** `Float` — shape `...`. The normalised overlap-add, with the shape of the broadcast of `weighted_sum` and `weight`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:overlap_add -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

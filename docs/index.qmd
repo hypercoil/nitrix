@@ -4,47 +4,69 @@ subtitle: "GPU-accelerated pure numerics for neuroimaging in JAX/XLA"
 toc: false
 ---
 
-`nitrix` is the substrate numerics layer of the federation: statistics,
-geometry, registration, signal, graph, and morphology, written as pure
-JAX/XLA so they run — differentiably, batched, JIT-compiled — on a hardware
-accelerator.
+`nitrix` is the substrate numerics layer of the federation: statistics, geometry,
+registration, signal, graph, and morphology, written as pure JAX/XLA so they run —
+differentiably, batched, JIT-compiled — on a hardware accelerator.
 
-::: {.callout-tldr title="Fast path"}
-New to GPUs, JAX/XLA, or automatic differentiation? Start with [the
-primer](explanation/primer/index.qmd) — the foundations the rest of the book leans
-on. Then three textbook units for readers who know linear algebra but not the
-domain: [the statistical modelling suite](explanation/statistics/index.qmd) —
-climbing from generalised linear models up to Gaussian processes — [discrete
-geometry](explanation/geometry/index.qmd) — meshes, volumes, and the operators on
-them — and [registration](explanation/registration/index.qmd) — the maps between
-those geometries. For statistics, read the [GLM
-foundation](explanation/statistics/glm.qmd) first ("every model is GLM plus one
-idea"); for geometry, the [operator algebra](explanation/geometry/operators.qmd);
-for registration, the [foundations](explanation/registration/foundations.qmd).
+The documentation follows the [Diátaxis](https://diataxis.fr) four-mode structure —
+**tutorials** to learn, **how-to guides** to get a task done, **reference** to look
+things up, and **explanation** to understand why. The explanation layer is complete;
+the others are taking shape. New here? Start with
+[the primer](explanation/primer/index.qmd).
+
+::: {.grid}
+
+::: {.g-col-12 .g-col-md-6}
+### Tutorials
+
+*Learning-oriented — guided lessons that take a newcomer from zero to a first
+working result.*
+
+**Planned.** In the meantime, every explanation chapter's figures are runnable
+end-to-end, and [the primer](explanation/primer/index.qmd) is the gentlest on-ramp
+to the library's foundations.
 :::
 
-## Explanation (the textbook layer)
+::: {.g-col-12 .g-col-md-6}
+### How-to guides
 
-- [The primer](explanation/primer/index.qmd) — the foundations the rest of the book
-  leans on: programming the GPU, the JAX/XLA compiler and its levels of
-  representation, the calculus of automatic differentiation, and the inductive
-  biases that tie the units together.
-  - [Programming the GPU](explanation/primer/hardware.qmd)
-  - [JAX and XLA: levels of representation](explanation/primer/xla-jax.qmd)
-- [The statistical modelling suite](explanation/statistics/index.qmd) — the model
-  ladder (GLM → LME → GAM → GLMM → GAMM → HSGP) and the shared algorithms behind it.
-  - [Generalised linear models: the foundation](explanation/statistics/glm.qmd)
-  - [Choosing smoothing parameters: the Fellner–Schall method](explanation/statistics/fellner-schall.qmd)
+*Task-oriented — direct recipes for a specific job ("register an EPI to a T1", "fit
+a mass-univariate GLM across a brain").*
+
+**Planned.** The recipe-style chapters come closest today — e.g. the
+[registration recipes](explanation/registration/recipes.qmd) (which mover for which
+problem) and each unit's performance chapter.
+:::
+
+::: {.g-col-12 .g-col-md-6}
+### Explanation
+
+*Understanding-oriented — derive the mathematics, justify the design, point at the
+code.* The textbook layer, and the most complete part of the docs.
+
+- [The primer](explanation/primer/index.qmd) — programming the GPU, the JAX/XLA
+  compiler, the calculus of automatic differentiation, and inductive bias
+  *(start here)*
+- [Statistical modelling](explanation/statistics/index.qmd) — the model ladder
+  (GLM → LME → GAM → GLMM → GAMM → HSGP) and the engine beneath it
 - [Discrete geometry](explanation/geometry/index.qmd) — meshes, volumes, and the
-  operators on them: the Laplace–Beltrami operator, curvature, morphology and
-  distance transforms, isosurfaces, over a shared semiring substrate.
-  - [The operator algebra: ELL + semirings](explanation/geometry/operators.qmd)
-  - [The Laplace–Beltrami operator](explanation/geometry/laplace-beltrami.qmd)
-- [Registration](explanation/registration/index.qmd) — maps between geometries:
-  the transform ladder (rigid → affine → diffeomorphic → surface), similarity
-  metrics, differentiable resampling, and the optimisation that finds the map.
-  - [The registration problem](explanation/registration/foundations.qmd)
-  - [Linear transforms as a Lie group](explanation/registration/transforms.qmd)
+  operators on them, over a shared semiring substrate
+- [Registration](explanation/registration/index.qmd) — maps between geometries: the
+  transform ladder, similarity, resampling, and the optimisation that finds the map
 
-More units (signal, connectivity and labels) follow the same pattern: derive the
-mathematics, justify the design, point at the code.
+More units (signal, connectivity and labels) will follow the same pattern.
+:::
+
+::: {.g-col-12 .g-col-md-6}
+### Reference
+
+*Information-oriented — precise, complete API documentation for every public
+function and type.*
+
+**Draft — [browse the API reference](reference/index.qmd).** The pages are
+auto-generated with signatures, named tensor dimensions, and benchmark figures;
+the authored prose is still being filled and coverage is expanding beyond
+`nitrix.stats`, so treat them as work in progress.
+:::
+
+:::

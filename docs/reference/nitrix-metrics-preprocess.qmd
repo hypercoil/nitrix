@@ -1,0 +1,52 @@
+---
+title: "nitrix.metrics.preprocess"
+generated: true
+signature-hash: 4697ee4ad630b19c
+description: "Intensity preprocessing for registration (the fMRIPrep front-end)."
+listing:
+  id: nitrix-metrics-preprocess-symbols
+  contents: "nitrix-metrics-preprocess/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.metrics.preprocess`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Intensity preprocessing for registration (the fMRIPrep front-end).
+
+The two within-/cross-modality conditioning steps an `antsRegistration` run
+applies before the metric sees the data:
+
+- [`winsorize`](nitrix-metrics-preprocess/winsorize.qmd) -- clip each image to its low/high intensity percentiles
+  (`--winsorize-image-intensities [0.005, 0.995]`), so outliers (hot voxels,
+  skull, artifacts) do not dominate an SSD / Demons force.  Also relieves the
+  step-normalisation global-outlier sensitivity (the clipped image has no
+  extreme voxel to set the trust-region cap).
+- [`match_histogram`](nitrix-metrics-preprocess/match_histogram.qmd) -- remap the moving image's intensity distribution onto
+  the reference's by CDF / quantile transport (`--use-histogram-matching 1`), so
+  a within-modality SSD / CC metric is not fighting a global intensity
+  gain/offset.
+
+Both are pure and differentiable (clip + sort-based quantiles + linear
+interpolation), so they compose with the differentiable-layer story.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-metrics-preprocess-symbols}
+:::

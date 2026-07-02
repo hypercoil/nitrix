@@ -4,38 +4,42 @@
 """
 Bounded bilateral smoothing via the semiring substrate.
 
-The marquee edge-preserving capability (SPEC §4.4): a true
-high-dimensional bilateral filter over a **bounded** neighbourhood.
-For each output position, gather the feature-space neighbourhood,
-weight by a Gaussian over a metric on feature space, normalise, and
-reduce via ``semiring_ell_matmul`` with the REAL semiring::
+A true high-dimensional bilateral filter over a **bounded**
+neighbourhood.  For each output position, gather the feature-space
+neighbourhood, weight by a Gaussian over a metric on feature space,
+normalise, and reduce via :func:`~nitrix.semiring.semiring_ell_matmul`
+with the REAL semiring:
 
-    out[i, :] = (1 / Z[i]) * sum_p w[i, p] * values[neighbours[i, p], :]
-    w[i, p]   = exp(-1/2 * (f_i - f_j)^T M (f_i - f_j))    [j = neighbour p]
-    Z[i]      = sum_p w[i, p]
+.. math::
+
+    \\mathrm{out}_{i,:} &= \\frac{1}{Z_i} \\sum_p w_{i,p}\\,
+        \\mathrm{values}_{\\mathrm{neighbours}_{i,p},\\,:} \\\\
+    w_{i,p} &= \\exp\\!\\left(-\\tfrac{1}{2}\\,
+        (f_i - f_j)^{\\top} M (f_i - f_j)\\right)
+        \\quad [\\,j = \\text{neighbour } p\\,] \\\\
+    Z_i &= \\sum_p w_{i,p}
 
 The whole filter is one gather plus one weighted reduction: statically
 shaped, ``jit`` / ``vmap`` / ``grad`` clean, and GPU-native.  The
-weight is a smooth ``exp`` of a quadratic form over a *fixed* bounded
-neighbourhood, so the gradient is smooth everywhere (no sort, no
-scatter, no simplex-identity branch).  This is the bounded-support
-filter that supersedes the retired permutohedral lattice for the
-feature dimensionalities we care about (and, via a low-rank metric,
-well beyond).
+weight is a smooth :math:`\\exp` of a quadratic form over a *fixed*
+bounded neighbourhood, so the gradient is smooth everywhere (no sort,
+no scatter, no simplex-identity branch).  This is a bounded-support
+filter for moderate feature dimensionalities and, via a low-rank
+metric, well beyond.
 
 Three independent choices parameterise a call:
 
 - **Values vs. features are decoupled.** ``values`` (e.g. a BOLD time
-  series, ``d_v`` frames) and ``features`` (the multimodal signature
-  set, ``d_f`` channels) are separate arguments with separate column
-  counts.  The common "filter the features by themselves" case is just
-  ``values is features`` at the call site.
-- **The metric** ``M = L L^T`` is supplied as a ``FeatureMetric``
-  (:mod:`nitrix.smoothing.metric`): diagonal per-channel bandwidths, a
-  low-rank projection of correlated channels, or a full anisotropic
-  factor.  In the limit of a large bandwidth on a channel, that channel
-  drops out and the filter degrades gracefully toward a spatial-only
-  Gaussian.
+  series, :math:`d_v` frames) and ``features`` (the multimodal
+  signature set, :math:`d_f` channels) are separate arguments with
+  separate column counts.  The common "filter the features by
+  themselves" case is just ``values is features`` at the call site.
+- **The metric** :math:`M = L L^{\\top}` is supplied as a
+  :class:`~nitrix.smoothing.metric.FeatureMetric`: diagonal per-channel
+  bandwidths, a low-rank projection of correlated channels, or a full
+  anisotropic factor.  In the limit of a large bandwidth on a channel,
+  that channel drops out and the filter degrades gracefully toward a
+  spatial-only Gaussian.
 - **The neighbourhood** is bounded: an ``int`` ``k`` (brute-force k-NN
   in feature space), an explicit ``(n, k_max)`` index array, or an
   :class:`~nitrix.sparse.ell.ELL` adjacency (grid box, mesh k-ring,
@@ -47,9 +51,17 @@ Three independent choices parameterise a call:
 ``n_iters > 1`` grows the effective support cheaply: the affinity graph
 (features, neighbours, weights) is fixed across iterations and only the
 values diffuse, so the normalised weights are built once and re-applied
-``n_iters`` times -- ``iters`` mean-field updates of a bounded dense CRF
-(Krahenbuhl & Koltun 2011) at ``O(n_iters * n * k_max * d_v)`` for the
-diffusion on top of a single ``O(n * k_max * k)`` weight build.
+``n_iters`` times -- ``n_iters`` mean-field updates of a bounded dense
+CRF at :math:`O(n_{\\mathrm{iters}} \\cdot n \\cdot k_{\\max} \\cdot d_v)`
+for the diffusion on top of a single
+:math:`O(n \\cdot k_{\\max} \\cdot k)` weight build.
+
+References
+----------
+.. [1] Krähenbühl, P., & Koltun, V. (2011). Efficient inference in
+   fully connected CRFs with Gaussian edge potentials. *Advances in
+   Neural Information Processing Systems*, 24.
+   https://arxiv.org/abs/1210.5644
 """
 
 from __future__ import annotations
@@ -76,11 +88,12 @@ def brute_force_knn(
 ) -> Int[Array, 'n k']:
     """Brute-force k-nearest-neighbour search in (optionally projected) feature space.
 
-    Materialises the ``(n, n)`` distance matrix; quadratic in memory.
-    Practical for ``n <~ 10k``.  For larger ``n``, the caller should
-    pre-compute the adjacency with a spatial-index data structure
-    (KD-tree, grid hashing, mesh k-ring, etc.) and pass it as
-    ``neighbourhood=`` to ``bilateral_gaussian``.
+    Materialises the :math:`(n, n)` distance matrix; quadratic in
+    memory.  Practical for :math:`n \\lesssim 10\\mathrm{k}`.  For larger
+    :math:`n`, the caller should pre-compute the adjacency with a
+    spatial-index data structure (KD-tree, grid hashing, mesh k-ring,
+    etc.) and pass it as ``neighbourhood=`` to
+    :func:`bilateral_gaussian`.
 
     Parameters
     ----------
@@ -90,16 +103,17 @@ def brute_force_knn(
         Number of neighbours per query point.  The point itself is
         included in its own ``k`` (so ``k=1`` returns self-only).
     metric
-        Optional ``FeatureMetric``.  ``None`` ranks by raw Euclidean
-        distance; when supplied, the search ranks by
-        ``sum(metric.project(diff)**2, -1)`` -- the same quadratic form
-        ``bilateral_gaussian`` uses for its weights, so the k-NN
-        adjacency matches the weight metric.
+        Optional :class:`~nitrix.smoothing.metric.FeatureMetric`.
+        ``None`` ranks by raw Euclidean distance; when supplied, the
+        search ranks by ``sum(metric.project(diff)**2, -1)`` -- the same
+        quadratic form :func:`bilateral_gaussian` uses for its weights,
+        so the k-NN adjacency matches the weight metric.
 
     Returns
     -------
-    Indices of the ``k`` nearest neighbours for each query point,
-    shape ``(n, k)``.  Sorted by ascending distance.
+    Int[Array, 'n k']
+        Indices of the ``k`` nearest neighbours for each query point,
+        shape ``(n, k)``, sorted by ascending distance.
     """
     # Pairwise feature differences: (n, n, d_f).
     diff = features[:, None, :] - features[None, :, :]
@@ -142,9 +156,10 @@ def bilateral_gaussian(
         channels.  The bilateral metric is over these, not over the
         values being smoothed.
     metric
-        A ``FeatureMetric`` (:mod:`nitrix.smoothing.metric`) defining
-        ``M = L L^T``.  The weight falls off as
-        ``exp(-1/2 * sum(metric.project(f_i - f_j)**2))``.
+        A :class:`~nitrix.smoothing.metric.FeatureMetric` defining
+        :math:`M = L L^{\\top}`.  The weight falls off as
+        :math:`\\exp\\!\\left(-\\tfrac{1}{2}\\sum_c
+        (\\mathrm{metric.project}(f_i - f_j))_c^2\\right)`.
     neighbourhood
         The bounded neighbour source, one of:
 
@@ -170,18 +185,20 @@ def bilateral_gaussian(
         ``O(n_iters)`` cost.  Default ``1``.
     backend
         ``"auto"``, ``"pallas-cuda"``, or ``"jax"``.  Passed to the
-        underlying ``semiring_ell_matmul``.
+        underlying :func:`~nitrix.semiring.semiring_ell_matmul`.
 
     Returns
     -------
-    Smoothed values, ``(n, d_v)``.
+    Float[Array, 'n d_v']
+        Smoothed values, ``(n, d_v)``.
 
     Notes
     -----
     The implementation is a direct N-body reduction: the inner sum has
     ``k_max`` terms, each an explicit Gaussian weight over the metric.
-    Correct by construction; cost ``O(n * k_max * (k + d_v))`` per pass,
-    where ``k`` is the metric's projected dimension (``<= d_f``).
+    Correct by construction; cost
+    :math:`O(n \\cdot k_{\\max} \\cdot (k + d_v))` per pass, where
+    :math:`k` is the metric's projected dimension (:math:`\\leq d_f`).
     """
     if n_iters < 1:
         raise ValueError(f'n_iters must be >= 1; got {n_iters}.')

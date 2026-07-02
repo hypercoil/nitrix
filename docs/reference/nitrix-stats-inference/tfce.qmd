@@ -1,0 +1,11 @@
+---
+title: "tfce"
+generated: true
+---
+
+[‹ back to `nitrix.stats.inference`](../nitrix-stats-inference.qmd)
+
+::: {.callout-warning title="TODO — could not introspect"}
+Re-exported submodule — see its own page.
+:::
+

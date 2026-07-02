@@ -1,0 +1,46 @@
+---
+title: "instance_norm"
+generated: true
+description: "Centre and scale by the statistics over `axes`."
+---
+
+[‹ back to `nitrix.numerics.normalize`](../nitrix-numerics-normalize.qmd)
+
+<!-- nitrix:gen sig:instance_norm -->
+```python
+instance_norm(x: Float[Array, '...'], *, axes: _AxisArg, eps: float = 1e-05) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:instance_norm -->
+Centre and scale by the statistics over `axes`.
+
+`(x - mean) / sqrt(var + eps)` with `mean` / `var` reduced
+over `axes` (population variance, no Bessel correction).  This
+is the *statistics* underneath an instance-normalisation layer,
+rank-agnostic (the reduced axes are chosen by the caller rather
+than fixed to a particular spatial rank) and without the
+trainable affine (apply `weight` / `bias` in the calling
+module).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:instance_norm -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Float` | `...` | — | Input tensor. |
+| `axes` | `_AxisArg` | — | — | Axis (or axes) to reduce the per-instance statistics over. For a channel-first volume `(N, C, *spatial)` pass the spatial axes (e.g. `axes=(-3, -2, -1)`) for the canonical per-(sample, channel) instance norm. |
+| `eps` | `float` | — | `1e-05` | Variance stabiliser inside the square root. |
+
+**Returns** `Float` — shape `...`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:instance_norm -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

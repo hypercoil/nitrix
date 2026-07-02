@@ -1,0 +1,55 @@
+---
+title: "nitrix.register.recipes"
+generated: true
+signature-hash: 7c88c392f4401d65
+description: "Pairwise rigid / affine registration recipes."
+listing:
+  id: nitrix-register-recipes-symbols
+  contents: "nitrix-register-recipes/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.register.recipes`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Pairwise rigid / affine registration recipes.
+
+Pure functions `(moving, fixed) -> RegistrationResult`, following the same
+convention as [`nitrix.stats.reml_fit`](nitrix-stats.qmd) (a `NamedTuple` of
+arrays, no PyTree module, no atlas or file I/O).  They compose the shared
+registration substrate -- the resolution pyramid, the similarity metric, the
+transform parametrisation, and the matrix-free optimiser -- with the
+orchestration living here so that `entense` can wrap it (or re-implement it)
+without re-deriving it.
+
+The representative algorithm is intensity-based Gauss-Newton /
+Levenberg-Marquardt on the rigid / affine Lie groups (the `3dvolreg` / AIR
+lineage): coarse-to-fine, second-order, and differentiable.  The similarity
+metric ([`SSD`](nitrix-register/SSD.qmd) by default;
+[`LNCC`](nitrix-register/LNCC.qmd) / [`MI`](nitrix-register/MI.qmd) /
+[`CorrelationRatio`](nitrix-register/CorrelationRatio.qmd) for intensity-robust or cross-modal
+cases) and the schedule are set on the [`RegistrationSpec`](nitrix-register/RegistrationSpec.qmd).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*mspatial` | a variadic group of axes (`mspatial`) |
+| `*fspatial` | a variadic group of axes (`fspatial`) |
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `*rspatial` | a variadic group of axes (`rspatial`) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-register-recipes-symbols}
+:::

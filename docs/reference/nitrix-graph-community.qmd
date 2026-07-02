@@ -1,0 +1,61 @@
+---
+title: "nitrix.graph.community"
+generated: true
+signature-hash: 6bfb9fb21ec88ced
+description: "Community-detection primitives."
+listing:
+  id: nitrix-graph-community-symbols
+  contents: "nitrix-graph-community/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.graph.community`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Community-detection primitives.
+
+Houses the modularity-related operators (the *null model*, the
+*modularity matrix*, and *coaffiliation*) plus the relaxed-modularity
+quality score.  These all share an algebraic shape with graph
+Laplacians, but their *role* is community-specific: [`modularity_matrix`](nitrix-graph-community/modularity_matrix.qmd)
+is the operator whose eigendecomposition gives Newman-style community
+structure, and [`coaffiliation`](nitrix-graph-community/coaffiliation.qmd) is the symmetric outer product of a
+community-assignment matrix.  They are kept separate from the graph
+Laplacian operators so that those may remain purely about Laplacians.
+
+The relaxed-modularity score has both *dense* and *sparse* call
+paths.  The sparse path uses the factorisation
+
+$$
+Q = \sum_{i,j} (A_{ij} - \gamma\, k_i k_j / 2m)\,(CC^{\top})_{ij}
+  = \operatorname{tr}(A\,CC^{\top}) - \frac{\gamma}{2m}\,\lVert C^{\top} k\rVert^2
+$$
+
+so that an [`ELL`](nitrix-sparse.qmd) or
+[`SectionedELL`](nitrix-sparse.qmd) adjacency never materialises the
+$n \times n$ modularity matrix.  This is the difference between
+"runs on small toy graphs" and "runs on a 100k-node mesh" for the
+modularity score.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `k` | kernel or basis components |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-graph-community-symbols}
+:::

@@ -1,0 +1,36 @@
+---
+title: "FLAMEResult"
+generated: true
+description: "Per-voxel FLAME fit output."
+---
+
+[‹ back to `nitrix.stats.lme.flame`](../nitrix-stats-lme-flame.qmd)
+
+<!-- nitrix:gen sig:FLAMEResult -->
+```python
+class FLAMEResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:FLAMEResult -->
+Per-voxel FLAME fit output.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:FLAMEResult.__init__ -->
+```python
+__init__(sigma_b_sq: Float[Array, 'V'], gamma_hat: Float[Array, 'V p'], log_lik: Float[Array, 'V'], weights: Float[Array, 'V N']) -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:FLAMEResult -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `N` | observations — time points, subjects, or sampled points |
+<!-- nitrix:/gen -->

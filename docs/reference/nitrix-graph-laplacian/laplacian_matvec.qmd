@@ -1,0 +1,50 @@
+---
+title: "laplacian_matvec"
+generated: true
+description: "Apply the Laplacian to a block of vectors, sparse-friendly."
+---
+
+[‹ back to `nitrix.graph.laplacian`](../nitrix-graph-laplacian.qmd)
+
+<!-- nitrix:gen sig:laplacian_matvec -->
+```python
+laplacian_matvec(A: _GraphInput, x: Num[Array, '... n k'], *, normalisation: _Normalisation = 'symmetric', eps: float = 1e-12, promise_symmetry: bool = True) -> Num[Array, '... n k']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:laplacian_matvec -->
+Apply the Laplacian to a block of vectors, sparse-friendly.
+
+Computes $L x$ without ever materialising $L$.  Accepts
+dense, [`ELL`](../nitrix-sparse.qmd), or
+[`SectionedELL`](../nitrix-sparse.qmd) `A`; works for the three
+Laplacian variants.  This is the operator passed to
+`jax.experimental.sparse.linalg.lobpcg_standard` for top-k
+eigenvalue decomposition on graphs too large for a dense
+eigendecomposition.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:laplacian_matvec -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `A` | `_GraphInput` | — | — | Adjacency, `(..., n, n)` dense or `ELL` / `SectionedELL`. |
+| `x` | `Num` | `...` × `n` × `k` | — | Block of vectors, `(..., n, k)`. For a single vector pass `x[..., None]` and squeeze the result. |
+| `normalisation` | `_Normalisation` | — | `'symmetric'` | Which Laplacian variant to apply. |
+| `eps` | `float` | — | `1e-12` | Floor on degree. |
+| `promise_symmetry` | `bool` | — | `True` | Sparse ([`ELL`](../nitrix-sparse.qmd) / [`SectionedELL`](../nitrix-sparse.qmd)) only. When `True` (default) the stored `A` matvec is applied directly. When `False` the adjacency application is symmetrised to $\tfrac{1}{2}(A x + A^{\top} x)$ -- use this when the stored pattern is not guaranteed symmetric (e.g. top-k affinity sparsification). The **degree** term still uses the row-sum of the stored `A`, so for `'symmetric'` the result is exactly the normalised Laplacian of $\tfrac{1}{2}(A + A^{\top})$; for `'combinatorial'` / `'random_walk'` on a genuinely asymmetric `A` the degree and the symmetrised off-diagonal are not mutually consistent (the out-degree $D$ no longer matches the symmetrised adjacency) -- symmetrise the adjacency at construction if you need that. Ignored for dense `A`. |
+
+**Returns** `Num` — shape `...` × `n` × `k`. The product $L x$, shape `(..., n, k)`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:laplacian_matvec -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `k` | kernel or basis components |
+<!-- nitrix:/gen -->

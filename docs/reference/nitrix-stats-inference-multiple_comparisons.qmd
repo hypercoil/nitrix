@@ -1,61 +1,49 @@
 ---
 title: "nitrix.stats.inference.multiple_comparisons"
 generated: true
-signature-hash: 6eb5eee5c25a0f9b
+signature-hash: 44a788242deb6fb4
+description: "Multiple-comparison corrections and multi-contrast combination for mass-univariate p-value and statistic maps."
+listing:
+  id: nitrix-stats-inference-multiple_comparisons-symbols
+  contents: "nitrix-stats-inference-multiple_comparisons/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
-Auto-generated scaffold for `nitrix.stats.inference.multiple_comparisons` (signatures only). Replace the
-skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
-`check_reference_staleness.py` flags this page if the underlying
-signatures drift from this stub.
+Auto-generated scaffold for `nitrix.stats.inference.multiple_comparisons`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
 
-## `fdr_bh` {#fdr_bh}
+<!-- nitrix:gen overview:__module__ -->
+Multiple-comparison corrections and multi-contrast combination for
+mass-univariate p-value and statistic maps.
 
-```python
-fdr_bh(p_values: Float[Array, 'n'], *, alpha: float=0.05) -> Tuple[Bool[Array, 'n'], Float[Array, 'n']]
-```
+These are companions to the permutation engine. They provide false-discovery-rate
+control -- Benjamini-Hochberg ([`fdr_bh`](nitrix-stats-inference-multiple_comparisons/fdr_bh.qmd), valid under independence or
+positive regression dependence), Benjamini-Yekutieli ([`fdr_by`](nitrix-stats-inference-multiple_comparisons/fdr_by.qmd), valid under
+arbitrary dependence), and Storey's $\pi_0$-adaptive q-values
+([`fdr_storey`](nitrix-stats-inference-multiple_comparisons/fdr_storey.qmd), higher power) behind a unified [`fdr`](nitrix-stats-inference-multiple_comparisons/fdr.qmd) dispatcher -- the
+Bonferroni family-wise correction ([`bonferroni`](nitrix-stats-inference-multiple_comparisons/bonferroni.qmd)), and the valid conjunction
+(minimum-statistic) combination across contrasts ([`conjunction`](nitrix-stats-inference-multiple_comparisons/conjunction.qmd),
+[`conjunction_pvalue`](nitrix-stats-inference-multiple_comparisons/conjunction_pvalue.qmd)). All are pure array operations over a flat
+per-element p-value vector.
+<!-- nitrix:/gen -->
 
-Benjamini-Hochberg FDR correction.
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
 
-**Parameters** — *TODO: document each parameter.*
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `k` | kernel or basis components |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->
 
-**Returns** — *TODO.*
+## Symbols
 
-## `bonferroni` {#bonferroni}
-
-```python
-bonferroni(p_values: Float[Array, 'n'], *, alpha: float=0.05) -> Tuple[Bool[Array, 'n'], Float[Array, 'n']]
-```
-
-Bonferroni family-wise correction.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `conjunction` {#conjunction}
-
-```python
-conjunction(stats: Float[Array, 'k *spatial']) -> Float[Array, '*spatial']
-```
-
-Minimum-statistic conjunction across ``k`` contrasts (Nichols et al. 2005).
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `conjunction_pvalue` {#conjunction_pvalue}
-
-```python
-conjunction_pvalue(p_values: Float[Array, 'k *spatial']) -> Float[Array, '*spatial']
-```
-
-Conjunction p-value: the **maximum** per-contrast p-value over ``k``
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
+::: {#nitrix-stats-inference-multiple_comparisons-symbols}
+:::

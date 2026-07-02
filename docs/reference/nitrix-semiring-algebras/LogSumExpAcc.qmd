@@ -1,0 +1,22 @@
+---
+title: "LogSumExpAcc"
+generated: true
+description: "Online state for logsumexp reductions."
+---
+
+[‹ back to `nitrix.semiring.algebras`](../nitrix-semiring-algebras.qmd)
+
+<!-- nitrix:gen sig:LogSumExpAcc -->
+```python
+class LogSumExpAcc(NamedTuple)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:LogSumExpAcc -->
+Online state for logsumexp reductions.
+
+Invariant: the logsumexp of the values seen so far equals
+`m + log(s)`, with the convention that `s == 0` corresponds to
+`-inf` (no values seen, or all `-inf`).
+<!-- nitrix:/gen -->
+

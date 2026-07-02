@@ -1,0 +1,42 @@
+---
+title: "rk4"
+generated: true
+description: "Integrate $dy/dt = f(t, y)$ with classic 4th-order Runge--Kutta."
+---
+
+[‹ back to `nitrix.numerics.ode`](../nitrix-numerics-ode.qmd)
+
+<!-- nitrix:gen sig:rk4 -->
+```python
+rk4(f: VectorField, y0: Float[Array, '...'], t: Float[Array, 't']) -> Float[Array, 't ...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:rk4 -->
+Integrate $dy/dt = f(t, y)$ with classic 4th-order Runge--Kutta.
+
+Same interface as [`euler`](../nitrix-numerics-ode/euler.qmd); far more accurate per step (4th-order
+local error), the sensible default for smooth vector fields.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:rk4 -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `f` | `VectorField` | — | — | Vector field `f(t, y) -> dy/dt` (`t` scalar, `y` the state). |
+| `y0` | `Float` | `...` | — | Initial state at `t[0]`. |
+| `t` | `Float` | `t` | — | Strictly monotone time points of shape `(t,)`; one RK4 step is taken per interval. |
+
+**Returns** `Float` — shape `t` × `...`. States at each time point, shape `(len(t), *y0.shape)` (`ys[0]` is `y0`).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:rk4 -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `t` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

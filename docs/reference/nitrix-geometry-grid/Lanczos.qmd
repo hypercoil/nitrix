@@ -1,0 +1,71 @@
+---
+title: "Lanczos"
+generated: true
+description: "Lanczos windowed-sinc interpolation of order `order` (radius `a`)."
+---
+
+[‹ back to `nitrix.geometry.grid`](../nitrix-geometry-grid.qmd)
+
+*Re-exported here; defined in `nitrix.geometry._interpolate`.*
+
+<!-- nitrix:gen sig:Lanczos -->
+```python
+class Lanczos
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:Lanczos -->
+Lanczos windowed-sinc interpolation of order `order` (radius `a`).
+
+A separable $2a$-tap kernel
+$L_a(x) = \operatorname{sinc}(x)\,\operatorname{sinc}(x / a)$
+($a = \mathrm{order}$), the high-fidelity resampler of the ANTs
+`LanczosWindowedSinc` class.  The $2a$ taps per axis are
+$\lfloor\mathrm{coord}\rfloor - a + 1, \ldots,
+\lfloor\mathrm{coord}\rfloor + a$; the per-axis weights are
+**renormalised to sum to 1**, so the separable outer product is a
+partition of unity and constants are preserved exactly (raw Lanczos
+weights sum to ~1 but not exactly).
+
+Smooth in both the image values and the sample coordinates, so it is
+differentiable end-to-end -- the high-quality differentiable
+alternative to [`Linear`](../nitrix-geometry-grid/Linear.qmd) for registration and anti-aliased
+resampling.  Unlike [`Linear`](../nitrix-geometry-grid/Linear.qmd) / [`NearestNeighbour`](../nitrix-geometry-grid/NearestNeighbour.qmd) it
+has no `map_coordinates` equivalent, so it always uses the explicit
+separable gather (no platform branch).
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:Lanczos.sample -->
+```python
+sample(image: Float[Array, '*spatial c'], coords: Float[Array, '*out_spatial ndim'], *, mode: BoundaryMode, cval: float) -> Float[Array, '*out_spatial c']
+```
+<!-- nitrix:/gen -->
+
+Sample the image at `coords` by windowed-sinc interpolation.
+
+<!-- nitrix:gen sig:Lanczos.__init__ -->
+```python
+__init__(order: int = 3) -> None
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:Lanczos -->
+::: {.callout-note}
+This is the ANTs *algorithm class*, not bit-exact ITK parity (ITK's
+windowed-sinc radius / normalisation conventions differ in detail).
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:Lanczos -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `c` | feature channels (channels-last) |
+| `*out_spatial` | the output grid's spatial axes (variadic) |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->

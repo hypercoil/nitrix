@@ -1,0 +1,50 @@
+---
+title: "nitrix.sparse.ell"
+generated: true
+signature-hash: aefe55d39ac75951
+description: "ELL sparse format primitives."
+listing:
+  id: nitrix-sparse-ell-symbols
+  contents: "nitrix-sparse-ell/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.sparse.ell`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+ELL sparse format primitives.
+
+ELL is the primary sparse format in [`nitrix.sparse`](nitrix-sparse.qmd): the per-row
+neighbour list is stored as two arrays, `values: (m, k_max)` and
+`indices: (m, k_max)`.  Rows with fewer than `k_max` neighbours
+have the trailing entries padded with the semiring identity in
+`values` and a fixed (in-range) sentinel index in `indices`.
+
+The format is intentionally a thin pair of dense arrays: no BCOO, no
+`jax.experimental.sparse` import.  Sectioned ELL (variable-degree)
+will live in `nitrix.sparse.ell_sectioned`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `m` | rows of a multi-row contrast |
+| `k_max` | *(undocumented — add to `_dimensions.yml`)* |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `k_actual` | *(undocumented — add to `_dimensions.yml`)* |
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-sparse-ell-symbols}
+:::

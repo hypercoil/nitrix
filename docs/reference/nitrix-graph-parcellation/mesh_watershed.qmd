@@ -1,0 +1,58 @@
+---
+title: "mesh_watershed"
+generated: true
+description: "Priority-flood watershed labelling of a vertex field on a mesh."
+---
+
+[‹ back to `nitrix.graph.parcellation`](../nitrix-graph-parcellation.qmd)
+
+<!-- nitrix:gen sig:mesh_watershed -->
+```python
+mesh_watershed(field: Float[Array, 'n_vertices'], adjacency: ELL, *, min_basin_size: int = 1, h_min: float = 0.0, roi: Optional[Bool[Array, 'n_vertices']] = None) -> Int[Array, 'n_vertices']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:mesh_watershed -->
+Priority-flood watershed labelling of a vertex field on a mesh.
+
+Labels every vertex by its catchment basin: water rises from each local
+minimum of `field` and each vertex joins the basin whose flood reaches it
+first (the priority-flood scheme of Barnes et al., 2014, with the monotone
+$\max(\mathrm{level}, f_j)$ key).  On a boundary map (see
+[`surface_boundary_map`](../nitrix-graph-parcellation/surface_boundary_map.qmd)) the minima are region interiors and the
+basins are the parcels; pass `field` directly to flood its minima (negate
+to flood maxima).
+
+Connected equal-valued minima are coalesced into a single seed (no plateau
+over-segmentation).  Two optional post-merges clean spurious basins:
+`min_basin_size` absorbs basins smaller than the threshold, and `h_min`
+absorbs basins shallower than that depth (saddle-to-minimum prominence),
+each merging into the lowest-saddle neighbour.  The defaults
+(`min_basin_size=1`, `h_min=0`) apply no merge -- a pure watershed.
+
+Runs host-side (the flood is inherently serial), returning a JAX integer
+array.  Works on any mesh adjacency, not just the icosphere.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:mesh_watershed -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `field` | `Float` | `n_vertices` | — | `(n_vertices,)` scalar field to flood (e.g. a boundary map). |
+| `adjacency` | `ELL` | — | — | Mesh adjacency in ELL format; real edges carry nonzero `values`. |
+| `min_basin_size` | `int` | — | `1` | Basins with fewer vertices are merged away (`1` = no size merge). |
+| `h_min` | `float` | — | `0.0` | Basins shallower than this depth are merged away (`0` = no depth merge). |
+| `roi` | `Optional[Bool[Array, 'n_vertices']]` | — | `None` | Optional `(n_vertices,)` boolean cortex mask. Out-of-ROI vertices (e.g. the medial wall) are excluded from flooding and labelled `-1` (background); basins never cross the ROI boundary. |
+
+**Returns** `Int` — shape `n_vertices`. `int32` basin labels in `[0, n_basins)`, with `-1` for out-of-ROI vertices when `roi` is given.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:mesh_watershed -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_vertices` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

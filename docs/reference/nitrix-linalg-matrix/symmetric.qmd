@@ -1,0 +1,43 @@
+---
+title: "symmetric"
+generated: true
+description: "Average `X` with its transpose across the named axes."
+---
+
+[‹ back to `nitrix.linalg.matrix`](../nitrix-linalg-matrix.qmd)
+
+<!-- nitrix:gen sig:symmetric -->
+```python
+symmetric(X: Num[Array, '... i i'], *, skew: bool = False, axes: Tuple[int, int] = (-2, -1)) -> Num[Array, '... i i']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:symmetric -->
+Average `X` with its transpose across the named axes.
+
+Returns the symmetric part $(X + X^{\top}) / 2$ of the square
+block, or its antisymmetric part $(X - X^{\top}) / 2$ when
+`skew` is set.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:symmetric -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X` | `Num` | `...` × `i` × `i` | — | Tensor with a square block at the named axes. |
+| `skew` | `bool` | — | `False` | If `True`, antisymmetrise ($(X - X^{\top}) / 2$) instead of symmetrising. |
+| `axes` | `Tuple[int, int]` | — | `(-2, -1)` | The two axes defining the square block. Defaults to the trailing two axes. |
+
+**Returns** `Num` — shape `...` × `i` × `i`. The symmetrised (or antisymmetrised) tensor, of the same shape as `X`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:symmetric -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `i` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

@@ -3515,6 +3515,29 @@ register(
     )
 )
 
+register(
+    OpInfo(
+        'nitrix.linalg.orthogonal_procrustes',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(), (40, 6)),
+                jax.random.normal(_key(1), (40, 6)),
+            ),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=(
+            'orthogonal polar factor (Schoenemann 1966)',
+            'eigh-based (no qr/svd); matrix-vMF prior = additive term',
+        ),
+        notes=(
+            'natively batched; jit/vmap/grad on a healthy-eigh backend '
+            '(eager on broken-cuSOLVER stacks, like randomized_svd)'
+        ),
+    )
+)
+
 # --- metrics (intensity / information / overlap / classification / SSL) -----
 
 
@@ -4741,6 +4764,57 @@ register(
         diff_arg=None,
         vmap_arg=None,
         invariants=('coarse-to-fine affine, each level implicit',),
+    )
+)
+
+
+# Functional alignment (representation-space; ProMises / EfficientProMises
+# methods) -- the §6.5 seam.  The method + map ADTs (ProMises,
+# EfficientProMises, DenseAlignment, SubspaceAlignment) are classes, so the
+# completeness guard drops them; the seam functions below carry the coverage.
+def _functional_align_data():
+    return (
+        jax.random.normal(_key(0), (30, 4)),
+        jax.random.normal(_key(1), (30, 4)),
+    )
+
+
+def _functional_align_apply_fixture():
+    from nitrix.register import functional_align_fit
+
+    source, reference = _functional_align_data()
+    return (source, functional_align_fit(source, reference)), {}
+
+
+register(
+    OpInfo(
+        'nitrix.register.functional_align',
+        fixture=lambda: (_functional_align_data(), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=(
+            'orthogonal Procrustes / ProMises (matrix-vMF prior MAP)',
+            'eigh polar factor (no qr/svd); §6.5 apply(.,fit(.))',
+        ),
+        notes='natively batched; eager on broken-cuSOLVER stacks',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.register.functional_align_fit',
+        fixture=lambda: (_functional_align_data(), {}),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('the fit half: returns the FunctionalAlignment map',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.register.functional_align_apply',
+        fixture=_functional_align_apply_fixture,
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('the apply half: data @ R (co-transport)',),
     )
 )
 

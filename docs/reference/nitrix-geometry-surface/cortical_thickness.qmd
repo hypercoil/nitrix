@@ -1,0 +1,60 @@
+---
+title: "cortical_thickness"
+generated: true
+description: "Per-vertex cortical thickness between the white and pial surfaces."
+---
+
+[‹ back to `nitrix.geometry.surface`](../nitrix-geometry-surface.qmd)
+
+<!-- nitrix:gen sig:cortical_thickness -->
+```python
+cortical_thickness(white: Mesh, pial: Mesh, *, method: Literal['symmetric', 'correspondence'] = 'symmetric') -> Float[Array, 'n_vertices']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:cortical_thickness -->
+Per-vertex cortical thickness between the white and pial surfaces.
+
+Requires the two surfaces to be in **vertex correspondence** (equal vertex
+counts, `white[i]` paired with `pial[i]` -- as produced by
+[`deform_to_sdf`](../nitrix-geometry-surface/deform_to_sdf.qmd) marching a white surface to a pial SDF).
+
+- `'correspondence'` -- $\lVert \mathrm{pial}_i -
+  \mathrm{white}_i \rVert$ per vertex.  Exact when the pial was deformed
+  from the white; pure JAX and **differentiable** with respect to both
+  meshes' vertices.
+- `'symmetric'` (default, Fischl & Dale 2000) -- the average of the
+  nearest white-to-pial-surface and pial-to-white-surface distances.
+  Host-side nearest-point queries (not differentiable); more robust when
+  the normal-correspondence is imperfect.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:cortical_thickness -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `white` | `Mesh` | — | — | Surfaces in vertex correspondence (equal vertex counts). |
+| `pial` | `Mesh` | — | — | Surfaces in vertex correspondence (equal vertex counts). |
+| `method` | `Literal['symmetric', 'correspondence']` | — | `'symmetric'` | `'symmetric'` (default) or `'correspondence'`. |
+
+**Returns** `Float` — shape `n_vertices`. Per-vertex cortical thickness, shape `(n_vertices,)`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:cortical_thickness -->
+### References
+
+Fischl, B., & Dale, A. M. (2000). Measuring the thickness of the human
+cerebral cortex from magnetic resonance images. *Proceedings of the
+National Academy of Sciences*, 97(20), 11050-11055.
+`10.1073/pnas.200033797`
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:cortical_thickness -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_vertices` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

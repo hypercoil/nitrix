@@ -1,0 +1,46 @@
+---
+title: "SectionedELL"
+generated: true
+description: "Bucketed-row ELL."
+---
+
+[‹ back to `nitrix.sparse.ell_sectioned`](../nitrix-sparse-ell_sectioned.qmd)
+
+<!-- nitrix:gen sig:SectionedELL -->
+```python
+class SectionedELL
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:SectionedELL -->
+Bucketed-row ELL.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:SectionedELL.tree_flatten -->
+```python
+tree_flatten() -> Tuple[Tuple[Tuple[ELL, ...], Tuple[NDArray[Any], ...]], Tuple[int, int, Any]]
+```
+<!-- nitrix:/gen -->
+
+Flatten into pytree children and static auxiliary data.
+
+The per-bucket [`ELL`](../nitrix-sparse.qmd) pytrees carry the
+differentiable `values` leaves; the row-group index arrays ride along
+as leaves (integer -> zero/float0 cotangent).  The *number* of buckets
+is structural (encoded in the treedef), so the static Python dispatch
+loop length in the matmul is preserved across a trace.
+
+<!-- nitrix:gen sig:SectionedELL.tree_unflatten -->
+```python
+tree_unflatten(aux: Tuple[int, int, Any], children: Tuple[Tuple[ELL, ...], Tuple[NDArray[Any], ...]]) -> 'SectionedELL'
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sig:SectionedELL.__init__ -->
+```python
+__init__(sections: Tuple[ELL, ...], row_groups: Tuple[NDArray[Any], ...], n_rows: int, n_cols: int, identity: Any = None) -> None
+```
+<!-- nitrix:/gen -->
+

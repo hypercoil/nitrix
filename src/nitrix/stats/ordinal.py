@@ -2,30 +2,35 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Ordinal regression -- the cumulative-link (proportional-odds) model (v3 §4).
+Ordinal regression -- the cumulative-link (proportional-odds) model.
 
-An *ordered* categorical response ``y in {0, .., K-1}`` (clinical stage, a Likert
-rating) is modelled through ``K - 1`` cumulative thresholds and a **single**
-linear predictor shared across them (the proportional-odds assumption):
+An *ordered* categorical response :math:`y \\in \\{0, \\ldots, K-1\\}` (clinical
+stage, a Likert rating) is modelled through :math:`K - 1` cumulative thresholds
+and a **single** linear predictor shared across them (the proportional-odds
+assumption):
 
-    P(y_i <= k) = F(theta_k - x_i^T beta),   theta_1 < theta_2 < ... < theta_{K-1}
+.. math::
 
-so ``P(y_i = k) = F(theta_k - eta_i) - F(theta_{k-1} - eta_i)`` with ``theta_0 =
--inf``, ``theta_K = +inf``.  ``F`` is the logistic CDF (``link='logit'`` -- the
-proportional-odds model) or the standard-normal CDF (``link='probit'`` -- ordered
-probit).  ``beta`` carries **no intercept** (the thresholds play that role).
+    P(y_i \\le k) = F(\\theta_k - x_i^{\\top} \\beta), \\quad
+    \\theta_1 < \\theta_2 < \\cdots < \\theta_{K-1}
 
-This is not the scalar single-predictor IRLS (the likelihood couples ``K - 1``
-ordered thresholds with the regression coefficients), so it gets its own fitter.
-The ordered thresholds are kept ordered by an unconstrained parameterisation
-``theta = theta_1 + cumsum([0, exp(delta)])``; the (concave) log-likelihood is
-maximised by the shared damped Newton (``lme._optimise.damped_newton`` with
-analytic autodiff curvature).  cuSOLVER-free.
+so :math:`P(y_i = k) = F(\\theta_k - \\eta_i) - F(\\theta_{k-1} - \\eta_i)` with
+:math:`\\theta_0 = -\\infty`, :math:`\\theta_K = +\\infty`.  :math:`F` is the
+logistic CDF (``link='logit'`` -- the proportional-odds model) or the
+standard-normal CDF (``link='probit'`` -- ordered probit).  :math:`\\beta` carries
+**no intercept** (the thresholds play that role).
+
+This is not the scalar single-predictor IRLS (the likelihood couples the
+:math:`K - 1` ordered thresholds with the regression coefficients), so it gets its
+own fitter.  The ordered thresholds are kept ordered by an unconstrained
+parameterisation :math:`\\theta = \\theta_1 + \\operatorname{cumsum}([0,
+\\exp(\\delta)])`; the (concave) log-likelihood is maximised by a shared damped
+Newton scheme with analytic autodiff curvature.  This pathway is cuSOLVER-free.
 
 References
 ----------
 - McCullagh, P. (1980). Regression models for ordinal data.  J. R. Statist. Soc.
-  B 42, 109-142.
+  B 42, 109-142. https://doi.org/10.1111/j.2517-6161.1980.tb01109.x
 """
 
 from __future__ import annotations
@@ -49,7 +54,27 @@ _EPS = 1e-12
 
 
 def _link_cdf(link: str) -> Callable[[Array], Array]:
-    """The cumulative-link CDF ``F`` for ``link`` (shared by fit and predict)."""
+    """Resolve the cumulative-link CDF :math:`F` for a given link.
+
+    Shared by the fit and predict paths so both reconstruct the same link.
+
+    Parameters
+    ----------
+    link
+        Cumulative link name: ``'logit'`` (logistic CDF, i.e. the sigmoid) or
+        ``'probit'`` (standard-normal CDF).
+
+    Returns
+    -------
+    Callable[[Array], Array]
+        The cumulative distribution function :math:`F` corresponding to ``link``,
+        applied elementwise.
+
+    Raises
+    ------
+    ValueError
+        If ``link`` is neither ``'logit'`` nor ``'probit'``.
+    """
     if link == 'logit':
         return cast(Callable[[Array], Array], jax.nn.sigmoid)
     if link == 'probit':
@@ -71,7 +96,8 @@ class OrdinalResult:
         ``(V, p)`` regression coefficients (no intercept; shared across the
         cumulative thresholds -- the proportional-odds slope).
     thresholds
-        ``(V, K-1)`` ordered cutpoints ``theta_1 < ... < theta_{K-1}``.
+        ``(V, K-1)`` ordered cutpoints
+        :math:`\\theta_1 < \\cdots < \\theta_{K-1}`.
     cov_coef
         ``(V, p, p)`` ``Cov(coef)`` -- the coefficient block of the inverse
         observed information (accounts for estimating the thresholds).
@@ -95,8 +121,29 @@ class OrdinalResult:
 
 
 def _thresholds(raw: Float[Array, 'nt'], k: int) -> Float[Array, 'Km1']:
-    """Ordered cutpoints from the unconstrained ``[theta_1, delta_2..delta_{K-1}]``
-    head: ``theta = theta_1 + cumsum([0, exp(delta)])``."""
+    """Recover ordered cutpoints from the unconstrained parameterisation.
+
+    The leading :math:`K - 1` entries of ``raw`` encode
+    :math:`[\\theta_1, \\delta_2, \\ldots, \\delta_{K-1}]`; the ordered thresholds
+    are reconstructed as :math:`\\theta = \\theta_1 +
+    \\operatorname{cumsum}([0, \\exp(\\delta)])`, so the exponentiated increments
+    guarantee :math:`\\theta_1 < \\cdots < \\theta_{K-1}`.
+
+    Parameters
+    ----------
+    raw
+        ``(nt,)`` packed parameter vector; only the first ``k - 1`` entries (the
+        threshold head :math:`\\theta_1` followed by the increments
+        :math:`\\delta`) are used here.
+    k
+        Number of ordered classes :math:`K`.
+
+    Returns
+    -------
+    Float[Array, 'Km1']
+        The ``(K-1,)`` ordered cutpoints :math:`\\theta_1 < \\cdots <
+        \\theta_{K-1}`.
+    """
     t1 = raw[0]
     incr = jnp.exp(raw[1 : k - 1])  # (K-2,)
     steps = jnp.concatenate([jnp.zeros((1,), dtype=raw.dtype), incr])
@@ -111,7 +158,35 @@ def _ordinal_nll(
     p: int,
     cdf: Any,
 ) -> Float[Array, '']:
-    """Negative cumulative-link log-likelihood at the packed parameters."""
+    """Negative cumulative-link log-likelihood at the packed parameters.
+
+    Unpacks ``raw`` into the ordered thresholds :math:`\\theta` and the slope
+    :math:`\\beta`, forms the linear predictor :math:`\\eta = X \\beta`, and
+    evaluates the multinomial log-likelihood of the observed classes under the
+    per-class probabilities :math:`P(y = k) = F(\\theta_k - \\eta) -
+    F(\\theta_{k-1} - \\eta)`.
+
+    Parameters
+    ----------
+    raw
+        ``(nt,)`` packed parameters: the ``k - 1`` unconstrained threshold entries
+        followed by the ``p`` regression coefficients.
+    y
+        ``(N,)`` observed ordered class labels in :math:`\\{0, \\ldots, K-1\\}`.
+    X
+        ``(N, p)`` design matrix (no intercept column).
+    k
+        Number of ordered classes :math:`K`.
+    p
+        Number of regression coefficients.
+    cdf
+        The cumulative-link CDF :math:`F` (from :func:`_link_cdf`).
+
+    Returns
+    -------
+    Float[Array, '']
+        The scalar negative log-likelihood summed over the ``N`` observations.
+    """
     theta = _thresholds(raw, k)  # (K-1,)
     beta = raw[k - 1 :]  # (p,)
     eta = X @ beta  # (N,)
@@ -139,8 +214,45 @@ def _ordinal_fit_one(
     Float[Array, 'p p'],
     Float[Array, ''],
 ]:
-    """Single-element ordinal fit.  Returns ``(thresholds, coef, cov_coef,
-    log_lik)``."""
+    """Fit the cumulative-link model for a single element.
+
+    Maximises the (concave) log-likelihood by damped Newton from ``raw0``, then
+    forms the coefficient covariance from the coefficient block of the inverse
+    observed information (a ridge-stabilised Hessian inverse), so it accounts for
+    having estimated the thresholds jointly.
+
+    Parameters
+    ----------
+    y
+        ``(N,)`` observed ordered class labels in :math:`\\{0, \\ldots, K-1\\}`.
+    X
+        ``(N, p)`` design matrix (no intercept column).
+    k
+        Number of ordered classes :math:`K`.
+    p
+        Number of regression coefficients.
+    cdf
+        The cumulative-link CDF :math:`F` (from :func:`_link_cdf`).
+    n_iter
+        Number of damped-Newton iterations.
+    ridge
+        Small stabiliser added to the Newton step damping and to the Hessian
+        before inversion.
+    raw0
+        ``(nt,)`` initial packed parameter vector.
+
+    Returns
+    -------
+    thresholds : Float[Array, 'Km1']
+        The ``(K-1,)`` ordered cutpoints at the optimum.
+    coef : Float[Array, 'p']
+        The ``(p,)`` fitted regression coefficients (proportional-odds slopes).
+    cov_coef : Float[Array, 'p p']
+        The ``(p, p)`` coefficient covariance block of the inverse observed
+        information.
+    log_lik : Float[Array, '']
+        The scalar maximised log-likelihood.
+    """
 
     def nll(raw: Float[Array, 'nt']) -> Float[Array, '']:
         return _ordinal_nll(raw, y, X, k, p, cdf)
@@ -169,10 +281,10 @@ def ordinal_fit(
 ) -> OrdinalResult:
     """Mass-univariate ordinal regression (cumulative-link / proportional odds).
 
-    Fits, per element, the ordered-categorical model ``P(y_v <= k) =
-    F(theta_k - X beta_v)`` for ``y_v in {0, .., K-1}``, with ``F`` the logistic
-    (``link='logit'``) or normal (``link='probit'``) CDF.  ``X`` carries **no**
-    intercept (the ``K - 1`` thresholds absorb it).
+    Fits, per element, the ordered-categorical model :math:`P(y_v \\le k) =
+    F(\\theta_k - X \\beta_v)` for :math:`y_v \\in \\{0, \\ldots, K-1\\}`, with
+    :math:`F` the logistic (``link='logit'``) or normal (``link='probit'``) CDF.
+    ``X`` carries **no** intercept (the :math:`K - 1` thresholds absorb it).
 
     Parameters
     ----------
@@ -181,7 +293,7 @@ def ordinal_fit(
     X
         ``(N, p)`` shared design (no intercept column).
     n_classes
-        Number of ordered classes ``K`` (``>= 2``).
+        Number of ordered classes :math:`K` (``>= 2``).
     link
         ``'logit'`` (proportional odds, default) or ``'probit'`` (ordered probit).
     n_iter
@@ -193,9 +305,11 @@ def ordinal_fit(
 
     Returns
     -------
-    ``OrdinalResult`` -- ``coef`` (proportional-odds slopes), ordered
-    ``thresholds``, ``cov_coef`` (the coefficient information block), ``log_lik``.
-    A coefficient contrast is ``c^T coef`` with SE ``sqrt(c^T cov_coef c)``.
+    OrdinalResult
+        A result with ``coef`` (proportional-odds slopes), ordered ``thresholds``,
+        ``cov_coef`` (the coefficient information block), and ``log_lik``.  A
+        coefficient contrast is :math:`c^{\\top} \\mathrm{coef}` with standard
+        error :math:`\\sqrt{c^{\\top}\\, \\mathrm{cov\\_coef}\\, c}`.
     """
     n, p = X.shape
     if n_classes < 2:
@@ -245,9 +359,9 @@ def ordinal_predict(
 ) -> Float[Array, '...']:
     """Per-element ordinal prediction on a (new) design ``X``.
 
-    Applies the fitted cumulative-link model ``P(y <= j) = F(theta_j - X beta)``
-    (``F`` the stored ``result.link`` CDF) at the new design and returns,
-    per ``type``:
+    Applies the fitted cumulative-link model :math:`P(y \\le j) =
+    F(\\theta_j - X \\beta)` (with :math:`F` the CDF stored in ``result.link``) at
+    the new design and returns, per ``type``:
 
     - ``'class_prob'`` (default): the per-class simplex ``P(y = k)``, shape
       ``(V, N, K)`` -- the diff of the cumulative probabilities.

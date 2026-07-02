@@ -1,0 +1,45 @@
+---
+title: "env_inst"
+generated: true
+description: "Envelope, instantaneous frequency, and phase from one call."
+---
+
+[‹ back to `nitrix.signal.fourier`](../nitrix-signal-fourier.qmd)
+
+<!-- nitrix:gen sig:env_inst -->
+```python
+env_inst(X: Float[Array, '...'], *, axis: int = -1, n: Optional[int] = None, fs: float = 1.0, period: float = 2 * math.pi) -> Tuple[Float[Array, '...'], Float[Array, '...'], Float[Array, '...']]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:env_inst -->
+Envelope, instantaneous frequency, and phase from one call.
+
+Computes all three quantities from a single
+[`analytic_signal`](../nitrix-signal-fourier/analytic_signal.qmd) evaluation.  More efficient than three
+separate calls when you need all three, since they share the
+underlying analytic-signal computation.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:env_inst -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X` | `Float` | `...` | — | Real-valued signal. |
+| `axis` | `int` | — | `-1` | Axis along which the quantities are computed. Default `-1`. |
+| `n` | `Optional[int]` | — | `None` | FFT length. `None` (default) uses `X.shape[axis]`; a larger `n` zero-pads. |
+| `fs` | `float` | — | `1.0` | Sampling frequency, used to scale the instantaneous frequency into physical units. Default `1.0`. |
+| `period` | `float` | — | `2 * math.pi` | Size of the phase-wrapping range, both for unwrapping and for normalising the frequency. Default $2\pi$. |
+
+**Returns** `Tuple[Float[Array, '...'], Float[Array, '...'], Float[Array, '...']]`. Magnitude of the analytic signal, same shape as `X` (or with the `axis` resized to `n`). Instantaneous frequency; same shape as `envelope` except the `axis` is one element shorter. Unwrapped instantaneous phase, same shape as `envelope`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:env_inst -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

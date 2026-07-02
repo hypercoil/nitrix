@@ -1,0 +1,31 @@
+---
+title: "axis_complement"
+generated: true
+description: "Return the complement of the axis or axes for a tensor of dimension ndim."
+---
+
+[‹ back to `nitrix.numerics.tensor_ops`](../nitrix-numerics-tensor_ops.qmd)
+
+*Re-exported here; defined in `nitrix._internal.util`.*
+
+<!-- nitrix:gen sig:axis_complement -->
+```python
+axis_complement(ndim: int, axis: Union[int, Sequence[int]]) -> Tuple[int, ...]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:axis_complement -->
+Return the complement of the axis or axes for a tensor of dimension ndim.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:axis_complement -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `ndim` | `int` | — | — | — |
+| `axis` | `Union[int, Sequence[int]]` | — | — | — |
+
+**Returns** `Tuple[int, ...]`.
+<!-- nitrix:/gen -->
+

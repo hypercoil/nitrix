@@ -1,0 +1,42 @@
+---
+title: "rigid_log"
+generated: true
+description: "Recover the Lie parameters of a rigid homogeneous matrix."
+---
+
+[‹ back to `nitrix.geometry.transform`](../nitrix-geometry-transform.qmd)
+
+<!-- nitrix:gen sig:rigid_log -->
+```python
+rigid_log(matrix: Float[Array, '... d1 d1'], *, ndim: int) -> Float[Array, '... p']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:rigid_log -->
+Recover the Lie parameters of a rigid homogeneous matrix.
+
+Inverse of [`rigid_exp`](../nitrix-geometry-transform/rigid_exp.qmd).  The rotation block must be a proper
+rotation.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:rigid_log -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `matrix` | `Float` | `...` × `d1` × `d1` | — | `(..., ndim + 1, ndim + 1)` homogeneous rigid transform. |
+| `ndim` | `int` | — | — | Spatial dimensionality (2 or 3). |
+
+**Returns** `Float` — shape `...` × `p`. Lie parameter vector, `(..., p)` with `p = 3` for `ndim == 2` ($\theta, t_x, t_y$) or `p = 6` for `ndim == 3` ($\omega_x, \omega_y, \omega_z, t_x, t_y, t_z$).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:rigid_log -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `d1` | *(undocumented — add to `_dimensions.yml`)* |
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

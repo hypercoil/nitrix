@@ -4,53 +4,69 @@
 """
 Mass-univariate **hierarchical** Gaussian-process regression (multi-level GP).
 
-``hgp_fit`` fits, per element, a *hierarchical* GP smooth of a covariate ``x``
-over a grouping factor -- the GP analogue of a random-slope mixed model, and the
-"GS" hierarchical GAM of Pedersen et al. (2019): a **global** smooth plus
-**group-level** smooth deviations that share a kernel::
+:func:`hgp_fit` fits, per element, a *hierarchical* GP smooth of a covariate
+``x`` over a grouping factor -- the GP analogue of a random-slope mixed model,
+and the "GS" hierarchical GAM of Pedersen et al. (2019): a **global** smooth plus
+**group-level** smooth deviations that share a kernel:
 
-    y_ij = beta0 + f(x_ij) + f_{g(i)}(x_ij) + e_ij
-    f      ~ GP(0, sigma_pop^2 K_rho)              (the population trend)
-    f_g    ~ GP(0, sigma_grp^2 K_rho)  iid over g  (group deviations)
-    e_ij   ~ N(0, sigma_e^2)
+.. math::
+
+    y_{ij} &= \\beta_0 + f(x_{ij}) + f_{g(i)}(x_{ij}) + e_{ij} \\\\
+    f &\\sim \\mathrm{GP}(0, \\sigma_{\\mathrm{pop}}^2 K_\\rho)
+       \\quad \\text{(the population trend)} \\\\
+    f_g &\\sim \\mathrm{GP}(0, \\sigma_{\\mathrm{grp}}^2 K_\\rho)
+       \\quad \\text{iid over } g \\quad \\text{(group deviations)} \\\\
+    e_{ij} &\\sim \\mathcal{N}(0, \\sigma_e^2)
 
 The group curves are *random deviations* around the population curve, sharing one
-amplitude ``sigma_grp^2`` and the kernel lengthscale ``rho`` (so a group with few
-observations is shrunk toward the population trend -- partial pooling).  This is
-the multi-level / "(a)" scope of the GP feature: a hierarchical GP in the mixed-
-model sense.
+amplitude :math:`\\sigma_{\\mathrm{grp}}^2` and the kernel lengthscale
+:math:`\\rho` (so a group with few observations is shrunk toward the population
+trend -- partial pooling).  This is the multi-level scope of the GP feature: a
+hierarchical GP in the mixed-model sense.
 
-Construction (HSGP, the penalty<->variance-component identity)
---------------------------------------------------------------
+Construction (HSGP, the penalty-variance-component identity)
+------------------------------------------------------------
 
 Both the population and the group smooths use the **fixed** Hilbert-space
-eigenbasis ``Phi`` (:mod:`nitrix.stats.gp`); the kernel enters only as the
-diagonal spectral reweighting ``s_j(rho)``.  Stacking the population columns and
-the group factor-smooth columns (``Phi`` masked to each group's rows) gives a
-single penalised design with a **block-diagonal, fully diagonal** penalty -- one
-smoothing-parameter block per variance component::
+eigenbasis :math:`\\Phi` (see :func:`nitrix.stats.gp.gp_fit`); the kernel enters
+only as the diagonal spectral reweighting :math:`s_j(\\rho)`.  Stacking the
+population columns and the group factor-smooth columns (:math:`\\Phi` masked to
+each group's rows) gives a single penalised design with a **block-diagonal, fully
+diagonal** penalty -- one smoothing-parameter block per variance component:
 
-    X = [ 1 | Phi(x) | Phi(x) (x) onehot(g) ]
-    penalty = blkdiag( lam_pop diag(1/s) ,  lam_grp diag(1/s) (x) I_L )
+.. math::
 
-``lam_pop = sigma_e^2 / sigma_pop^2`` and ``lam_grp = sigma_e^2 / sigma_grp^2``
-are the two smoothing parameters (the inverse GP amplitudes), selected by the
-generalized Fellner-Schall step exactly as a multi-smooth GAM; the shared ``rho``
-is profiled by the same pooled-REML grid as :func:`~nitrix.stats.gp.gp_fit`.
-Because every penalty block is diagonal with **disjoint** columns, the FS penalty
-trace is the closed form ``rank_k / lam_k`` and the REML log-pseudo-determinant is
+    X &= [\\, \\mathbf{1} \\mid \\Phi(x) \\mid \\Phi(x) \\otimes
+        \\operatorname{onehot}(g) \\,] \\\\
+    \\text{penalty} &= \\operatorname{blkdiag}\\!\\big(
+        \\lambda_{\\mathrm{pop}} \\operatorname{diag}(1/s),\\;
+        \\lambda_{\\mathrm{grp}} \\operatorname{diag}(1/s) \\otimes I_L \\big)
+
+:math:`\\lambda_{\\mathrm{pop}} = \\sigma_e^2 / \\sigma_{\\mathrm{pop}}^2` and
+:math:`\\lambda_{\\mathrm{grp}} = \\sigma_e^2 / \\sigma_{\\mathrm{grp}}^2` are the
+two smoothing parameters (the inverse GP amplitudes), selected by the generalised
+Fellner-Schall step exactly as a multi-smooth GAM; the shared :math:`\\rho` is
+profiled by the same pooled-REML grid as :func:`nitrix.stats.gp.gp_fit`.
+Because every penalty block is diagonal with **disjoint** columns, the
+Fellner-Schall penalty trace is the closed form
+:math:`\\operatorname{rank}_k / \\lambda_k` and the REML log-pseudo-determinant is
 a per-block sum -- no eigendecomposition.
 
-The fit reuses the :mod:`nitrix.stats.gp` HSGP eigenstructure and is cuSOLVER-free
-and ``vmap`` clean; the working size is ``O(V (M_0 + (1 + L) m)^2)`` -- the
-factor-smooth interaction is ``L`` times wider than a plain GP, the inherent cost
-of per-group curves (bound it with ``block`` on brain-scale ``V``).
+The fit reuses the :func:`nitrix.stats.gp.gp_fit` HSGP eigenstructure and is
+cuSOLVER-free and ``vmap`` clean; the working size is
+:math:`O(V (M_0 + (1 + L) m)^2)` -- the factor-smooth interaction is :math:`L`
+times wider than a plain GP, the inherent cost of per-group curves (bound it with
+``block`` on brain-scale :math:`V`).
 
 References
 ----------
 - Pedersen, E. J., Miller, D. L., Simpson, G. L. & Ross, N. (2019). Hierarchical
-  generalized additive models in ecology.  PeerJ 7, e6876.
-- Wood, S. N. & Fasiolo, M. (2017). A generalized Fellner-Schall method ...
+  generalized additive models in ecology: an introduction with mgcv. PeerJ 7,
+  e6876. https://doi.org/10.7717/peerj.6876
+- Wood, S. N. & Fasiolo, M. (2017). A generalized Fellner-Schall method for
+  smoothing parameter optimization with application to Tweedie location, scale
+  and shape models. Biometrics 73(4), 1071-1081.
+  https://doi.org/10.1111/biom.12666
 """
 
 from __future__ import annotations
@@ -92,8 +108,16 @@ __all__ = [
         'dispersion',
     ),
     aux=(
-        'kernel', 'engine', 'model', 'n_levels', 'n_obs', 'rank', 'n_fixed',
-        'lo', 'hi', 'boundary',
+        'kernel',
+        'engine',
+        'model',
+        'n_levels',
+        'n_obs',
+        'rank',
+        'n_fixed',
+        'lo',
+        'hi',
+        'boundary',
     ),
 )
 @dataclass(frozen=True)
@@ -106,13 +130,17 @@ class HGPResult:
         ``(V, p)`` coefficients over ``[fixed | pop-smooth | group-smooths…]``:
         the unpenalised fixed effects, the population eigenfunction coefficients,
         then each grouping level's per-group deviation coefficients.  ``'GS'``:
-        ``p = n_fixed + m + L m``; ``'nested'``: ``p = n_fixed + m + (L1 + L2) m``.
+        :math:`p = M_0 + m + L m`; ``'nested'``:
+        :math:`p = M_0 + m + (L_1 + L_2) m`.
     cov_unscaled
-        ``(V, p, p)`` Bayesian covariance ``(X^T X + S_lambda)^{-1}``.
+        ``(V, p, p)`` Bayesian covariance
+        :math:`(X^{\\top} X + S_\\lambda)^{-1}`.
     theta
-        ``(V, K + 2)`` ``[log sigma_pop^2, (log sigma_grp_i^2)…, log sigma_e^2,
-        log rho]`` -- one GP variance per component (``K = 2`` for ``'GS'``,
-        ``3`` for ``'nested'``); the ``rho`` column is constant (one shared
+        ``(V, K + 2)`` array
+        :math:`[\\log \\sigma_{\\mathrm{pop}}^2, (\\log
+        \\sigma_{\\mathrm{grp},i}^2)\\ldots, \\log \\sigma_e^2, \\log \\rho]`
+        -- one GP variance per component (:math:`K = 2` for ``'GS'``, ``3`` for
+        ``'nested'``); the :math:`\\rho` column is constant (one shared
         lengthscale).
     log_mlik
         ``(V,)`` REML log marginal likelihood at the fit.
@@ -120,15 +148,16 @@ class HGPResult:
         ``(V, K)`` effective degrees of freedom of each GP component (population,
         then each grouping level).
     dispersion
-        ``(V,)`` residual variance ``sigma_e^2``.
+        ``(V,)`` residual variance :math:`\\sigma_e^2`.
     kernel, engine, model
         Kernel name, reduced-rank engine (``'hsgp'``), and hierarchical model
         (``'GS'`` -- global + group smoothers; ``'nested'`` -- two-level g1/g2).
     n_levels
-        Number of factor levels: ``L`` (``'GS'``) or the tuple ``(L1, L2)``
-        (``'nested'``).
+        Number of factor levels: :math:`L` (``'GS'``) or the tuple
+        :math:`(L_1, L_2)` (``'nested'``).
     n_obs, rank, n_fixed
-        ``N``, the per-smooth rank ``m``, and the number of fixed columns ``M_0``.
+        :math:`N`, the per-smooth rank :math:`m`, and the number of fixed columns
+        :math:`M_0`.
     lo, hi, boundary
         HSGP domain descriptors (for re-evaluation in :func:`hgp_predict`).
     """
@@ -188,9 +217,58 @@ def _hgp_fit_one(
     Float[Array, ''],
     Float[Array, ''],
 ]:
-    """Single-element hierarchical fit at fixed ``rho``.  Returns ``(beta, V, lam,
-    edf_blocks, dispersion, log_mlik)`` with ``edf_blocks`` the per-GP-component
-    effective dof (population, then each grouping level)."""
+    """Single-element hierarchical fit at a fixed lengthscale.
+
+    Runs the multi-block Fellner-Schall smoothing-parameter update, forms the
+    penalised-least-squares quantities, and computes the per-component effective
+    degrees of freedom for one response vector.
+
+    Parameters
+    ----------
+    c
+        ``(p,)`` cross-product :math:`X^{\\top} y` for this element.
+    g
+        Scalar sum of squares :math:`y^{\\top} y` for this element.
+    xtx
+        ``(p, p)`` Gram matrix :math:`X^{\\top} X` (shared across elements).
+    d_blocks
+        ``(K, p)`` diagonal penalty weights, one row per variance component.
+    ranks
+        ``(K,)`` rank (column count) of each penalty block.
+    log_pdets
+        ``(K,)`` log pseudo-determinant of each penalty block.
+    block_cols
+        Tuple of ``(lo, hi)`` column slices, one per smooth, over which each
+        component's effective degrees of freedom are accumulated.
+    n
+        Number of observations :math:`N`.
+    p
+        Total number of design columns.
+    n_fixed
+        Number of unpenalised fixed columns :math:`M_0`.
+    n_outer
+        Number of Fellner-Schall outer iterations.
+    ridge
+        Ridge added to the penalised Gram matrix for numerical stability.
+    lam_floor, lam_ceil
+        Lower and upper clamps on each smoothing parameter.
+
+    Returns
+    -------
+    beta : Float[Array, ' p']
+        Penalised coefficient estimate.
+    v : Float[Array, 'p p']
+        Bayesian covariance :math:`(X^{\\top} X + S_\\lambda)^{-1}`.
+    lam : Float[Array, ' K']
+        Fitted smoothing parameter per variance component.
+    edf_blocks : Float[Array, ' K']
+        Per-GP-component effective degrees of freedom (population, then each
+        grouping level).
+    phi : Float[Array, '']
+        Residual variance (dispersion) :math:`\\sigma_e^2`.
+    log_mlik : Float[Array, '']
+        REML log marginal likelihood at the fit.
+    """
     lam = _mb_fs(
         c, g, xtx, d_blocks, ranks, n, p, n_outer, ridge, lam_floor, lam_ceil
     )
@@ -222,7 +300,44 @@ def _hgp_pooled_nll_one(
     lam_floor: float,
     lam_ceil: float,
 ) -> Float[Array, '']:
-    """The per-element ``-2 l_R`` at fixed ``rho`` (its own ``lam``)."""
+    """Per-element REML deviance :math:`-2 l_R` at a fixed lengthscale.
+
+    Fits this element's smoothing parameters by Fellner-Schall and returns its
+    REML deviance; summed across elements this is the pooled objective minimised
+    over the shared lengthscale.
+
+    Parameters
+    ----------
+    c
+        ``(p,)`` cross-product :math:`X^{\\top} y` for this element.
+    g
+        Scalar sum of squares :math:`y^{\\top} y` for this element.
+    xtx
+        ``(p, p)`` Gram matrix :math:`X^{\\top} X` (shared across elements).
+    d_blocks
+        ``(K, p)`` diagonal penalty weights, one row per variance component.
+    ranks
+        ``(K,)`` rank (column count) of each penalty block.
+    log_pdets
+        ``(K,)`` log pseudo-determinant of each penalty block.
+    n
+        Number of observations :math:`N`.
+    p
+        Total number of design columns.
+    n_fixed
+        Number of unpenalised fixed columns :math:`M_0`.
+    n_outer
+        Number of Fellner-Schall outer iterations.
+    ridge
+        Ridge added to the penalised Gram matrix for numerical stability.
+    lam_floor, lam_ceil
+        Lower and upper clamps on each smoothing parameter.
+
+    Returns
+    -------
+    Float[Array, '']
+        The REML deviance :math:`-2 l_R` for this element.
+    """
     lam = _mb_fs(
         c, g, xtx, d_blocks, ranks, n, p, n_outer, ridge, lam_floor, lam_ceil
     )
@@ -240,8 +355,27 @@ def _hgp_pooled_nll_one(
 def _factor_smooth_design(
     phi: Float[Array, 'N m'], group: Int[Array, ' N'], n_levels: int
 ) -> Float[Array, 'N Lm']:
-    """The factor-smooth interaction ``Phi(x) (x) onehot(group)`` (group ``g``'s
-    columns are ``Phi`` on its own rows, zero elsewhere), as ``(N, L*m)``."""
+    """Build the factor-smooth interaction design.
+
+    Forms the interaction :math:`\\Phi(x) \\otimes \\operatorname{onehot}(group)`:
+    each group's :math:`m`-column block holds the basis :math:`\\Phi` on that
+    group's own rows and zero elsewhere, laid out contiguously as
+    :math:`(N, L m)`.
+
+    Parameters
+    ----------
+    phi
+        ``(N, m)`` Hilbert-space eigenbasis evaluated at the covariate.
+    group
+        ``(N,)`` integer factor labels ``0 .. n_levels - 1``.
+    n_levels
+        Number of factor levels :math:`L`.
+
+    Returns
+    -------
+    Float[Array, 'N Lm']
+        The ``(N, L * m)`` block-sparse factor-smooth design.
+    """
     onehot = jax.nn.one_hot(group, n_levels, dtype=phi.dtype)  # (N, L)
     # (N, L, m) -> (N, L*m): block g holds phi where group==g.
     inter = onehot[:, :, None] * phi[:, None, :]
@@ -250,15 +384,40 @@ def _factor_smooth_design(
 
 def _block_weights(
     inv_s: Float[Array, ' m'], n_fixed: int, level_counts: Tuple[int, ...]
-) -> Tuple[Float[Array, 'K p'], Float[Array, ' K'], Tuple[Tuple[int, int], ...]]:
-    """The ``K = 1 + len(level_counts)`` diagonal penalty blocks over the full
-    ``p`` columns, their ranks, and the smooth column slices.
+) -> Tuple[
+    Float[Array, 'K p'], Float[Array, ' K'], Tuple[Tuple[int, int], ...]
+]:
+    """Assemble the diagonal penalty blocks for the hierarchical design.
 
-    Block 0 is the **population** smooth (``1/s`` on its ``m`` columns); block
-    ``i+1`` is the ``i``-th **factor-smooth** (``1/s`` tiled over its
+    Returns the :math:`K = 1 + \\mathrm{len}(level\\_counts)` diagonal penalty
+    blocks laid out over the full :math:`p` columns, together with each block's
+    rank and its column slice. Block 0 is the **population** smooth
+    (:math:`1/s` on its :math:`m` columns); block :math:`i + 1` is the
+    :math:`i`-th **factor-smooth** (:math:`1/s` tiled over its
     ``level_counts[i]`` groups). ``level_counts = (L,)`` is the GS model;
-    ``(L1, L2)`` is the nested two-level model. Every block is diagonal with
-    disjoint columns."""
+    :math:`(L_1, L_2)` is the nested two-level model. Every block is diagonal
+    with disjoint columns.
+
+    Parameters
+    ----------
+    inv_s
+        ``(m,)`` inverse spectral weights :math:`1/s_j(\\rho)` for one smooth.
+    n_fixed
+        Number of leading unpenalised fixed columns :math:`M_0`.
+    level_counts
+        Factor-level counts per grouping factor: ``(L,)`` for the GS model or
+        :math:`(L_1, L_2)` for the nested model.
+
+    Returns
+    -------
+    d_blocks : Float[Array, 'K p']
+        Diagonal penalty weights, one row per block, zero outside the block's
+        own columns.
+    ranks : Float[Array, ' K']
+        Column count (rank) of each block.
+    block_cols : tuple of (int, int)
+        The ``(lo, hi)`` column slice of each block.
+    """
     m = inv_s.shape[0]
     reps = (1,) + tuple(level_counts)  # population is one copy
     widths = tuple(rep * m for rep in reps)
@@ -283,7 +442,9 @@ def _block_weights(
 
 def _inv_s(sqrt_lambda: Array, kernel: str, rho: float, dtype: Any) -> Array:
     s = spectral_density(
-        sqrt_lambda, kernel=kernel, rho=jnp.asarray(rho, dtype=dtype),
+        sqrt_lambda,
+        kernel=kernel,
+        rho=jnp.asarray(rho, dtype=dtype),
         amplitude=1.0,
     )
     return 1.0 / jnp.clip(s, 1e-30, None)
@@ -318,50 +479,81 @@ def hgp_fit(
     lam_ceil: float = 1e8,
     block: Optional[int] = None,
 ) -> HGPResult:
-    """Fit a mass-univariate hierarchical GP: a population smooth plus group-level
-    smooth deviations sharing a kernel (the "GS" hierarchical GAM; HSGP engine).
+    """Fit a mass-univariate hierarchical Gaussian process.
+
+    Fits, per element, a population smooth of the covariate ``x`` plus
+    group-level smooth deviations that share a kernel -- the "GS" hierarchical
+    GAM, using the reduced-rank Hilbert-space (HSGP) engine. The shared
+    lengthscale is profiled over a pooled-REML grid and each variance component's
+    smoothing parameter is fitted by the generalised Fellner-Schall step.
 
     Parameters
     ----------
     Y
-        ``(V, N)`` responses.
+        ``(V, N)`` responses (one row per element).
     x
         ``(N,)`` covariate the GP smooths *over* (a single covariate, **not** the
-        full design matrix ``X``; linear covariates go to ``parametric=``).
+        full design matrix; linear covariates go to ``parametric``).
     group
-        ``(N,)`` integer factor labels ``0 .. L-1`` (the grouping the smooth
-        varies over -- subjects, sites, ...).  For ``model='nested'`` this is the
-        **outer** factor.
+        ``(N,)`` integer factor labels :math:`0 \\ldots L-1` (the grouping the
+        smooth varies over -- subjects, sites, ...).  For ``model='nested'`` this
+        is the **outer** factor.
     group_inner
-        ``(N,)`` integer labels of the **inner** factor (nested within ``group``),
-        ``0 .. L2-1`` globally.  Required for ``model='nested'``.
+        ``(N,)`` integer labels of the **inner** factor (nested within
+        ``group``), :math:`0 \\ldots L_2-1` globally.  Required for
+        ``model='nested'``.
     parametric
         Optional ``(N, q)`` unpenalised linear design (with the intercept).
-    kernel, rank, boundary, bounds
-        HSGP basis parameters (see :func:`nitrix.stats.gp.gp_fit`); ``rank`` is the
-        per-smooth eigenfunction count (default ``12`` -- the design is ``1 + L``
-        smooths wide, so a smaller rank than ``gp_fit`` is usual).
+    kernel
+        Covariance kernel name (as :func:`nitrix.stats.gp.gp_fit`); enters only
+        through the diagonal spectral reweighting.
+    rank
+        Per-smooth eigenfunction count :math:`m` (default ``12`` -- the design is
+        :math:`1 + L` smooths wide, so a smaller rank than :func:`gp_fit
+        <nitrix.stats.gp.gp_fit>` is usual).
     model
         Hierarchical structure.  ``'GS'`` (default): a global smoother plus
-        group-level smoothers with one shared group wiggliness ``sigma_grp^2``.
-        ``'nested'``: a two-level hierarchy ``(gp | g1/g2)`` -- population +
-        outer-group + inner-group(nested) GP deviations, three variance components
-        (``sigma_pop^2``, ``sigma_outer^2``, ``sigma_inner^2``) sharing ``rho``.
+        group-level smoothers with one shared group wiggliness
+        :math:`\\sigma_{\\mathrm{grp}}^2`.  ``'nested'``: a two-level hierarchy
+        (outer ``g1`` / inner ``g2``) -- population + outer-group + inner-group
+        (nested) GP deviations, three variance components
+        (:math:`\\sigma_{\\mathrm{pop}}^2`, :math:`\\sigma_{\\mathrm{outer}}^2`,
+        :math:`\\sigma_{\\mathrm{inner}}^2`) sharing :math:`\\rho`.
+    boundary
+        HSGP domain-extension factor (as :func:`nitrix.stats.gp.gp_fit`); must be
+        ``>= 1.0``.
+    bounds
+        Optional ``(lo, hi)`` covariate domain; defaults to the range of ``x``.
+    rho_bounds
+        Optional ``(lo, hi)`` bounds of the shared-lengthscale search; defaults
+        to a span-relative range.
+    n_rho
+        Number of grid points in the shared-lengthscale search.
+    map_rho
+        Optional lengthscale prior :math:`\\rho \\mapsto -\\log p(\\rho)` added to
+        the pooled objective (e.g. a builder from :mod:`nitrix.stats.priors`).
     n_levels, n_levels_inner
         Outer / inner factor-level counts (default to ``max + 1``); pass when a
         level is absent so the block widths are stable.
-    rho_bounds, n_rho, map_rho
-        Shared-lengthscale search (as :func:`~nitrix.stats.gp.gp_fit`); ``map_rho``
-        is an optional ``rho -> -log p(rho)`` lengthscale prior (e.g. a builder
-        from :mod:`nitrix.stats.priors`).
-    n_outer, n_search, ridge, lam_floor, lam_ceil, block
-        Fellner-Schall / solver controls (as :func:`~nitrix.stats.gp.gp_fit`).
+    n_outer
+        Number of Fellner-Schall iterations for the final per-element fit.
+    n_search
+        Number of Fellner-Schall iterations during the lengthscale search.
+    ridge
+        Ridge added to the penalised Gram matrix for numerical stability.
+    lam_floor, lam_ceil
+        Lower and upper clamps on each smoothing parameter.
+    block
+        Optional element-block size for the chunked ``vmap`` reduction (bounds
+        peak memory on brain-scale :math:`V`).
 
     Returns
     -------
-    ``HGPResult`` with per-element coefficients, ``theta = [log sigma_pop^2,
-    log sigma_grp^2, log sigma_e^2, log rho]``, REML marginal likelihood, the
-    population / group EDF, and dispersion.
+    HGPResult
+        Per-element fit with coefficients, the log-variance parameters
+        ``theta`` (per-component GP variances, residual variance and shared
+        lengthscale), the REML marginal likelihood, the population / group
+        effective degrees of freedom, and the dispersion.
     """
     if model not in ('GS', 'nested'):
         raise NotImplementedError(
@@ -433,7 +625,7 @@ def hgp_fit(
         pairs = np.unique(np.stack([gi_np, go_np], axis=1), axis=0)
         if pairs.shape[0] != len(np.unique(gi_np)):
             raise ValueError(
-                'hgp_fit: model=\'nested\' requires globally-numbered inner '
+                "hgp_fit: model='nested' requires globally-numbered inner "
                 'labels (each inner level nested within a single `group` level); '
                 'an inner label appears under multiple outer levels. Renumber '
                 'the inner factor globally (e.g. encode the (outer, inner) pair), '
@@ -505,8 +697,19 @@ def hgp_fit(
         d_blocks, ranks, log_pdets, _ = _blocks(jnp.exp(log_rho))
         per = blocked_vmap(
             lambda c_v, g_v: _hgp_pooled_nll_one(
-                c_v, g_v, xtx, d_blocks, ranks, log_pdets, n, p, n_fixed,
-                n_search, ridge, lam_floor, lam_ceil,
+                c_v,
+                g_v,
+                xtx,
+                d_blocks,
+                ranks,
+                log_pdets,
+                n,
+                p,
+                n_fixed,
+                n_search,
+                ridge,
+                lam_floor,
+                lam_ceil,
             ),
             (c_all, g_all),
             block=block,
@@ -530,8 +733,20 @@ def hgp_fit(
 
     def _final(c_v: Array, g_v: Array) -> Tuple[Array, ...]:
         return _hgp_fit_one(
-            c_v, g_v, xtx, d_blocks, ranks, log_pdets, block_cols, n, p,
-            n_fixed, n_outer, ridge, lam_floor, lam_ceil,
+            c_v,
+            g_v,
+            xtx,
+            d_blocks,
+            ranks,
+            log_pdets,
+            block_cols,
+            n,
+            p,
+            n_fixed,
+            n_outer,
+            ridge,
+            lam_floor,
+            lam_ceil,
         )
 
     beta, v, lam, edf, phi_disp, log_mlik = cast(
@@ -550,9 +765,7 @@ def hgp_fit(
         + [jnp.log(jnp.clip(sigma_e2, 1e-30, None)), log_rho_col],
         axis=-1,
     )
-    n_levels_aux: Any = (
-        tuple(level_counts) if nested else int(level_counts[0])
-    )
+    n_levels_aux: Any = tuple(level_counts) if nested else int(level_counts[0])
     return HGPResult(
         coef=beta,
         cov_unscaled=v,
@@ -598,6 +811,16 @@ def hgp_predict(
         Optional group indices to render; ``None`` gives the population curve.
     parametric
         ``(g, q)`` parametric covariates (required if the fit used them).
+
+    Returns
+    -------
+    mean : Float[Array, '...']
+        Posterior mean curve. ``(V, g)`` for the population smooth
+        (``levels=None``), or ``(V, len(levels), g)`` for the requested group
+        curves.
+    std : Float[Array, '...']
+        Posterior standard deviation of the curve, matching the shape of
+        ``mean``.
     """
     dtype = result.coef.dtype
     x_new = jnp.asarray(x_new, dtype=dtype)
@@ -628,7 +851,7 @@ def hgp_predict(
     # GS and nested -- the group-column count is read off the coefficient width).
     n_group_cols = result.coef.shape[1] - mf - m
     fixed_part = result.coef[:, :mf] @ t_new.T  # (V, g)
-    beta_pop = result.coef[:, mf:mf + m]  # (V, m)
+    beta_pop = result.coef[:, mf : mf + m]  # (V, m)
     pop_smooth = beta_pop @ phi_new.T  # (V, g)
     pop_mean = fixed_part + pop_smooth
 
@@ -637,7 +860,9 @@ def hgp_predict(
             [t_new, phi_new, jnp.zeros((gsz, n_group_cols), dtype=dtype)],
             axis=1,
         )
-        var = jnp.einsum('gi,vij,gj->vg', x_design, result.cov_unscaled, x_design)
+        var = jnp.einsum(
+            'gi,vij,gj->vg', x_design, result.cov_unscaled, x_design
+        )
         std = jnp.sqrt(jnp.clip(result.dispersion[:, None] * var, 1e-30, None))
         return pop_mean, std
 
@@ -656,11 +881,13 @@ def hgp_predict(
         # Curve design: T + population Phi + this group's Phi block (the other
         # group blocks zero), as (g, L*m).
         onehot = jax.nn.one_hot(ell, n_lev, dtype=dtype)  # (L,)
-        grp_cols = (
-            phi_new[:, None, :] * onehot[None, :, None]
-        ).reshape(gsz, n_lev * m)  # (g, L*m)
+        grp_cols = (phi_new[:, None, :] * onehot[None, :, None]).reshape(
+            gsz, n_lev * m
+        )  # (g, L*m)
         x_design = jnp.concatenate([t_new, phi_new, grp_cols], axis=1)
-        var = jnp.einsum('gi,vij,gj->vg', x_design, result.cov_unscaled, x_design)
+        var = jnp.einsum(
+            'gi,vij,gj->vg', x_design, result.cov_unscaled, x_design
+        )
         std = jnp.sqrt(jnp.clip(result.dispersion[:, None] * var, 1e-30, None))
         return mean, std
 

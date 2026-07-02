@@ -1,0 +1,74 @@
+---
+title: "percentile_rescale"
+generated: true
+description: "Shift by the `lo`-percentile then scale by the `hi`-percentile."
+---
+
+[‹ back to `nitrix.numerics.normalize`](../nitrix-numerics-normalize.qmd)
+
+<!-- nitrix:gen sig:percentile_rescale -->
+```python
+percentile_rescale(x: Num[Array, '...'], *, lo: float = 0.0, hi: float = 99.0, clip: bool = True, axis: Optional[_AxisArg] = None, eps: float = 1e-12, mask: Optional[Num[Array, '...']] = None) -> Num[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:percentile_rescale -->
+Shift by the `lo`-percentile then scale by the `hi`-percentile.
+
+Computes $(x - p_{lo}) / p_{hi}$ where $p_{lo}$ /
+$p_{hi}$ are the `lo` / `hi` percentiles of `x`,
+then optionally clips the result to $[0, 1]$ when `clip`
+is set.  With the defaults `lo=0` (the minimum) and `hi=99`
+this is the **min--p99--clip** recipe used by SynthStrip /
+SynthDist / SynthSR (and SynthSR after its CT intensity clip):
+$\operatorname{clip}((x - \min) / p_{99}, 0, 1)$.
+
+Distinct from [`intensity_normalize`](../nitrix-numerics-normalize/intensity_normalize.qmd) in two ways, both
+deliberate:
+
+1. The scale is the **raw high percentile** $p_{hi}$ (not
+   the inter-percentile width $p_{hi} - p_{lo}$), so the
+   upper reference is an absolute intensity, not a range
+   endpoint.
+2. It rescales **then** clips ([`intensity_normalize`](../nitrix-numerics-normalize/intensity_normalize.qmd) clips
+   then rescales), so values above $p_{hi}$ saturate at
+   `1` rather than defining the top of the range.
+
+Use [`intensity_normalize`](../nitrix-numerics-normalize/intensity_normalize.qmd) for symmetric two-sided
+percentile-window rescaling; use this for the strict
+min/high-percentile convention the Synth* pipelines expect.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:percentile_rescale -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Num` | `...` | — | Intensity tensor. |
+| `lo` | `float` | — | `0.0` | Lower / upper percentiles. Defaults `(0, 99)` (minimum and 99th percentile). |
+| `hi` | `float` | — | `99.0` | Lower / upper percentiles. Defaults `(0, 99)` (minimum and 99th percentile). |
+| `clip` | `bool` | — | `True` | Clip the result to `[0, 1]`. Default `True`. |
+| `axis` | `Optional[_AxisArg]` | — | `None` | Axes over which to compute the percentiles. `None` (default) uses the whole tensor; pass an axis tuple for per-slice / per-channel rescaling. |
+| `eps` | `float` | — | `1e-12` | Stabiliser added to the `p_hi` denominator (guards the all-constant / all-zero input). |
+| `mask` | `Optional[Num[Array, '...']]` | — | `None` | Optional foreground mask (same shape as `x`, or broadcastable): when given, the percentiles are computed over the masked (e.g. non-zero / in-brain) voxels only -- the skull-strip-aware variant -- via `nanpercentile`, falling back to the global min / max where a slice has no foreground. Every voxel is still rescaled (and clipped); only the *reference* percentiles change. Pass `mask = x != 0` for the non-zero recipe. |
+
+**Returns** `Num` — shape `...`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:percentile_rescale -->
+::: {.callout-note}
+The two `jnp.percentile` calls are *not* worth fusing into one
+length-2 quantile call: XLA already CSEs the two identical sorts
+into a single `lax.sort` (see `intensity_normalize` Notes and
+`docs/feature-requests/median-percentile-cpu-sort-cliff.md`).
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:percentile_rescale -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

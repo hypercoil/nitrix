@@ -1,0 +1,62 @@
+---
+title: "nitrix.smoothing.susan"
+generated: true
+signature-hash: 96295ecb61c119a4
+description: "SUSAN-style edge-preserving smoothing."
+listing:
+  id: nitrix-smoothing-susan-symbols
+  contents: "nitrix-smoothing-susan/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.smoothing.susan`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+SUSAN-style edge-preserving smoothing.
+
+[`susan_emulator`](nitrix-smoothing-susan/susan_emulator.qmd) is the convenience wrapper that composes
+[`bilateral_gaussian`](nitrix-smoothing-bilateral/bilateral_gaussian.qmd) (the brightness-similarity weighting half
+of FSL SUSAN) with `median_filter` (the impulse-noise fallback
+half).  The user passes a raw n-D image and the wrapper does the
+feature-construction internally.
+
+Documented behavioural deltas from FSL SUSAN:
+
+- The brightness-similarity weighting that FSL SUSAN does explicitly
+  is recovered by including intensity in the bilateral feature space.
+- The impulse-noise median fallback is exposed via `use_median=True`
+  (default), which applies `median_filter` *before* the
+  bilateral pass.  (FSL SUSAN does this internally as part of a single
+  operation; here it is exposed as a chained step, in keeping with the
+  practice of composing small primitives.)
+- The "auto-flat-kernel at small spatial extents" behaviour of FSL
+  SUSAN is *not* replicated.  `sigma_space` controls the spatial
+  weighting directly.
+
+The `bthresh` parameter exists for API compatibility with FSL
+SUSAN's bilateral threshold but is currently advisory: setting it
+clips the per-edge weight at the threshold rather than acting as a
+hard cutoff.  (Hard-cutoff variants are straightforward to add if the
+diagnostic value materialises.)
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-smoothing-susan-symbols}
+:::

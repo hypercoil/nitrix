@@ -1,0 +1,57 @@
+---
+title: "nitrix.signal.tsconv"
+generated: true
+signature-hash: 8a7e416600885156
+description: "1-D time-series convolution along the trailing axis."
+listing:
+  id: nitrix-signal-tsconv-symbols
+  contents: "nitrix-signal-tsconv/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.signal.tsconv`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+1-D time-series convolution along the trailing axis.
+
+A thin batched wrapper around `lax.conv_general_dilated` for
+1-D temporal convolution with the typical fMRI / time-series
+layout `(..., channels, observations)`.
+
+What the legacy `hypercoil.functional.tsconv` had that we drop:
+
+- `tsconv2d` -- "2D conv where one axis is time" via separate
+  `lax.conv_general_dilated` calls.  Users wanting that should
+  call `lax.conv_general_dilated` directly with the explicit
+  dimension-numbers spec; wrapping it doesn't save code.
+- `basisconv2d`, `polyconv2d`, `basischan`, `polychan` --
+  scientific-question-specific (basis-function / polynomial-channel
+  construction for HRF modelling).  Live elsewhere when they live
+  again (probably `hypercoil`-side or a downstream consumer's
+  utility module).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `C` | *(undocumented — add to `_dimensions.yml`)* |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+| `C_out` | *(undocumented — add to `_dimensions.yml`)* |
+| `K` | *(undocumented — add to `_dimensions.yml`)* |
+| `obs_out` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-signal-tsconv-symbols}
+:::

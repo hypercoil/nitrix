@@ -1,0 +1,78 @@
+---
+title: "sympower"
+generated: true
+description: "Arbitrary real power of an SPD batch."
+---
+
+[‹ back to `nitrix.linalg.spd`](../nitrix-linalg-spd.qmd)
+
+<!-- nitrix:gen sig:sympower -->
+```python
+sympower(input: Float[Array, '... d d'], *, power: float, psi: float = 0.0, key: Optional[jax.Array] = None, eigvalue_clip: EigvalueClip = 'auto') -> Float[Array, '... d d']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:sympower -->
+Arbitrary real power of an SPD batch.
+
+Raises the eigenvalues to `power` via [`symmap`](../nitrix-linalg-spd/symmap.qmd), computing
+$Q \operatorname{diag}(\lambda^{p}) Q^{\top}$.  For `power > 0`
+and SPD input the result is well-defined.  For `power < 0` this returns
+the inverse (negative-power) variant, and eigenvalue clipping prevents
+division by zero.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:sympower -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `input` | `Float` | `...` × `d` × `d` | — | Symmetric (assumed SPD) matrix batch. |
+| `power` | `float` | — | — | Real exponent applied to each eigenvalue. Common cases: `-0.5` gives the inverse square root used in tangent-space projection, and `2` gives self-multiplication (equivalent to `input @ input` for SPD input; the eigendecomposition path is more stable for ill-conditioned inputs but slower). |
+| `psi` | `float` | — | `0.0` | Reconditioning strength forwarded to [`symmap`](../nitrix-linalg-spd/symmap.qmd). |
+| `key` | `Optional[jax.Array]` | — | `None` | PRNG key, required when `psi > 0`. |
+| `eigvalue_clip` | `EigvalueClip` | — | `'auto'` | Eigenvalue clipping policy forwarded to [`symmap`](../nitrix-linalg-spd/symmap.qmd). |
+
+**Returns** `Float` — shape `...` × `d` × `d`. Each input matrix raised to the given real power; same shape as `input`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:sympower -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **1.97 ms** (median, L4); up to **184.38× faster** than `scipy.linalg.fractional_matrix_power`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_SYMPOWER.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| sympower | jax-cpu | d=256,power=0.75 | `cupy.eigh_matpow` | skipped | — | — | — | — | — |
+| sympower | jax-cpu | d=256,power=0.75 | `nitrix-jax` | ok | 5.28 ms / 23.17 ms | 219.04 ms | 529 MB (rss) | ✓ 0.00056×tol | 1.00x vs nitrix-jax |
+| sympower | jax-cpu | d=256,power=0.75 | `scipy.linalg.fractional_matrix_power` | ok | 199.00 ms / 314.79 ms | 297.12 ms | 472 MB (rss) | ✓ 0.0017×tol | 37.69x vs nitrix-jax |
+| sympower | jax-cuda12 | d=256,power=0.75 | `cupy.eigh_matpow` | skipped | — | — | — | — | — |
+| sympower | jax-cuda12 | d=256,power=0.75 | `nitrix-jax` | ok | 1.94 ms / 1.97 ms | 1.240 s | 72.09 MB (hbm) | ✓ 0.00054×tol | 1.00x vs nitrix-jax |
+| sympower | jax-cuda12 | d=256,power=0.75 | `scipy.linalg.fractional_matrix_power` | ok | 147.47 ms / 231.03 ms | 440.22 ms | 0.26 MB (hbm) | ✓ 0.0017×tol | 75.87x vs nitrix-jax |
+| sympower | jax-cpu | d=512,power=0.75 | `cupy.eigh_matpow` | skipped | — | — | — | — | — |
+| sympower | jax-cpu | d=512,power=0.75 | `nitrix-jax` | ok | 24.27 ms / 29.86 ms | 441.20 ms | 547 MB (rss) | ✓ 0.00067×tol | 1.00x vs nitrix-jax |
+| sympower | jax-cpu | d=512,power=0.75 | `scipy.linalg.fractional_matrix_power` | ok | 656.61 ms / 1.986 s | 1.836 s | 493 MB (rss) | ✓ 0.0017×tol | 27.05x vs nitrix-jax |
+| sympower | jax-cuda12 | d=512,power=0.75 | `cupy.eigh_matpow` | skipped | — | — | — | — | — |
+| sympower | jax-cuda12 | d=512,power=0.75 | `nitrix-jax` | ok | 4.28 ms / 4.34 ms | 1.238 s | 74.45 MB (hbm) | ✓ 0.00048×tol | 1.00x vs nitrix-jax |
+| sympower | jax-cuda12 | d=512,power=0.75 | `scipy.linalg.fractional_matrix_power` | ok | 493.98 ms / 537.86 ms | 3.474 s | 1.05 MB (hbm) | ✓ 0.0017×tol | 115.38x vs nitrix-jax |
+| sympower | jax-cpu | d=64,power=0.75 | `cupy.eigh_matpow` | skipped | — | — | — | — | — |
+| sympower | jax-cpu | d=64,power=0.75 | `nitrix-jax` | ok | 392.9 µs / 400.1 µs | 173.70 ms | 518 MB (rss) | ✓ 0.0006×tol | 1.00x vs nitrix-jax |
+| sympower | jax-cpu | d=64,power=0.75 | `scipy.linalg.fractional_matrix_power` | ok | 4.82 ms / 21.33 ms | 181.88 ms | 472 MB (rss) | ✓ 0.0015×tol | 12.25x vs nitrix-jax |
+| sympower | jax-cuda12 | d=64,power=0.75 | `cupy.eigh_matpow` | ok | 702.0 µs / 707.7 µs | 553.81 ms | 0.02 MB (hbm) | ✓ 0.00057×tol | 0.94x vs nitrix-jax |
+| sympower | jax-cuda12 | d=64,power=0.75 | `nitrix-jax` | ok | 746.3 µs / 758.8 µs | 687.86 ms | 71.35 MB (hbm) | ✓ 0.00057×tol | 1.00x vs nitrix-jax |
+| sympower | jax-cuda12 | d=64,power=0.75 | `scipy.linalg.fractional_matrix_power` | ok | 137.60 ms / 187.51 ms | 397.99 ms | 0.02 MB (hbm) | ✓ 0.0015×tol | 184.38x vs nitrix-jax |
+:::
+
+*source: bench `daec36e9` · nitrix `fcbe94d3`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:sympower -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->

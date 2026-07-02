@@ -1,0 +1,53 @@
+---
+title: "mesh_bary_upsample"
+generated: true
+description: "Barycentric upsample from coarse to fine."
+---
+
+[‹ back to `nitrix.sparse.mesh`](../nitrix-sparse-mesh.qmd)
+
+<!-- nitrix:gen sig:mesh_bary_upsample -->
+```python
+mesh_bary_upsample(bary_ell: ELL, coarse_coords: Float[Array, '... n_coarse d']) -> Float[Array, '... n_fine d']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:mesh_bary_upsample -->
+Barycentric upsample from coarse to fine.
+
+For each fine vertex `i`:
+    out[i, :] = sum_k bary_ell.values[i, k]
+                * coarse_coords[bary_ell.indices[i, k], :]
+
+Standard [`semiring_ell_matmul`](../nitrix-semiring.qmd) under
+`REAL`; provided as a named wrapper so mesh-hierarchy code reads at
+the right level of abstraction.
+
+The `bary_ell` is the "barycentric upsampler" structure:
+row `i` (fine vertex) lists the `k` coarse vertices that
+define the barycentric coordinates of `i`, with
+`bary_ell.values[i, :]` storing the per-source weight.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:mesh_bary_upsample -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `bary_ell` | `ELL` | — | — | ELL whose row `i` (fine vertex) carries the barycentric weights and source indices into the coarse level. |
+| `coarse_coords` | `Float` | `...` × `n_coarse` × `d` | — | `(..., n_coarse, d)` per-vertex coarse-level coordinates (or any per-vertex feature). |
+
+**Returns** `Float` — shape `...` × `n_fine` × `d`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:mesh_bary_upsample -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n_coarse` | *(undocumented — add to `_dimensions.yml`)* |
+| `d` | spatial dimension (2 or 3) |
+| `n_fine` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

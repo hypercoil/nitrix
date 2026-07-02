@@ -1,0 +1,36 @@
+---
+title: "GAMResult"
+generated: true
+description: "Per-element GAM fit output."
+---
+
+[‹ back to `nitrix.stats.gam`](../nitrix-stats-gam.qmd)
+
+<!-- nitrix:gen sig:GAMResult -->
+```python
+class GAMResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:GAMResult -->
+Per-element GAM fit output.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:GAMResult.__init__ -->
+```python
+__init__(coef: Float[Array, 'V p'], lam: Float[Array, 'V m'], edf: Float[Array, 'V m'], edf_total: Float[Array, 'V'], dispersion: Float[Array, 'V'], deviance: Float[Array, 'V'], null_deviance: Float[Array, 'V'], cov_unscaled: Float[Array, 'V p p'], family: Family, n_obs: int, col_slices: Tuple[Tuple[int, int], ...], intercept: bool) -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:GAMResult -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `m` | rows of a multi-row contrast |
+<!-- nitrix:/gen -->

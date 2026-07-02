@@ -1,0 +1,40 @@
+---
+title: "adj_r_squared"
+generated: true
+description: "Per-element adjusted $R^2$ (Gaussian)."
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+<!-- nitrix:gen sig:adj_r_squared -->
+```python
+adj_r_squared(result: GLMResult) -> Float[Array, 'V']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:adj_r_squared -->
+Per-element adjusted $R^2$ (Gaussian).
+
+Applies the standard degrees-of-freedom adjustment to [`r_squared`](../nitrix-stats-glm/r_squared.qmd),
+penalising the number of fitted parameters relative to the number of
+observations.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:adj_r_squared -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `result` | `GLMResult` | — | — | A fitted [`GLMResult`](../nitrix-stats-glm/GLMResult.qmd) supplying the deviances, observation count, and residual degrees of freedom. |
+
+**Returns** `Float` — shape `V`. `(V,)` adjusted $R^2$, one per element.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:adj_r_squared -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+<!-- nitrix:/gen -->

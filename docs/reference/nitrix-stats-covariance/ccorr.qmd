@@ -1,0 +1,38 @@
+---
+title: "ccorr"
+generated: true
+description: "Alias for [`conditionalcorr`](../nitrix-stats-covariance/conditionalcorr.qmd)."
+---
+
+[‹ back to `nitrix.stats.covariance`](../nitrix-stats-covariance.qmd)
+
+<!-- nitrix:gen sig:ccorr -->
+```python
+ccorr(*args, **kwargs) -> Num[Array, '... c c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:ccorr -->
+Alias for [`conditionalcorr`](../nitrix-stats-covariance/conditionalcorr.qmd).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:ccorr -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `*args` | `Any` | — | `()` | — |
+| `**kwargs` | `Any` | — | `{}` | — |
+
+**Returns** `Num` — shape `...` × `c` × `c`. Conditional correlation matrix, `(..., c, c)`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:ccorr -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `c` | feature channels (channels-last) |
+<!-- nitrix:/gen -->

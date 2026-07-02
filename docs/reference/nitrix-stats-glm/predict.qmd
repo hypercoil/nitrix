@@ -1,0 +1,43 @@
+---
+title: "predict"
+generated: true
+description: "Per-element prediction on a (possibly new) design."
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+<!-- nitrix:gen sig:predict -->
+```python
+predict(result: GLMResult, X: Float[Array, 'N p'], *, type: PredictType = 'response') -> Float[Array, 'V N']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:predict -->
+Per-element prediction on a (possibly new) design.
+
+Forms the linear predictor $\eta = X \beta$ for every element and,
+for `type='response'`, maps it through the family's inverse link.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:predict -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `result` | `GLMResult` | — | — | A fitted [`GLMResult`](../nitrix-stats-glm/GLMResult.qmd) supplying the per-element coefficients and the family (for the inverse link). |
+| `X` | `Float` | `N` × `p` | — | `(N, p)` design matrix to predict on (need not be the design used to fit; must share the coefficient layout). |
+| `type` | `PredictType` | — | `'response'` | `'response'` (default) applies the inverse link to return fitted values on the response scale; `'link'` returns the linear predictor $\eta = X \beta$ on the link scale. |
+
+**Returns** `Float` — shape `V` × `N`. `(V, N)` predictions, one row per element over the `N` rows of `X`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:predict -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `N` | observations — time points, subjects, or sampled points |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+<!-- nitrix:/gen -->

@@ -1,0 +1,76 @@
+---
+title: "nitrix.linalg.spd"
+generated: true
+signature-hash: 4d33e318fb3a85e4
+description: "Symmetric positive-definite manifold operations."
+listing:
+  id: nitrix-linalg-spd-symbols
+  contents: "nitrix-linalg-spd/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.linalg.spd`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Symmetric positive-definite manifold operations.
+
+Applying $\log$ / $\sqrt{\cdot}$ / a fractional power to the
+eigenvalues of a symmetric positive-definite (SPD) matrix is numerically
+unstable when *any* eigenvalue is at or below the machine-precision floor of
+the input's dtype.
+
+This module handles that instability through three design choices:
+
+1. **Eigenvalue clipping is on by default.**  `eigvalue_clip='auto'`
+   clips at $\max_i |\lambda_i| \cdot d \cdot \varepsilon$, the
+   standard rank-truncation threshold (matching
+   `numpy.linalg.matrix_rank`), where $d$ is the matrix
+   dimension and $\varepsilon$ is the dtype's machine epsilon.
+   Eigenvalues below the threshold are set to the threshold itself rather
+   than to zero -- $\log(\mathrm{threshold})$ is finite, whereas
+   $\log(0)$ is $-\infty$ and would contaminate everything
+   downstream.
+2. **No silent NaN filling.**  If the input is genuinely indefinite the
+   operation is mathematically undefined, so the `NaN` is surfaced rather
+   than silently replaced with `0`.
+3. **The differentiability hook is explicit.**  Pass `psi > 0` to
+   recondition the input before the eigendecomposition (perturbing
+   degenerate eigenvalues so the eigendecomposition VJP does not blow up).
+   This is a backward-only concern; for well-conditioned input the forward
+   result is the same either way.
+
+Public surface:
+
+- [`symmap`](nitrix-linalg-spd/symmap.qmd) -- generic eigenvalue-function map.
+- [`symlog`](nitrix-linalg-spd/symlog.qmd), [`symexp`](nitrix-linalg-spd/symexp.qmd), [`symsqrt`](nitrix-linalg-spd/symsqrt.qmd) -- the common cases.
+- [`sympower`](nitrix-linalg-spd/sympower.qmd) -- arbitrary real power of an SPD matrix.
+- [`tangent_project_spd`](nitrix-linalg-spd/tangent_project_spd.qmd) / [`cone_project_spd`](nitrix-linalg-spd/cone_project_spd.qmd) -- log-Euclidean
+  tangent-space projection used in the Riemannian mean / connectivity
+  embedding literature.
+- [`mean_log_euclidean`](nitrix-linalg-spd/mean_log_euclidean.qmd) -- closed-form Fréchet mean under the
+  log-Euclidean metric, $\exp(\operatorname{mean}_i \log X_i)$.
+- [`mean_euclidean`](nitrix-linalg-spd/mean_euclidean.qmd) -- the trivial Euclidean mean, provided for
+  symmetry with the SPD mean family.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `d` | spatial dimension (2 or 3) |
+| `batch` | leading batch axes (variadic) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-linalg-spd-symbols}
+:::

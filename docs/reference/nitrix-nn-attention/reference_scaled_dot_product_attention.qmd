@@ -1,0 +1,69 @@
+---
+title: "reference_scaled_dot_product_attention"
+generated: true
+description: "Reference scaled-dot-product attention (oracle)."
+---
+
+[‹ back to `nitrix.nn.attention`](../nitrix-nn-attention.qmd)
+
+*Re-exported here; defined in `nitrix.nn.attention._reference`.*
+
+<!-- nitrix:gen sig:reference_scaled_dot_product_attention -->
+```python
+reference_scaled_dot_product_attention(q: Float[Array, '... h s d'], k: Float[Array, '... h t d'], v: Float[Array, '... h t d_v'], *, bias: Optional[Float[Array, '... h s t']] = None, mask: Optional[Bool[Array, '... h s t']] = None, scale: Optional[float] = None, causal: bool = False, qk_norm: bool = False) -> Float[Array, '... h s d_v']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:reference_scaled_dot_product_attention -->
+Reference scaled-dot-product attention (oracle).
+
+Computes
+$\operatorname{softmax}(\mathrm{scale} \cdot q\,k^{\top} + b)\,v$
+over the key axis `t`, where the softmax logits are masked (set to
+$-\infty$) at excluded entries before normalisation and the
+additive bias $b$ is optional.  Leading dimensions `...` (batch)
+and the head axis `h` are handled by `einsum` broadcasting, and
+`bias` / `mask` broadcast against `(..., h, s, t)`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:reference_scaled_dot_product_attention -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `q` | `Float` | `...` × `h` × `s` × `d` | — | Query / key / value. `q` and `k` share head dim `d`; `k` and `v` share key length `t`. `s` may differ from `t` (cross-attention). |
+| `k` | `Float` | `...` × `h` × `t` × `d` | — | Query / key / value. `q` and `k` share head dim `d`; `k` and `v` share key length `t`. `s` may differ from `t` (cross-attention). |
+| `v` | `Float` | `...` × `h` × `t` × `d_v` | — | Query / key / value. `q` and `k` share head dim `d`; `k` and `v` share key length `t`. `s` may differ from `t` (cross-attention). |
+| `bias` | `Optional[Float[Array, '... h s t']]` | — | `None` | Optional additive logit bias (e.g. a Swin relative-position table), broadcast to `(..., h, s, t)`. |
+| `mask` | `Optional[Bool[Array, '... h s t']]` | — | `None` | Optional boolean keep-mask (`True` keeps an entry); broadcast to `(..., h, s, t)`. Combined with `causal` by logical-and. |
+| `scale` | `Optional[float]` | — | `None` | Softmax temperature; defaults to `1 / sqrt(d)`. |
+| `causal` | `bool` | — | `False` | If `True`, query `i` attends only to keys `j <= i` (indices aligned at 0 -- the standard self-attention convention). |
+| `qk_norm` | `bool` | — | `False` | If `True`, RMS-normalise `q` and `k` over the head dim before the dot (QK-norm; logit-growth control at depth/scale). |
+
+**Returns** `Float` — shape `...` × `h` × `s` × `d_v`. Attention output of shape `(..., h, s, d_v)` in the common result type of `q`, `k` and `v`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:reference_scaled_dot_product_attention -->
+::: {.callout-note}
+All compute runs in at least float32: a float16 or bfloat16 input is
+upcast to float32 for QK-norm, scores, softmax and value aggregation, and
+cast back at the end, so the oracle is platform-stable (no bfloat16
+tensor-core multiply variance); float64 inputs stay float64.  A fully
+masked query row yields `nan` (a degenerate case; callers should keep at
+least one key per query).
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:reference_scaled_dot_product_attention -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `h` | *(undocumented — add to `_dimensions.yml`)* |
+| `s` | flattened spatial sample positions |
+| `d` | spatial dimension (2 or 3) |
+| `t` | *(undocumented — add to `_dimensions.yml`)* |
+| `d_v` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

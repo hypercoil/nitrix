@@ -4,44 +4,47 @@
 """
 Geometric-parameter affine algebra (batched, differentiable).
 
-The complement to the Lie-group chart in ``transform`` (``rigid_exp`` /
-``affine_exp``): here an affine is parametrised by its **geometric
-factors** -- translation, Euler rotation, anisotropic scale, and shear --
-and composed as ``T @ R @ S @ E``.  This is the parametrisation used when
-those factors are individually meaningful (e.g. reading off the scales of
-a fitted transform, or constraining a fit to be rigid by dropping scale
-and shear), as opposed to the exponential chart, which is the natural one
-for unconstrained gradient-based optimisation.
+The complement to the Lie-group chart in :mod:`nitrix.geometry.transform`
+(:func:`rigid_exp` / :func:`affine_exp`): here an affine is parametrised by
+its geometric factors -- translation, Euler rotation, anisotropic scale,
+and shear -- and composed as :math:`T\\,R\\,S\\,E`.  This is the
+parametrisation used when those factors are individually meaningful (for
+example, reading off the scales of a fitted transform, or constraining a
+fit to be rigid by dropping scale and shear), as opposed to the exponential
+chart, which is the natural one for unconstrained gradient-based
+optimisation.
 
-Also here: ``fit_affine``, the closed-form (weighted) least-squares
+Also here: :func:`fit_affine`, the closed-form (weighted) least-squares
 affine between two corresponding point sets.
 
+Notes
+-----
 Conventions:
 
-- Matrices are ``(..., N, N+1)`` (the implied last row is
-  ``(*[0]*N, 1)``) unless made square; everything is batched over leading
-  dimensions and differentiable.  A transform maps coordinates as
-  ``y = mat[..., :, :-1] @ x + mat[..., :, -1]``.
+- Matrices are :math:`(\\ldots, N, N + 1)` (the implied last row is
+  :math:`(0, \\ldots, 0, 1)`) unless made square; everything is batched over
+  leading dimensions and differentiable.  A transform maps coordinates as
+  :math:`y = \\mathtt{mat}[\\ldots, :, :-1]\\,x + \\mathtt{mat}[\\ldots, :, -1]`.
 - Rotations: 2-D is a single planar angle; 3-D is right-handed
-  **intrinsic** ``R = X @ Y @ Z`` (rotate about x, then y, then z); angles
+  *intrinsic* :math:`R = X\\,Y\\,Z` (rotate about x, then y, then z); angles
   in degrees by default.  The left-to-right axis order reads the same as the
-  matrix product because intrinsic rotations post-multiply: ``X @ Y @ Z`` is
-  equivalently the *extrinsic* sequence z-then-y-then-x (rightmost factor
+  matrix product because intrinsic rotations post-multiply: :math:`X\\,Y\\,Z`
+  is equivalently the *extrinsic* sequence z-then-y-then-x (rightmost factor
   applied first), the same rightmost-applied-first convention as the
-  ``T @ R @ S @ E`` factor composition above. (Intrinsic rotations
-  are about the object axes, which move with the object; extrinsic rotations
-  are about the fixed world axes.)
-- The rotation / parameter chart supports ``ndim`` in ``{2, 3}`` (the
-  Euler convention is dimension-specific, but both are covered);
-  ``params_to_affine_matrix`` takes an explicit ``ndim`` because a
+  :math:`T\\,R\\,S\\,E` factor composition above.  (Intrinsic rotations are
+  about the object axes, which move with the object; extrinsic rotations are
+  about the fixed world axes.)
+- The rotation / parameter chart supports ``ndim`` in ``{2, 3}`` (the Euler
+  convention is dimension-specific, but both are covered);
+  :func:`params_to_affine_matrix` takes an explicit ``ndim`` because a
   6-vector is ambiguous (rigid 3-D vs full 2-D), while
-  ``affine_matrix_to_params`` infers it from the matrix shape.  The shape
-  helpers and ``fit_affine`` are N-D.
+  :func:`affine_matrix_to_params` infers it from the matrix shape.  The
+  shape helpers and :func:`fit_affine` are N-D.
 
-GPU note: the factorisations (``inv`` / ``cholesky`` / ``det``) are routed
-through ``linalg._solver.safe_*`` (or computed analytically for the 3x3 /
-diagonal cases) so they work on the cuSolver-affected GPU stacks, where
-the dense-solver handle pool is broken.
+On GPU, the factorisations (inverse / Cholesky / determinant) are routed
+through the library's safe solver wrappers (or computed analytically for
+the 3x3 / diagonal cases) so they work on the cuSolver-affected GPU stacks,
+where the dense-solver handle pool is broken.
 """
 
 from __future__ import annotations
@@ -69,16 +72,47 @@ __all__ = [
 
 
 def _diag(v: Float[Array, '... n']) -> Float[Array, '... n n']:
-    """Batched ``diag``: ``(..., N)`` -> ``(..., N, N)``."""
+    """Batched diagonal embedding: ``(..., N)`` -> ``(..., N, N)``.
+
+    Places each length-``N`` vector on the main diagonal of an otherwise
+    zero square matrix, broadcasting over the leading batch dimensions.
+
+    Parameters
+    ----------
+    v : Float[Array, '... n']
+        Batched vectors of diagonal entries.
+
+    Returns
+    -------
+    Float[Array, '... n n']
+        Batched diagonal matrices whose main diagonals are the entries of
+        ``v``.
+    """
     return v[..., None] * jnp.eye(v.shape[-1], dtype=v.dtype)
 
 
 def _shear_matrix(
     shear: Float[Array, '... s'], d: int
 ) -> Float[Array, '... d d']:
-    """Unit-diagonal upper-triangular shear matrix from its strict-upper
-    entries (row-major): ``d=2`` -> ``[[1, s0], [0, 1]]``; ``d=3`` ->
+    """Build a unit-diagonal upper-triangular shear matrix.
+
+    The strict-upper entries of the matrix are filled, in row-major order,
+    from ``shear``, leaving ones on the diagonal and zeros below it.  For
+    example, ``d=2`` gives ``[[1, s0], [0, 1]]`` and ``d=3`` gives
     ``[[1, s0, s1], [0, 1, s2], [0, 0, 1]]``.
+
+    Parameters
+    ----------
+    shear : Float[Array, '... s']
+        Batched vectors of the ``d(d-1)/2`` strict-upper-triangular shear
+        entries, in row-major order.
+    d : int
+        Side length of the returned square shear matrix.
+
+    Returns
+    -------
+    Float[Array, '... d d']
+        Batched unit-diagonal upper-triangular shear matrices.
     """
     batch = shear.shape[:-1]
     diag = np.arange(d)
@@ -105,9 +139,23 @@ def _divide_no_nan(
 def make_square_affine(
     mat: Float[Array, '... n np1'],
 ) -> Float[Array, '... np1 np1']:
-    """``(..., N, N+1)`` -> ``(..., N+1, N+1)`` by appending ``(*[0]*N, 1)``.
+    """Promote an affine to homogeneous square form.
 
-    A no-op if ``mat`` is already square.
+    Appends the implied bottom row :math:`(0, \\ldots, 0, 1)` so an
+    ``(..., N, N+1)`` affine becomes an ``(..., N+1, N+1)`` matrix suitable
+    for matrix multiplication and inversion.  A no-op if ``mat`` is already
+    square.
+
+    Parameters
+    ----------
+    mat : Float[Array, '... n np1']
+        Batched affine matrices in ``(..., N, N+1)`` form (or already square
+        ``(..., N+1, N+1)``).
+
+    Returns
+    -------
+    Float[Array, '... np1 np1']
+        Batched square homogeneous matrices ``(..., N+1, N+1)``.
     """
     *batch, rows, cols = mat.shape
     if rows == cols:
@@ -120,7 +168,24 @@ def make_square_affine(
 def invert_affine(
     mat: Float[Array, '... n np1'],
 ) -> Float[Array, '... n np1']:
-    """Multiplicative inverse of an affine ``(..., N, N+1)`` (or square)."""
+    """Multiplicative inverse of an affine transform.
+
+    Promotes the affine to homogeneous square form via
+    :func:`make_square_affine`, inverts it, and drops the implied bottom row
+    back off.  The result maps coordinates in the opposite direction to
+    ``mat``.
+
+    Parameters
+    ----------
+    mat : Float[Array, '... n np1']
+        Batched affine matrices in ``(..., N, N+1)`` form (or already square
+        ``(..., N+1, N+1)``).
+
+    Returns
+    -------
+    Float[Array, '... n np1']
+        Batched inverse affines in ``(..., N, N+1)`` form.
+    """
     rows = mat.shape[-2]
     return safe_inv(make_square_affine(mat))[..., :rows, :]
 
@@ -128,10 +193,28 @@ def invert_affine(
 def compose_affine(
     mats: Sequence[Float[Array, '... n np1']],
 ) -> Float[Array, '... n np1']:
-    """Compose affines left-to-right: ``compose((A, B, C))`` applies C first.
+    """Compose a sequence of affines left-to-right.
 
-    Returns ``A @ B @ C`` (as square matrices), dropping the implied last
-    row back to ``(..., N, N+1)``.
+    Given ``(A, B, C)`` the result is the affine :math:`A\\,B\\,C`, so the
+    last transform in the sequence is applied to coordinates first.  Each
+    affine is promoted to homogeneous square form for the matrix products
+    and the implied bottom row is dropped from the result.
+
+    Parameters
+    ----------
+    mats : Sequence[Float[Array, '... n np1']]
+        Non-empty sequence of batched affine matrices in ``(..., N, N+1)``
+        form (or square). Batch dimensions must broadcast together.
+
+    Returns
+    -------
+    Float[Array, '... n np1']
+        The composed affine in ``(..., N, N+1)`` form.
+
+    Raises
+    ------
+    ValueError
+        If ``mats`` is empty.
     """
     if not mats:
         raise ValueError('compose_affine: empty sequence')
@@ -153,14 +236,34 @@ def fit_affine(
 ) -> Float[Array, '... n np1']:
     """Closed-form (weighted) least-squares affine between point sets.
 
-    Fits ``mat`` ``(..., N, N+1)`` so that ``mat`` maps ``target`` onto
-    ``source``: ``source ≈ mat[..., :, :-1] @ target + mat[..., :, -1]``,
-    minimising the (weighted) squared residual over the ``M``
-    corresponding points of ``source`` / ``target`` ``(..., M, N)``.
+    Fits an affine ``mat`` in ``(..., N, N+1)`` form so that ``mat`` maps
+    ``target`` onto ``source``, i.e.
+    :math:`\\mathtt{source} \\approx \\mathtt{mat}[\\ldots, :, :-1]\\,
+    \\mathtt{target} + \\mathtt{mat}[\\ldots, :, -1]`, minimising the
+    (weighted) squared residual over the ``M`` corresponding points.
 
-    Solves the normal equations ``(Xᵀ W X) β = Xᵀ W y`` (with ``X`` the
-    homogeneous ``target`` and ``y = source``) via an SPD Cholesky solve;
-    ``weights`` is ``(..., M)`` or ``(..., M, 1)``.
+    The fit solves the normal equations
+    :math:`(X^{\\top} W X)\\,\\beta = X^{\\top} W y` (with :math:`X` the
+    homogeneous ``target``, :math:`y` the ``source``, and :math:`W` the
+    diagonal weight matrix) via a symmetric-positive-definite Cholesky
+    solve.
+
+    Parameters
+    ----------
+    source : Float[Array, '... m n']
+        Batched target coordinates of the fit: ``M`` points in ``N``
+        dimensions that the affine should map onto.
+    target : Float[Array, '... m n']
+        Batched source coordinates of the fit: the ``M`` points in ``N``
+        dimensions that are mapped by the affine.
+    weights : Float[Array, '... m'], optional
+        Per-point non-negative weights, ``(..., M)`` or ``(..., M, 1)``.
+        If omitted, all points are weighted equally.
+
+    Returns
+    -------
+    Float[Array, '... n np1']
+        The fitted affine in ``(..., N, N+1)`` form.
     """
     ones = jnp.ones((*target.shape[:-1], 1), dtype=target.dtype)
     x = jnp.concatenate([target, ones], axis=-1)  # (..., M, N+1)
@@ -183,15 +286,34 @@ def fit_affine(
 def angles_to_rotation_matrix(
     ang: Float[Array, '... a'], *, deg: bool = True
 ) -> Float[Array, '... d d']:
-    """Euler angles -> rotation matrix (2-D or 3-D).
+    """Convert Euler angles to a rotation matrix (2-D or 3-D).
 
-    2-D: a single angle ``(..., 1)`` -> ``(..., 2, 2)`` planar rotation.
-    3-D: three angles ``(..., 3)`` -> ``(..., 3, 3)``, right-handed
-    intrinsic ``R = X @ Y @ Z`` (rotate about object's x, then y, then z;
-    the axis order reads with the matrix product because intrinsic rotations
-    post-multiply -- equivalently the extrinsic sequence z-then-y-then-x,
-    rightmost factor applied first).  Angles in degrees by default
-    (``deg=False`` for radians).
+    In 2-D a single angle ``(..., 1)`` yields a ``(..., 2, 2)`` planar
+    rotation.  In 3-D three angles ``(..., 3)`` yield a ``(..., 3, 3)``
+    right-handed intrinsic rotation :math:`R = X\\,Y\\,Z` (rotate about the
+    object's x, then y, then z; the axis order reads with the matrix product
+    because intrinsic rotations post-multiply -- equivalently the extrinsic
+    sequence z-then-y-then-x, rightmost factor applied first).
+
+    Parameters
+    ----------
+    ang : Float[Array, '... a']
+        Batched Euler angles, with a trailing axis of length 1 (2-D) or 3
+        (3-D).
+    deg : bool, optional
+        If ``True`` (the default), ``ang`` is interpreted in degrees; if
+        ``False``, in radians.
+
+    Returns
+    -------
+    Float[Array, '... d d']
+        Batched rotation matrices, ``(..., 2, 2)`` in 2-D or ``(..., 3, 3)``
+        in 3-D.
+
+    Raises
+    ------
+    ValueError
+        If the trailing axis of ``ang`` is neither 1 nor 3.
     """
     ang = jnp.asarray(ang)
     n_ang = ang.shape[-1]
@@ -232,13 +354,30 @@ def angles_to_rotation_matrix(
 def rotation_matrix_to_angles(
     mat: Float[Array, '... d d'], *, deg: bool = True
 ) -> Float[Array, '... a']:
-    """Rotation matrix -> Euler angles (2-D or 3-D).
+    """Recover Euler angles from a rotation matrix (2-D or 3-D).
 
-    Inverse of :func:`angles_to_rotation_matrix`.  2-D: a ``(..., 2, 2)``
-    rotation -> a single angle ``(..., 1)`` via ``atan2``.  3-D: a
-    ``(..., 3, 3[+])`` rotation -> three angles ``(..., 3)`` (``R = X @ Y @
-    Z``), with the gimbal-lock convention ``ang[0] = 0`` when
-    ``|ang[1]| = 90 deg``.
+    Inverse of :func:`angles_to_rotation_matrix`.  In 2-D a ``(..., 2, 2)``
+    rotation yields a single angle ``(..., 1)`` via ``atan2``.  In 3-D a
+    ``(..., 3, 3)`` rotation (the upper-left block is used, so square affine
+    forms are also accepted) yields three angles ``(..., 3)`` for the
+    :math:`R = X\\,Y\\,Z` convention, with the gimbal-lock convention that
+    the first angle is set to zero when the middle angle has magnitude
+    :math:`90^{\\circ}`.
+
+    Parameters
+    ----------
+    mat : Float[Array, '... d d']
+        Batched rotation matrices, ``(..., 2, 2)`` in 2-D or ``(..., 3, 3)``
+        (or larger, with the leading ``3x3`` block used) in 3-D.
+    deg : bool, optional
+        If ``True`` (the default), the returned angles are in degrees; if
+        ``False``, in radians.
+
+    Returns
+    -------
+    Float[Array, '... a']
+        Batched Euler angles, with a trailing axis of length 1 (2-D) or 3
+        (3-D).
     """
     d = mat.shape[-2]
     if d == 2:
@@ -280,19 +419,44 @@ def params_to_affine_matrix(
     deg: bool = True,
     shift_scale: bool = False,
 ) -> Float[Array, '... d d1']:
-    """Geometric affine params ``(..., M)`` -> matrix ``(..., ndim, ndim+1)``.
+    """Build an affine matrix from geometric parameters.
 
-    Param order along the last axis: translation (``ndim``), rotation
-    (``ndim(ndim-1)/2``: 1 in 2-D, 3 in 3-D), scale (``ndim``), shear
-    (``ndim(ndim-1)/2``).  Missing trailing params default to identity
-    (scale -> 1, others -> 0), so a translation+rotation prefix gives a
-    rigid transform.  Builds ``T @ R @ S @ E``.  With ``shift_scale=True``,
-    1 is added to the scale params (so a zero vector is the identity --
-    useful when the params are a network-predicted perturbation).
+    Assembles the affine :math:`T\\,R\\,S\\,E` (translation, rotation,
+    anisotropic scale, shear) from a flat parameter vector and returns it in
+    ``(..., ndim, ndim+1)`` form.  Missing trailing parameters default to
+    the identity factor (scale to 1, everything else to 0), so a
+    translation-plus-rotation prefix yields a rigid transform.
 
-    ``ndim`` is 2 or 3.  The full vector length is ``ndim(ndim+1)`` (6 in
-    2-D, 12 in 3-D); an explicit ``ndim`` is required because a 6-vector is
-    ambiguous (rigid 3-D vs full 2-D).
+    Parameters
+    ----------
+    par : Float[Array, '... p']
+        Batched parameter vectors.  The trailing axis is laid out as
+        translation (``ndim`` entries), rotation (``ndim(ndim-1)/2``: 1 in
+        2-D, 3 in 3-D), scale (``ndim``), and shear (``ndim(ndim-1)/2``).
+        Its length may be anything from 0 up to the full
+        ``ndim(ndim+1)``; shorter vectors are padded with identity defaults.
+    ndim : int, optional
+        Spatial dimensionality, 2 or 3 (default 3).  An explicit value is
+        required because, for example, a 6-vector is ambiguous between a
+        rigid 3-D transform and a full 2-D transform.
+    deg : bool, optional
+        If ``True`` (the default), the rotation parameters are interpreted
+        in degrees; if ``False``, in radians.
+    shift_scale : bool, optional
+        If ``True``, 1 is added to the scale parameters, so an all-zero
+        vector maps to the identity.  This is convenient when the parameters
+        are a network-predicted perturbation.  Defaults to ``False``.
+
+    Returns
+    -------
+    Float[Array, '... d d1']
+        Batched affine matrices in ``(..., ndim, ndim+1)`` form.
+
+    Raises
+    ------
+    ValueError
+        If ``ndim`` is not 2 or 3, or if ``par`` has more than
+        ``ndim(ndim+1)`` trailing entries.
     """
     if ndim not in (2, 3):
         raise ValueError(f'ndim must be 2 or 3; got {ndim}.')
@@ -327,16 +491,32 @@ def params_to_affine_matrix(
 def affine_matrix_to_params(
     mat: Float[Array, '... d d1'], *, deg: bool = True
 ) -> Float[Array, '... p']:
-    """Affine matrix ``(..., ndim, ndim+1[+1])`` -> params ``(..., M)``.
+    """Recover geometric parameters from an affine matrix.
 
-    Inverse of :func:`params_to_affine_matrix` (``ndim`` inferred as
-    ``mat.shape[-1] - 1``, so both the ``(d, d+1)`` and square
-    ``(d+1, d+1)`` forms work): returns translation (``ndim``), rotation
-    (``ndim(ndim-1)/2``), scale (``ndim``), shear (``ndim(ndim-1)/2``).
-    The linear block is factored ``R @ S @ E`` via the Cholesky of
-    ``mᵀ m`` (an RQ-style decomposition); the scale sign is fixed up with
-    the determinant so a negative-determinant (reflection) matrix is
-    representable.
+    Inverse of :func:`params_to_affine_matrix`.  The linear block is
+    factored into rotation, scale, and shear via the Cholesky of
+    :math:`m^{\\top} m` (an RQ-style decomposition); the scale sign is fixed
+    up with the determinant so a negative-determinant (reflection) matrix is
+    representable.  The dimensionality is inferred as ``mat.shape[-1] - 1``,
+    so both the ``(..., d, d+1)`` and square ``(..., d+1, d+1)`` forms are
+    accepted.
+
+    Parameters
+    ----------
+    mat : Float[Array, '... d d1']
+        Batched affine matrices in ``(..., ndim, ndim+1)`` form (or square
+        ``(..., ndim+1, ndim+1)``).
+    deg : bool, optional
+        If ``True`` (the default), the returned rotation parameters are in
+        degrees; if ``False``, in radians.
+
+    Returns
+    -------
+    Float[Array, '... p']
+        Batched parameter vectors laid out as translation (``ndim``),
+        rotation (``ndim(ndim-1)/2``), scale (``ndim``), and shear
+        (``ndim(ndim-1)/2``), matching the convention of
+        :func:`params_to_affine_matrix`.
     """
     d = mat.shape[-1] - 1
     rot_count = d * (d - 1) // 2

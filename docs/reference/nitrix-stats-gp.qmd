@@ -1,0 +1,127 @@
+---
+title: "nitrix.stats.gp"
+generated: true
+signature-hash: 697769ddc887cf4e
+description: "Mass-univariate Gaussian-process regression with lengthscale estimation."
+listing:
+  id: nitrix-stats-gp-symbols
+  contents: "nitrix-stats-gp/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.stats.gp`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Mass-univariate Gaussian-process regression with lengthscale estimation.
+
+[`gp_fit`](nitrix-stats-gp/gp_fit.qmd) fits, per element (voxel / vertex / fixel), a Gaussian-process
+smooth of a single covariate `x` with its kernel lengthscale $\rho$
+estimated by REML -- the piece the fixed-$\rho$
+[`hsgp_basis`](nitrix-stats-basis/hsgp_basis.qmd) (which rides [`gam_fit`](nitrix-stats-gam/gam_fit.qmd)
+unchanged) leaves open:
+
+$$
+y_v = T \alpha_v + f_v(x) + e_v, \quad
+f_v \sim \mathcal{GP}(0, \sigma_f^2 K_\rho), \quad
+e_v \sim \mathcal{N}(0, \sigma_e^2).
+$$
+
+The engine is the Hilbert-space approximation (HSGP; Solin & Sarkka 2020,
+Riutort-Mayol et al. 2023): $f$ is expanded in a fixed Laplace-Dirichlet
+eigenbasis $\Phi = [\phi_j(x)]$ on the bounded domain $[c - L, c + L]$,
+and the kernel enters only through the spectral-density weights
+$s_j(\rho) = S_\rho(\sqrt{\lambda_j})$
+(`spectral_density`).  This is what makes lengthscale
+estimation tractable: because $\Phi$ does not depend on $\rho$, the GP
+is a penalised regression with a fixed design and a diagonal, $\rho$-dependent
+penalty $S(\rho) = \operatorname{diag}(1 / s_j(\rho))$ -- the REML criterion
+is smooth in $\rho$ with no eigendecomposition in the loop (contrast the
+kriging [`gp_basis`](nitrix-stats-basis/gp_basis.qmd), whose eigenbasis moves with
+$\rho$).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### Two profiled parameters, one shared search
+
+For a candidate $\rho$ the model is a Gaussian penalised regression with the
+single smoothing parameter $\lambda = \sigma_e^2 / \sigma_f^2$ (the GAM
+identity: the Fellner-Schall smoothing parameter *is* the inverse GP amplitude).
+So:
+
+- **Inner** (fixed $\rho$): the generalized Fellner-Schall step (Wood &
+  Fasiolo 2017) selects $\lambda$ -- exactly the
+  [`gam_fit`](nitrix-stats-gam/gam_fit.qmd) machinery, here with one diagonal penalty
+  $\operatorname{diag}(1 / s(\rho))$ on the smooth block.
+- **Outer** (select $\rho$): a 1-D search over $\log \rho$ of the
+  pooled REML marginal likelihood $\sum_v V_r(\rho, \lambda_v)$, on a fixed
+  log-spaced grid with a parabolic refinement.  $\rho$ is shared across
+  elements (one eigenbasis, one smoothness), while the amplitude
+  $\sigma_f^2$ and noise $\sigma_e^2$ are per element -- the natural
+  mass-univariate factoring.
+
+Every solve is cuSOLVER-free and `jit` / `vmap` clean; the only `N`-sized
+objects are the one-off cross-products $X^{\top} Y$ and
+$\operatorname{diag}(Y Y^{\top})$, so peak memory is
+$O(V (m + q)^2)$ -- no per-element `(N, N)` GP covariance is ever
+materialised.
+
+### Reml criterion
+
+With the scale $\sigma_e^2$ profiled out, the per-element restricted
+negative log-likelihood (up to an additive constant in $n$ and $M_0$
+only -- the same for every $\rho$ and every competing GP model on a given
+$y$) is
+
+$$
+-2 l_R = (n - M_0) \log(D_p) + \log|H| - \log|S_\lambda|_+,
+$$
+
+with $H = X^{\top} X + S_\lambda$ the penalised Hessian,
+$D_p = y^{\top} y - \beta^{\top} X^{\top} y$ the penalised residual sum of
+squares, $S_\lambda = \lambda \operatorname{diag}(0, 1/s(\rho))$,
+$\log|S_\lambda|_+ = m \log \lambda - \sum_j \log s_j(\rho)$ its
+log-pseudo-determinant, and $M_0$ the number of unpenalised (fixed-effect)
+columns.  `GPResult.log_mlik` reports $l_R$ (so larger is better; the
+dropped constant cancels in any model comparison on the same data).
+
+### References
+
+- Solin, A. & Sarkka, S. (2020). Hilbert space methods for reduced-rank Gaussian
+  process regression.  Statistics and Computing 30, 419-446.
+  `10.1007/s11222-019-09886-w`
+- Riutort-Mayol, G., Burkner, P.-C., Andersen, M. R., Solin, A. & Vehtari, A.
+  (2023). Practical Hilbert space approximate Bayesian Gaussian processes for
+  probabilistic programming.  Statistics and Computing 33, 17.
+  `10.1007/s11222-022-10167-2`
+- Wood, S. N. & Fasiolo, M. (2017). A generalized Fellner-Schall method for
+  smoothing parameter optimization.  Biometrics 73, 1071-1081.
+  `10.1111/biom.12666`
+- Wood, S. N. (2011). Fast stable restricted maximum likelihood and marginal
+  likelihood estimation of semiparametric generalized linear models.  Journal of
+  the Royal Statistical Society, Series B 73, 3-36.
+  `10.1111/j.1467-9868.2010.00749.x`
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `3` | *(undocumented — add to `_dimensions.yml`)* |
+| `N` | observations — time points, subjects, or sampled points |
+| `g` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-stats-gp-symbols}
+:::

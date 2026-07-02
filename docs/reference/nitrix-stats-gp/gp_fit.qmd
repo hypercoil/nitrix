@@ -1,0 +1,71 @@
+---
+title: "gp_fit"
+generated: true
+description: "Fit a mass-univariate Gaussian-process regression with REML-estimated lengthscale."
+---
+
+[‹ back to `nitrix.stats.gp`](../nitrix-stats-gp.qmd)
+
+<!-- nitrix:gen sig:gp_fit -->
+```python
+gp_fit(Y: Float[Array, 'V N'], x: Union[Float[Array, ' N'], Float[Array, 'N D']], *, parametric: Optional[Float[Array, 'N q']] = None, kernel: str = 'matern52', rank: Optional[Any] = None, boundary: float = 1.5, bounds: Optional[Tuple[float, float]] = None, engine: Literal['hsgp', 'exact'] = 'hsgp', select: Literal['shared-rho'] = 'shared-rho', ard: bool = False, rho_bounds: Optional[Tuple[float, float]] = None, n_rho: int = 24, map_rho: Optional[Callable[[Float[Array, '']], Float[Array, '']]] = None, corr: Optional[Any] = None, group: Optional[Any] = None, time: Optional[Float[Array, ' N']] = None, n_corr: int = 9, corr_raw_bounds: Tuple[float, float] = (-4.0, 4.0), family: Union[str, Family] = 'gaussian', prior_weights: Optional[Float[Array, ' N']] = None, n_pql: int = 8, n_outer: int = 30, n_search: int = 15, ridge: float = 1e-08, lam_floor: float = 1e-06, lam_ceil: float = 100000000.0, block: Optional[int] = None) -> GPResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:gp_fit -->
+Fit a mass-univariate Gaussian-process regression with REML-estimated
+lengthscale.
+
+Fits, independently per element (voxel / vertex / fixel), a Gaussian-process
+smooth of the covariate `x` whose kernel lengthscale $\rho$ is
+estimated by (profiled, pooled) REML rather than fixed in advance.  A single
+$\rho$ is shared across elements; the amplitude and noise are per
+element.  For a non-Gaussian `family` the lengthscale is estimated by
+PQL-REML.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:gp_fit -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `Y` | `Float` | `V` × `N` | — | `(V, N)` responses (one row per element). |
+| `x` | `Union[Float[Array, ' N'], Float[Array, 'N D']]` | — | — | `(N,)` covariate, or `(N, D)` for a **multi-dimensional** GP (a spatial smooth / smooth interaction; HSGP tensor-product engine). This is a single covariate the GP smooths *over* -- **not** the full design matrix `X` of [`glm_fit`](../nitrix-stats-glm/glm_fit.qmd) / [`gam_fit`](../nitrix-stats-gam/gam_fit.qmd); linear covariates go to `parametric=`. |
+| `parametric` | `Optional[Float[Array, 'N q']]` | — | `None` | Optional `(N, q)` unpenalised linear design (covariates entering linearly alongside the intercept). |
+| `kernel` | `str` | — | `'matern52'` | Stationary kernel: `'matern52'` (default) / `'matern32'` / `'matern12'` / `'rbf'`. |
+| `rank` | `Optional[Any]` | — | `None` | Smooth-basis rank `m`. `None` (default) uses an engine-appropriate value: `20` for 1-D `'hsgp'` (small `rho` needs a larger `rank`), `N` for `'exact'` (full-rank), and `8` **per axis** for a multi-dimensional fit. An explicit `rank < N` with `engine='exact'` gives the eigen-truncated Karhunen-Loeve / Nystrom approximation; for multi-D, `rank` may be a per-axis sequence $[m_1, \ldots, m_D]$. |
+| `boundary` | `float` | — | `1.5` | Domain-extension factor `L / half-range` (`>= 1`; default `1.5`; `'hsgp'` only). |
+| `bounds` | `Optional[Tuple[float, float]]` | — | `None` | `(lo, hi)` data-range override (defaults to the data min/max). |
+| `engine` | `Literal['hsgp', 'exact']` | — | `'hsgp'` | Reduced-rank engine. `'hsgp'` (default; Hilbert-space eigenfunctions, a fixed design with an eigendecomposition-free $\rho$-dependent diagonal penalty) or `'exact'` (kernel eigenfeatures $U \Lambda^{1/2}$ -- the full-rank GP when `rank == N`; a one-off host `eigh` of the shared kernel Gram per $\rho$, cuSOLVER-free, equivalent to a variance-component REML fit by the penalty-to-variance-component identity). |
+| `select` | `Literal['shared-rho']` | — | `'shared-rho'` | Lengthscale-selection mode. `'shared-rho'` (the only mode, and the default) shares a single `rho` across all elements with per-element amplitude and noise -- the mass-univariate design that keeps the final fit `N`-free. The parameter is a forward-compatibility hook for a future per-element `rho`. |
+| `ard` | `bool` | — | `False` | Multi-D only: `False` (default) estimates one **isotropic** lengthscale (a radial kernel of `\|\|x - x'\|\|`); `True` estimates a **per-axis** lengthscale (ARD / separable kernel) by coordinate descent over the axes. |
+| `rho_bounds` | `Optional[Tuple[float, float]]` | — | `None` | `(rho_lo, rho_hi)` search range. Defaults to `(0.05, 2.0) * (hi - lo)`. |
+| `n_rho` | `int` | — | `24` | Number of log-spaced grid points for the `rho` search. |
+| `map_rho` | `Optional[Callable[[Float[Array, '']], Float[Array, '']]]` | — | `None` | Optional callable $\rho \mapsto -\log p(\rho)$ adding a lengthscale prior to the pooled objective (a MAP / prior-regularised $\rho$); `None` is pure REML. Use a builder from [`nitrix.stats.priors`](../nitrix-stats-priors.qmd) ([`halfnormal_prior`](../nitrix-stats-priors/halfnormal_prior.qmd) / [`invgamma_prior`](../nitrix-stats-priors/invgamma_prior.qmd) / [`lognormal_prior`](../nitrix-stats-priors/lognormal_prior.qmd)) or any pure-JAX callable. |
+| `corr` | `Optional[Any]` | — | `None` | Within-group residual-correlation structure: `'ar1'` (discrete AR(1)), `'car1'` (continuous-time AR(1); pass `time`), `'cs'` (compound symmetry), or a `lme.CorrSpec`. `None` (default) is the i.i.d. residual. When set, `group` is required; the residual is $\sigma_e^2 R(\rho_c)$ block-diagonal across `group`, with $\rho_c$ estimated jointly with the lengthscale. |
+| `group` | `Optional[Any]` | — | `None` | `(N,)` integer grouping factor for `corr` (the residual is correlated *within* groups, independent across them). Required when `corr` is set. |
+| `time` | `Optional[Float[Array, ' N']]` | — | `None` | `(N,)` observation times for `corr='car1'` (and to order `ar1` when rows are not in within-group time order). |
+| `n_corr` | `int` | — | `9` | Number of grid points for the residual-correlation parameter search. |
+| `corr_raw_bounds` | `Tuple[float, float]` | — | `(-4.0, 4.0)` | `(lo, hi)` range of the structure's *unconstrained* grid parameter. `ar1` maps it by `tanh` -- the default `(-4, 4)` spans $\rho_c \in (-0.999, 0.999)$. `car1` / `cs` map it by `sigmoid`, a **one-sided** window $\rho_c \in (0.018, 0.982)$ (`cs` is positive by construction, the common exchangeable regime; `car1` is a positive decay). The raw grid is not parabolically refined, so widen the bounds / raise `n_corr` for a finer estimate; an estimate at the grid edge warns. |
+| `family` | `Union[str, Family]` | — | `'gaussian'` | Response family: `'gaussian'` (default; exact REML), or `'binomial'` / `'poisson'` for a non-Gaussian GP whose lengthscale is estimated by PQL-REML (`engine='hsgp'`, 1-D, no `corr=`, only). Accepts a family name or a resolved [`Family`](../nitrix-stats-glm/Family.qmd). |
+| `prior_weights` | `Optional[Float[Array, ' N']]` | — | `None` | Optional `(N,)` per-observation prior weights for a non-Gaussian family (the IRLS `a_i` weights; e.g. binomial trial counts). Ignored for the Gaussian family. |
+| `n_pql` | `int` | — | `8` | Number of PQL outer relinearisation iterations for a non-Gaussian family (ignored for the Gaussian family). |
+| `n_outer` | `int` | — | `30` | Fellner-Schall iterations for the final fit and for each $\rho$-search evaluation, respectively. |
+| `n_search` | `int` | — | `15` | Fellner-Schall iterations for the final fit and for each $\rho$-search evaluation, respectively. |
+| `ridge` | `float` | — | `1e-08` | Small stabiliser on the penalised normal equations. |
+| `lam_floor` | `float` | — | `1e-06` | Clamp on the smoothing parameter $\lambda = \sigma_e^2 / \sigma_f^2$. |
+| `lam_ceil` | `float` | — | `100000000.0` | Clamp on the smoothing parameter $\lambda = \sigma_e^2 / \sigma_f^2$. |
+| `block` | `Optional[int]` | — | `None` | Optional element-block size bounding peak memory on brain-scale `V`. |
+
+**Returns** `GPResult`. The per-element fit: coefficients, Bayesian covariance, per-element hyperparameters $[\log \sigma_f^2, \log \sigma_e^2, \log \rho]$, the REML log marginal likelihood, the effective degrees of freedom and the dispersion (see [`GPResult`](../nitrix-stats-gp/GPResult.qmd)).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:gp_fit -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `N` | observations — time points, subjects, or sampled points |
+<!-- nitrix:/gen -->

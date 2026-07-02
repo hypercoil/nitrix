@@ -1,0 +1,34 @@
+---
+title: "fold_axis"
+generated: true
+description: "Fold the specified axis into the specified number of folds."
+---
+
+[‹ back to `nitrix.numerics.tensor_ops`](../nitrix-numerics-tensor_ops.qmd)
+
+*Re-exported here; defined in `nitrix._internal.util`.*
+
+*decorated:* `@partial(jax.jit, static_argnames=('axis', 'n_folds'))`
+
+<!-- nitrix:gen sig:fold_axis -->
+```python
+fold_axis(tensor: Shaped[Array, ...], axis: int, n_folds: int) -> Shaped[Array, ...]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:fold_axis -->
+Fold the specified axis into the specified number of folds.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:fold_axis -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `tensor` | `Shaped[Array, ...]` | — | — | — |
+| `axis` | `int` | — | — | — |
+| `n_folds` | `int` | — | — | — |
+
+**Returns** `Shaped[Array, ...]`.
+<!-- nitrix:/gen -->
+

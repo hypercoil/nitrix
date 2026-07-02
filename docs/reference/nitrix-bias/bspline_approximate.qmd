@@ -1,0 +1,72 @@
+---
+title: "bspline_approximate"
+generated: true
+description: "Smooth, separable cubic B-spline approximation of regular-grid data."
+---
+
+[‹ back to `nitrix.bias`](../nitrix-bias.qmd)
+
+*Re-exported here; defined in `nitrix.bias._bspline`.*
+
+<!-- nitrix:gen sig:bspline_approximate -->
+```python
+bspline_approximate(values: Float[Array, '... *spatial'], *, control_points: Union[int, Sequence[int]], weight: Optional[Float[Array, '... *spatial']] = None, spline_order: int = 3, method: FitMethod = 'mba', ridge: float = 0.0001, penalty: float = 1.0, penalty_order: int = 2, spatial_rank: Optional[int] = None, eps: float = 1e-08) -> Float[Array, '... *spatial']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:bspline_approximate -->
+Smooth, separable cubic B-spline approximation of regular-grid data.
+
+Fits a uniform tensor-product B-spline control lattice to `values` and
+reconstructs the smooth field at every voxel.  This is the field-
+smoothing primitive N4 uses to regularise its per-iteration bias-field
+residual, but it stands alone as a fast, differentiable scattered-data
+smoother (registration fields, surface fitting, any "approximate this
+noisy grid with a smooth low-DOF surface" task).
+
+Both the fit and the reconstruction are separable -- a sequence of small
+dense per-axis matrix contractions (no gather / scatter) -- so every
+method is pure JAX, XLA-friendly, and differentiable.  The number of
+control points sets the model resolution (fewer -> smoother).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:bspline_approximate -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `values` | `Float` | `...` × `*spatial` | — | Data to approximate, `(..., *spatial)`. Leading dims are batch. |
+| `control_points` | `Union[int, Sequence[int]]` | — | — | Number of B-spline control points per spatial axis (ITK's `NumberOfControlPoints`). `int` -- same count on every axis; sequence -- per-axis. Must be at least `spline_order + 1`. |
+| `weight` | `Optional[Float[Array, '... *spatial']]` | — | `None` | Optional per-voxel confidence in `[0, 1]` (e.g. a brain mask), same broadcastable shape as `values`. `None` (default) treats every voxel as a unit-confidence data point. Zero-weight voxels do not influence the fit. |
+| `spline_order` | `int` | — | `3` | B-spline order. Default `3` (cubic; the N4 / ANTs default). |
+| `method` | `FitMethod` | — | `'mba'` | Fitting estimator: - `'mba'` (default) -- Lee--Wolberg--Shin multilevel B-spline approximation, the $w^2$-weighted scatter ITK / ANTs N4 uses. Biased on dense data at a single level (the bias is removed by *iterated* refitting on a doubling grid); the **parity** path. - `'least_squares'` -- weighted least-squares fit ($\min \lVert R\phi - z \rVert_W^2$); reproduces smooth fields exactly, no MBA bias, converges in fewer levels. Uses `ridge`. - `'psplines'` -- penalised least-squares (Eilers--Marx P-splines): adds a difference penalty $\lambda \lVert D\phi \rVert^2$ for a single smooth fit on a *fine* control grid without the multi-resolution hierarchy. Uses `penalty` + `penalty_order` (and `ridge`). |
+| `ridge` | `float` | — | `0.0001` | Tikhonov regularisation for the LS / P-spline normal equations, relative to the mean Gram diagonal. Default `1e-4` -- near-exact, appropriate for *clean* data; it also stabilises control points poorly supported by the mask. For **noisy** data, `ridge` is the denoising strength (the bias-variance knob): increase it (e.g. `1e-1`) to trade exactness for noise rejection. This is why the [`bias_field_correction`](../nitrix-bias-correction/bias_field_correction.qmd) loop defaults `ridge` higher. Ignored by `'mba'`. |
+| `penalty` | `float` | — | `1.0` | P-spline roughness penalty weight (relative to the mean Gram diagonal); larger -> smoother. Only used by `'psplines'`. |
+| `penalty_order` | `int` | — | `2` | Order of the difference penalty for `'psplines'` (default `2`, penalising curvature). |
+| `spatial_rank` | `Optional[int]` | — | `None` | Number of trailing dims treated as spatial. `None` infers it from `control_points` (if a sequence) or assumes all dims are spatial. |
+| `eps` | `float` | — | `1e-08` | Stabiliser for the MBA fit's near-empty control points. |
+
+**Returns** `Float` — shape `...` × `*spatial`. The smooth B-spline field sampled on the voxel grid, same shape as `values`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:bspline_approximate -->
+::: {.callout-note}
+On a regular grid the B-spline weights factorise across axes, so the
+scattered-data fit collapses to per-axis banded matrices $R_d$
+of shape `(n_vox_d, n_control_d)`.  `'mba'` applies the adjoint
+with the Lee--Wolberg--Shin $w^2$ weighting; `'least_squares'`
+/ `'psplines'` solve the normal equations
+$(R^{\top} W R + P)\,\phi = R^{\top} W z$ with the Gram
+assembled without materialising $R$.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:bspline_approximate -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

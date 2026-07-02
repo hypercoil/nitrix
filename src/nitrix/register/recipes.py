@@ -4,17 +4,21 @@
 """
 Pairwise rigid / affine registration recipes.
 
-Pure functions ``(moving, fixed) -> RegistrationResult`` -- the ``reml_fit``
-precedent (a ``NamedTuple`` of arrays, no PyTree module, no atlas / I/O).
-They compose the R0/R1 substrate (pyramid + metric + transform
-parametrisation + matrix-free optimiser); the orchestration lives here so
-``entense`` can wrap it (or re-implement) without re-deriving it.
+Pure functions ``(moving, fixed) -> RegistrationResult``, following the same
+convention as :func:`nitrix.stats.reml_fit` (a :class:`~typing.NamedTuple` of
+arrays, no PyTree module, no atlas or file I/O).  They compose the shared
+registration substrate -- the resolution pyramid, the similarity metric, the
+transform parametrisation, and the matrix-free optimiser -- with the
+orchestration living here so that ``entense`` can wrap it (or re-implement it)
+without re-deriving it.
 
 The representative algorithm is intensity-based Gauss-Newton /
-Levenberg-Marquardt on SE(3)/affine (the ``3dvolreg`` / AIR lineage):
-coarse-to-fine, second-order, differentiable.  The metric (SSD by
-default; LNCC / MI / CR for intensity-robust or cross-modal cases) and
-the schedule are set on the ``RegistrationSpec``.
+Levenberg-Marquardt on the rigid / affine Lie groups (the ``3dvolreg`` / AIR
+lineage): coarse-to-fine, second-order, and differentiable.  The similarity
+metric (:class:`~nitrix.register.SSD` by default;
+:class:`~nitrix.register.LNCC` / :class:`~nitrix.register.MI` /
+:class:`~nitrix.register.CorrelationRatio` for intensity-robust or cross-modal
+cases) and the schedule are set on the :class:`~nitrix.register.RegistrationSpec`.
 """
 
 from __future__ import annotations
@@ -59,7 +63,25 @@ from ._syn import SyNResult, SyNSpec, greedy_syn_register
 
 
 def _image_moments(img: Array, ndim: int) -> tuple[Array, Array]:
-    """Intensity-weighted centroid and per-axis std (voxel coordinates)."""
+    """Intensity-weighted centroid and per-axis standard deviation.
+
+    Treats the image as a non-negative density (negative intensities are
+    clipped to zero) and computes the first two moments in voxel coordinates.
+
+    Parameters
+    ----------
+    img
+        Single-channel image, shape ``(*spatial,)`` with ``ndim`` spatial axes.
+    ndim
+        Number of spatial dimensions (2 or 3).
+
+    Returns
+    -------
+    centroid : Array
+        Intensity-weighted centroid, shape ``(ndim,)``, in voxel coordinates.
+    std : Array
+        Per-axis intensity-weighted standard deviation, shape ``(ndim,)``.
+    """
     grid = identity_grid(img.shape, dtype=img.dtype)  # (*spatial, ndim)
     w = jnp.clip(img, 0.0, None)  # non-negative weights (image as a density)
     total = jnp.sum(w) + 1e-12
@@ -72,15 +94,34 @@ def _image_moments(img: Array, ndim: int) -> tuple[Array, Array]:
 def _moment_init_matrix(
     moving: Array, fixed: Array, *, ndim: int, scale: bool
 ) -> Array:
-    """Centre-of-mass / moment initialisation (A8), an index-space affine.
+    """Centre-of-mass / moment initialisation, an index-space affine.
 
-    Aligns the intensity-weighted centroids (translation) and -- for ``scale``
-    (affine) -- the per-axis spread (a **diagonal** scale, no rotation: a
-    moment match cannot fix the principal-axis sign, so a rotation init risks a
-    *worse* start).  In the ``affine_grid`` centring convention (sample voxel
-    ``i`` at ``M(i − c) + t + c``): ``M = diag(std_m / std_f)`` (or ``I``), and
-    ``t`` maps the fixed centroid onto the moving centroid.  The cheap robust
-    start when a single zero init sits outside the narrow affine basin.
+    Aligns the intensity-weighted centroids (translation) and -- when ``scale``
+    is set (the affine case) -- the per-axis spread (a **diagonal** scale, with
+    no rotation: a moment match cannot fix the principal-axis sign, so a rotation
+    init risks a *worse* start).  In the :func:`~nitrix.geometry.affine_grid`
+    centring convention (sample voxel :math:`i` at :math:`M(i - c) + t + c`),
+    :math:`M = \\operatorname{diag}(\\sigma_m / \\sigma_f)` (or the identity),
+    and :math:`t` maps the fixed centroid onto the moving centroid.  This is the
+    cheap robust start for when a single zero init sits outside the narrow affine
+    basin.
+
+    Parameters
+    ----------
+    moving, fixed
+        Single-channel images, each with ``ndim`` spatial axes.
+    ndim
+        Number of spatial dimensions (2 or 3).
+    scale
+        If True, include the diagonal per-axis scale block (the affine case);
+        if False, the linear block is the identity (the rigid / translation-only
+        case).
+
+    Returns
+    -------
+    Array
+        Homogeneous ``(ndim + 1, ndim + 1)`` index-space affine matrix mapping
+        the fixed grid onto the moving grid.
     """
     dtype = moving.dtype
     c = (jnp.asarray(fixed.shape, dtype=dtype) - 1.0) / 2.0
@@ -106,13 +147,38 @@ def _resolve_init_matrix(
     space: CoordinateSpace,
     spec: RegistrationSpec,
 ) -> Optional[Array]:
-    """Resolve the ``init`` argument to a **coarsest-level** init matrix (or None).
+    """Resolve the ``init`` argument to a coarsest-level init matrix (or None).
 
     The driver starts the coarse-to-fine loop at the coarsest level and upscales
     the translation column to each finer grid, so the init's translation must be
     expressed at the coarsest scale -- the full-resolution moment translation
     divided by the pyramid's coarse-to-fine factor.  The linear (scale) block is
     resolution-independent and passes through unchanged.
+
+    Parameters
+    ----------
+    init
+        Either ``'identity'`` (no init; returns None) or ``'moment'`` (a
+        centre-of-mass start).  Any other value raises.
+    moving, fixed
+        Single-channel images, each with ``ndim`` spatial axes.
+    ndim
+        Number of spatial dimensions (2 or 3).
+    scale
+        Whether the moment init includes the diagonal per-axis scale block
+        (affine) or only the translation (rigid).
+    space
+        Coordinate space; ``'moment'`` init is defined for
+        :class:`~nitrix.register.IndexSpace` only and raises otherwise.
+    spec
+        Registration spec supplying the pyramid depth and factor used to rescale
+        the translation to the coarsest level.
+
+    Returns
+    -------
+    Optional[Array]
+        The coarsest-level homogeneous ``(ndim + 1, ndim + 1)`` init matrix, or
+        None for identity init (the driver then starts from zero parameters).
     """
     if init == 'identity':
         return None
@@ -136,14 +202,37 @@ def _init_from_transform(
     space: CoordinateSpace,
     spec: RegistrationSpec,
 ) -> Array:
-    """A self-contained (centred) recipe matrix -> the internal coarsest-level
-    about-origin init that ``_resolve_init_matrix`` returns.
+    """Convert a self-contained recipe matrix into a coarsest-level init.
 
-    The warm-start hook: ``rigid_register`` / ``affine_register`` return the
-    self-contained matrix (centre baked in, B1), so to *start* an optimise from
-    a prior stage's result we de-centre it to about-origin and rescale the
-    translation to the coarsest pyramid level (the driver upscales it back).
-    Index-space only -- the staged-pipeline frame.
+    Maps a centred (self-contained) recipe matrix into the internal
+    coarsest-level about-origin init, matching what ``_resolve_init_matrix``
+    returns.  This is the warm-start hook: :func:`rigid_register` and
+    :func:`affine_register` return the self-contained matrix (with the grid
+    centre baked in), so to *start* an optimisation from a prior stage's result
+    we de-centre it to be about the origin and rescale the translation to the
+    coarsest pyramid level (the driver upscales it back).  Index-space only --
+    this is the staged-pipeline frame.
+
+    Parameters
+    ----------
+    transform
+        A self-contained homogeneous ``(ndim + 1, ndim + 1)`` matrix (a prior
+        recipe's ``result.matrix``), with the grid centre baked in.
+    fixed
+        The fixed image, whose shape fixes the grid centre used for de-centring.
+    ndim
+        Number of spatial dimensions (2 or 3).
+    space
+        Coordinate space; this warm-start is defined for
+        :class:`~nitrix.register.IndexSpace` only and raises otherwise.
+    spec
+        Registration spec supplying the pyramid depth and factor used to rescale
+        the translation to the coarsest level.
+
+    Returns
+    -------
+    Array
+        The coarsest-level about-origin homogeneous init matrix.
     """
     if not isinstance(space, IndexSpace):
         raise ValueError(
@@ -186,10 +275,29 @@ class AffinePyramidDepthWarning(UserWarning):
 def _cap_levels(
     spec: RegistrationSpec, shape: tuple[int, ...]
 ) -> RegistrationSpec:
-    """Shorten the (affine) pyramid so its coarsest level keeps ``>=
-    _MIN_COARSE_AXIS`` voxels per axis; **loud** (a warning, per the loud-fallback
-    tenet) and a no-op when the requested depth already satisfies it.  Honours an
-    explicit per-level ``iterations`` tuple by keeping its finest entries."""
+    """Shorten the affine pyramid so its coarsest level stays reliable.
+
+    Reduces the pyramid depth so the coarsest level keeps at least
+    ``_MIN_COARSE_AXIS`` voxels per axis, below which the affine Hessian is too
+    poorly determined and the fit can diverge.  It is loud (it warns when it
+    shortens) and a no-op when the requested depth already satisfies the bound.
+    An explicit per-level ``iterations`` tuple is honoured by keeping its finest
+    entries.
+
+    Parameters
+    ----------
+    spec
+        The requested registration spec (pyramid depth, factor, iterations).
+    shape
+        Spatial shape of the fixed image; its smallest axis fixes the coarsest
+        grid size.
+
+    Returns
+    -------
+    RegistrationSpec
+        The original ``spec`` if the depth is already safe, otherwise a copy
+        with ``levels`` (and any per-level ``iterations`` tuple) shortened.
+    """
     smallest = float(min(shape))
     effective = 1
     while (
@@ -233,21 +341,40 @@ def _resolve_ic_dispatch(
     *,
     mask: Optional[Array] = None,
 ) -> bool:
-    """The single inverse-compositional-vs-forward dispatch resolver (G1).
+    """Resolve the inverse-compositional-versus-forward dispatch.
 
-    Returns whether to take the inverse-compositional fast path (constant-template
-    Hessian, ~4-7x the forward GN/LM throughput).  It applies to a **rigid or
-    affine** least-squares (SSD) registration in **IndexSpace** (the template is
-    linearised in voxel coordinates) with an unmasked cost.  ``method``:
-    ``"auto"`` takes it when those preconditions hold and falls back to the
-    forward path otherwise (the parity oracle); ``"inverse_compositional"`` forces
-    it (and validates the preconditions); ``"forward"`` always takes the forward
-    path.
+    Returns whether to take the inverse-compositional fast path (a
+    constant-template Hessian, roughly 4-7x the forward Gauss-Newton / LM
+    throughput).  It applies to a **rigid or affine** least-squares (SSD)
+    registration in :class:`~nitrix.register.IndexSpace` (where the template is
+    linearised in voxel coordinates) with an unmasked cost.  A fixed-grid cost
+    ``mask`` routes to the forward path regardless: the constant-template Hessian
+    is a full-grid linearisation built once from the whole reference, so it
+    cannot honour a per-voxel mask, and an explicit
+    ``method='inverse_compositional'`` combined with a mask is a loud error.
 
-    A fixed-grid cost ``mask`` (A3) routes to the forward path regardless -- the
-    constant-template Hessian is a full-grid linearisation built once from the
-    whole reference, so it cannot honour a per-voxel mask; an explicit
-    ``method='inverse_compositional'`` with a mask is a loud error.
+    Parameters
+    ----------
+    method
+        Dispatch selector: ``'auto'`` (fast path when its preconditions hold,
+        otherwise the forward path), ``'inverse_compositional'`` (force the fast
+        path and validate its preconditions), or ``'forward'`` (always forward).
+    space
+        Coordinate space; the fast path requires
+        :class:`~nitrix.register.IndexSpace`.
+    spec
+        Registration spec; the fast path requires a least-squares metric and a
+        Gauss-Newton / LM (or ``'auto'``) optimiser.
+    model
+        Transform model; the fast path requires a rigid or affine model.
+    mask
+        Optional per-voxel cost weight; when present, the fast path is disabled.
+
+    Returns
+    -------
+    bool
+        True to take the inverse-compositional fast path, False for the forward
+        Gauss-Newton / LM path.
     """
     if mask is not None:
         if method == 'inverse_compositional':
@@ -301,52 +428,59 @@ def rigid_register(
     """Estimate the rigid transform aligning ``moving`` to ``fixed``.
 
     Optimises the 6-DOF (3-D) / 3-DOF (2-D) rigid Lie parameters
-    (``geometry.rigid_exp``) coarse-to-fine so that ``moving`` resampled
-    by the result matches ``fixed`` under ``spec.metric``.
+    (:func:`~nitrix.geometry.rigid_exp`) coarse-to-fine so that ``moving``
+    resampled by the result matches ``fixed`` under ``spec.metric``.
 
     Parameters
     ----------
     moving, fixed
         Single-channel images (2-D or 3-D).  Shapes need not match (the
-        warp is built on the ``fixed`` grid); the default ``IndexSpace``
-        additionally assumes a shared voxel grid.
+        warp is built on the ``fixed`` grid); the default
+        :class:`~nitrix.register.IndexSpace` additionally assumes a shared voxel
+        grid.
     spec
-        ``RegistrationSpec`` (pyramid depth, iterations, metric, ...).
-        **Metric choice:** ``SSD`` (default) within-modality -- the fast
-        inverse-compositional path; ``MI`` / ``CorrelationRatio`` cross-modal;
-        ``LNCC`` under a smooth intensity bias.  **Grid:** the default
-        ``IndexSpace`` assumes ``moving`` and ``fixed`` share a (roughly
-        isotropic) voxel grid -- use ``WorldSpace`` for anisotropic voxels or
-        differing grids (a rigid in index space shears in physical space).
+        The :class:`~nitrix.register.RegistrationSpec` (pyramid depth,
+        iterations, metric, ...).  **Metric choice:**
+        :class:`~nitrix.register.SSD` (default) within-modality -- the fast
+        inverse-compositional path; :class:`~nitrix.register.MI` /
+        :class:`~nitrix.register.CorrelationRatio` cross-modal;
+        :class:`~nitrix.register.LNCC` under a smooth intensity bias.
+        **Grid:** the default :class:`~nitrix.register.IndexSpace` assumes
+        ``moving`` and ``fixed`` share a (roughly isotropic) voxel grid -- use
+        :class:`~nitrix.register.WorldSpace` for anisotropic voxels or differing
+        grids (a rigid in index space shears in physical space).
     space
-        Coordinate space to optimise in (``_space``): ``IndexSpace()``
+        Coordinate space to optimise in: :class:`~nitrix.register.IndexSpace`
         (default; voxel-space, shared-grid, on-device) or
         ``WorldSpace(fixed_affine=..., moving_affine=...)`` (physical
         space -- correct under anisotropic voxels and different grids).
     method
         Solver: ``"auto"`` (default; the inverse-compositional fast path --
-        ~4-7x the forward throughput -- when its preconditions hold:
-        ``IndexSpace`` + a least-squares / SSD metric; the forward
-        Gauss-Newton / LM path otherwise), ``"inverse_compositional"`` (force
-        it; validates), or ``"forward"``.  The forward path is the parity
+        roughly 4-7x the forward throughput -- when its preconditions hold:
+        :class:`~nitrix.register.IndexSpace` and a least-squares / SSD metric;
+        the forward Gauss-Newton / LM path otherwise), ``"inverse_compositional"``
+        (force it; validates), or ``"forward"``.  The forward path is the parity
         oracle the fast path is tested against.
     init
-        Starting transform (A8): ``"identity"`` (default) or ``"moment"`` -- a
+        Starting transform: ``"identity"`` (default) or ``"moment"`` -- a
         centre-of-mass start (intensity-weighted centroids, plus a per-axis
         diagonal scale for affine) that lands inside the optimiser's basin on a
-        large misalignment a single zero start would miss.  ``IndexSpace`` only.
+        large misalignment a single zero start would miss.
+        :class:`~nitrix.register.IndexSpace` only.
     init_transform
         A self-contained warm-start matrix (a prior recipe's ``result.matrix``),
         taking precedence over ``init`` -- the staged-pipeline hook (e.g. affine
-        warm-started from rigid; see :func:`syn_pipeline`).  ``IndexSpace`` only.
+        warm-started from rigid; see :func:`syn_pipeline`).
+        :class:`~nitrix.register.IndexSpace` only.
     mask
-        Optional non-negative per-voxel weight on the ``fixed`` grid (A3): the
+        Optional non-negative per-voxel weight on the ``fixed`` grid: the
         cost is restricted to / weighted by it (a brain mask, lesion exclusion,
-        FoV), out-of-mask voxels ignored -- for ``MI`` / ``CorrelationRatio`` it
-        gates the joint-histogram scatter, not just the reduction.  A mask routes
-        to the **forward** path (the inverse-compositional constant-template
-        Hessian assumes the full grid); ``method='inverse_compositional'`` with a
-        mask raises.
+        FoV), with out-of-mask voxels ignored -- for
+        :class:`~nitrix.register.MI` / :class:`~nitrix.register.CorrelationRatio`
+        it gates the joint-histogram scatter, not just the reduction.  A mask
+        routes to the **forward** path (the inverse-compositional
+        constant-template Hessian assumes the full grid);
+        ``method='inverse_compositional'`` with a mask raises.
     winsorize, histogram_match
         Intensity conditioning before registration (the fMRIPrep front-end):
         ``winsorize=(0.005, 0.995)`` clips each image to those percentiles
@@ -358,10 +492,13 @@ def rigid_register(
 
     Returns
     -------
-    ``RegistrationResult`` (``matrix``, ``params``, ``warped``,
-    ``cost_history``).  ``matrix`` maps ``fixed`` to ``moving`` (index
-    coordinates in ``IndexSpace``, world coordinates in ``WorldSpace``);
-    ``warped`` is ``moving`` on the ``fixed`` grid.
+    RegistrationResult
+        A :class:`~nitrix.register.RegistrationResult` carrying ``matrix``,
+        ``params``, ``warped``, and ``cost_history``.  ``matrix`` maps ``fixed``
+        to ``moving`` (index coordinates in
+        :class:`~nitrix.register.IndexSpace`, world coordinates in
+        :class:`~nitrix.register.WorldSpace`); ``warped`` is ``moving`` resampled
+        on the ``fixed`` grid.
     """
     moving, fixed = preprocess_images(
         moving,
@@ -419,16 +556,42 @@ def _affine_multistart(
     restarts: int,
     mask: Optional[Array] = None,
 ) -> RegistrationResult:
-    """Run ``restarts`` forward affine solves from diversified inits; keep the
-    lowest-cost result.
+    """Run ``restarts`` forward affine solves and keep the lowest-cost result.
 
-    The GPU joint-histogram scatter-add (``MI`` / ``CorrelationRatio``) is
-    non-deterministic, and the 12-DOF affine BFGS occasionally amplifies that
+    Runs the forward affine solve from that many diversified inits and keeps the
+    lowest-cost result.  The GPU joint-histogram scatter-add
+    (:class:`~nitrix.register.MI` / :class:`~nitrix.register.CorrelationRatio`)
+    is non-deterministic, and the 12-DOF affine BFGS occasionally amplifies that
     gradient noise into a catastrophic divergence (the dense-field force and
-    6-DOF rigid paths absorb it; ``SSD`` is exact).  Re-solving from small
-    deterministic init perturbations and keeping the best metric cost drives the
-    failure rate to ~0 -- a diverged run scores far worse, so it is never kept.
-    Deterministic (fixed PRNG seed), so the result is reproducible.
+    6-DOF rigid paths absorb it; :class:`~nitrix.register.SSD` is exact).
+    Re-solving from small deterministic init perturbations and keeping the best
+    metric cost drives the failure rate to nearly zero -- a diverged run scores
+    far worse, so it is never kept.  A fixed PRNG seed makes the result
+    reproducible.
+
+    Parameters
+    ----------
+    moving, fixed
+        Single-channel images, each with ``ndim`` spatial axes.
+    ndim
+        Number of spatial dimensions (2 or 3).
+    spec
+        Registration spec (pyramid depth, iterations, metric, ...).
+    space
+        Coordinate space to optimise in.
+    base_init
+        Optional base init parameter vector (the unperturbed moment / identity
+        start); None starts from zero parameters.
+    restarts
+        Number of forward solves to run from diversified inits.
+    mask
+        Optional per-voxel cost weight on the ``fixed`` grid.
+
+    Returns
+    -------
+    RegistrationResult
+        The lowest-cost result across the restarts, scored under a metric pinned
+        on the full-resolution images so the costs are comparable.
     """
     model = Affine()
     base = (
@@ -496,38 +659,65 @@ def affine_register(
     """Estimate the affine transform aligning ``moving`` to ``fixed``.
 
     Optimises the 12-DOF (3-D) / 6-DOF (2-D) affine Lie parameters
-    (``geometry.affine_exp`` -- linear block via ``matrix_exp``,
-    guaranteeing an invertible map) coarse-to-fine.  For a robust result
-    on a large initial misalignment, run ``rigid_register`` first and
-    pass its parameters (extended with a zero linear-generator block) as
-    a warm start, or compose the two transforms.
+    (:func:`~nitrix.geometry.affine_exp` -- linear block via
+    :func:`~nitrix.linalg.matrix_exp`, guaranteeing an invertible map)
+    coarse-to-fine.  For a robust result on a large initial misalignment, run
+    :func:`rigid_register` first and pass its parameters (extended with a zero
+    linear-generator block) as a warm start, or compose the two transforms.
 
-    Parameters / returns as ``rigid_register`` (including the ``space`` and
-    ``method`` arguments; the inverse-compositional fast path -- where affine's
-    large parameter count makes the forward ``jacfwd`` costliest -- engages
-    under ``method="auto"`` for ``IndexSpace`` + an SSD metric).  ``init`` adds
-    the **moment** start (centroid + per-axis scale), worth more here than for
-    rigid -- the affine basin is narrow and a single zero start fails silently
-    on a large misalignment.  ``init_transform`` (a prior recipe's
-    ``result.matrix``) is the self-contained warm-start hook, taking precedence
-    over ``init`` -- e.g. affine warm-started from rigid (see
-    :func:`syn_pipeline`); ``IndexSpace`` only.  ``mask`` (an optional fixed-grid
-    cost weight; see ``rigid_register``) restricts the cost to a region and
-    routes to the forward path.  ``winsorize`` / ``histogram_match`` condition
-    the intensities before registration (see ``rigid_register``).
+    The ``space`` and ``method`` arguments behave as in :func:`rigid_register`;
+    the inverse-compositional fast path -- where affine's large parameter count
+    makes the forward ``jacfwd`` costliest -- engages under ``method="auto"`` for
+    :class:`~nitrix.register.IndexSpace` and an SSD metric.
 
-    ``restarts`` (default ``1``) runs the **forward** solve from that many
-    diversified inits and keeps the lowest-cost result -- a pure
-    basin-of-attraction lever.  It **no longer** doubles as the GPU MI
-    determinism fix: the joint histogram now takes a deterministic one-hot-matmul
-    path on GPU at affine pyramid sizes (``<= 200k`` voxels/level; E2), so
-    ``MI`` / ``CorrelationRatio`` recover reproducibly at ``restarts=1``.
-    (Historically the GPU joint-histogram scatter-add was non-deterministic and
-    the 12-DOF affine BFGS occasionally amplified that noise into a catastrophic
-    divergence, so ``restarts=4``--``6`` was the mitigation; that is retired for
-    sizes under the gate.  ``SSD`` is exact and takes the inverse-compositional
-    path, which ignores ``restarts``.)  Above the gate (the finest full-res
-    level), or for a genuinely multi-basin start, ``restarts > 1`` still helps.
+    Parameters
+    ----------
+    moving, fixed
+        Single-channel images (2-D or 3-D); see :func:`rigid_register`.
+    spec
+        Registration spec (pyramid, iterations, metric, ...); see
+        :func:`rigid_register`.
+    space
+        Coordinate space to optimise in; see :func:`rigid_register`.
+    method
+        Solver dispatch (``"auto"`` / ``"inverse_compositional"`` /
+        ``"forward"``); see :func:`rigid_register`.
+    init
+        Starting transform: ``"identity"`` (default) or the **moment** start
+        (centroid plus per-axis scale), worth more here than for rigid -- the
+        affine basin is narrow and a single zero start fails silently on a large
+        misalignment.  :class:`~nitrix.register.IndexSpace` only.
+    init_transform
+        A self-contained warm-start matrix (a prior recipe's ``result.matrix``),
+        taking precedence over ``init`` -- e.g. affine warm-started from rigid
+        (see :func:`syn_pipeline`).  :class:`~nitrix.register.IndexSpace` only.
+    mask
+        Optional per-voxel cost weight on the ``fixed`` grid (see
+        :func:`rigid_register`); restricts the cost to a region and routes to the
+        forward path.
+    winsorize, histogram_match
+        Intensity conditioning before registration (see :func:`rigid_register`).
+    restarts
+        Number of diversified forward solves (default ``1``), keeping the
+        lowest-cost result -- a pure basin-of-attraction lever.  It **no longer**
+        doubles as the GPU MI determinism fix: the joint histogram now takes a
+        deterministic one-hot-matmul path on GPU at affine pyramid sizes (at most
+        roughly 200k voxels per level), so :class:`~nitrix.register.MI` /
+        :class:`~nitrix.register.CorrelationRatio` recover reproducibly at
+        ``restarts=1``.  (Historically the GPU joint-histogram scatter-add was
+        non-deterministic and the 12-DOF affine BFGS occasionally amplified that
+        noise into a catastrophic divergence, so ``restarts`` of 4-6 was the
+        mitigation; that is retired for sizes under the gate.
+        :class:`~nitrix.register.SSD` is exact and takes the
+        inverse-compositional path, which ignores ``restarts``.)  Above the gate
+        (the finest full-resolution level), or for a genuinely multi-basin start,
+        ``restarts > 1`` still helps.
+
+    Returns
+    -------
+    RegistrationResult
+        A :class:`~nitrix.register.RegistrationResult`; see
+        :func:`rigid_register` for the fields and conventions.
     """
     moving, fixed = preprocess_images(
         moving,
@@ -596,35 +786,38 @@ def apply_transform(
     Resamples ``image`` -- an array in the **moving** frame of the registration
     that produced ``result`` (a second contrast, a label map, an atlas) -- onto
     the reference (fixed) grid by the recovered transform.  Dispatches on the
-    result: a homogeneous matrix (``rigid_register`` / ``affine_register`` --
-    the self-contained ``fixed -> moving`` voxel map) or a dense displacement
-    field (``greedy_syn_register`` / ``diffeomorphic_demons_register``).
-    In-memory resampling only -- image **file** I/O is out of scope (``thrux``).
+    result: a homogeneous matrix (:func:`rigid_register` / :func:`affine_register`
+    -- the self-contained ``fixed -> moving`` voxel map) or a dense displacement
+    field (:func:`greedy_syn_register` /
+    :func:`diffeomorphic_demons_register`).  In-memory resampling only -- image
+    **file** I/O is out of scope.
 
     Parameters
     ----------
     image
         Single-channel array to resample, on the registration's moving grid.
     result
-        A ``RegistrationResult`` (uses ``.matrix``) or a diffeomorphic result
-        (uses ``.displacement``).
+        A :class:`~nitrix.register.RegistrationResult` (uses ``.matrix``) or a
+        diffeomorphic result (uses ``.displacement``).
     reference_shape
         Output grid for a **matrix** result; ``None`` -> ``image.shape``
-        (correct when moving and fixed share a grid, the ``IndexSpace`` norm --
-        pass the fixed shape for ``WorldSpace`` / differing grids).  A
-        displacement result defines its own output grid.
+        (correct when moving and fixed share a grid, the
+        :class:`~nitrix.register.IndexSpace` norm -- pass the fixed shape for
+        :class:`~nitrix.register.WorldSpace` / differing grids).  A displacement
+        result defines its own output grid.
     method
         Interpolation kernel; ``None`` -> ``NearestNeighbour`` for an **integer**
         ``image`` (label-preserving, no interpolation bleed) and ``Linear``
         otherwise.  For anti-aliased multi-label resampling pass
         ``MultiLabel(labels=...)``; for overlap of a warped label map see
-        ``metrics.dice`` / ``metrics.jaccard``.
+        :func:`nitrix.metrics.dice` / :func:`nitrix.metrics.jaccard`.
     mode, cval
         Out-of-bounds handling (default ``'constant'`` 0 -- background).
 
     Returns
     -------
-    ``image`` resampled onto the reference grid (same dtype as ``image``).
+    Float[Array, '*rspatial']
+        ``image`` resampled onto the reference grid (same dtype as ``image``).
     """
     image = jnp.asarray(image)
     is_int = jnp.issubdtype(image.dtype, jnp.integer)
@@ -712,18 +905,22 @@ def syn_pipeline(
     Parameters
     ----------
     moving, fixed
-        Single-channel images sharing a grid (the ``IndexSpace`` norm).
+        Single-channel images sharing a grid (the
+        :class:`~nitrix.register.IndexSpace` norm).
     transform
         How far to stage: ``'rigid'``, ``'affine'``, or ``'syn'`` (default).
     rigid_spec, affine_spec, syn_spec, force
         Per-stage configuration; ``None`` -> a cross-modal-robust default
-        (``MI`` linear stages, the default ``LNCCForce`` SyN -- the
-        antsRegistrationSyN convention).  For a faster **within-modality** run
-        pass ``SSD`` linear specs (the inverse-compositional fast path).
+        (:class:`~nitrix.register.MI` linear stages, the default
+        :class:`~nitrix.register.LNCCForce` SyN -- the antsRegistrationSyN
+        convention).  For a faster **within-modality** run pass
+        :class:`~nitrix.register.SSD` linear specs (the inverse-compositional
+        fast path).
     affine_restarts
         Multi-start count for the affine stage; ``None`` -> ``4`` for a
-        histogram (``MI`` / ``CR``) affine metric (the non-deterministic GPU
-        scatter), else ``1``.
+        histogram (:class:`~nitrix.register.MI` /
+        :class:`~nitrix.register.CorrelationRatio`) affine metric (the
+        non-deterministic GPU scatter), else ``1``.
 
     Returns
     -------

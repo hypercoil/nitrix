@@ -1,0 +1,87 @@
+---
+title: "median_filter"
+generated: true
+description: "Apply a median filter via a NaN-safe gather and `jax.numpy.nanmedian`."
+---
+
+[‹ back to `nitrix.morphology`](../nitrix-morphology.qmd)
+
+*Re-exported here; defined in `nitrix.morphology._median`.*
+
+<!-- nitrix:gen sig:median_filter -->
+```python
+median_filter(x: Num[Array, '... *spatial'], *, size: Optional[Union[int, Sequence[int]]] = None, structuring_element: Optional[Num[Array, '*kspatial']] = None, padding: str = 'SAME') -> Num[Array, '... *spatial']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:median_filter -->
+Apply a median filter via a NaN-safe gather and `jax.numpy.nanmedian`.
+
+Each output position takes the median over its local window.  The
+window is materialised by gathering neighbouring positions along the
+spatial axes; excluded and out-of-bounds positions are set to `NaN`
+so that `jax.numpy.nanmedian` ignores them.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:median_filter -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Num` | `...` × `*spatial` | — | Single-channel input of shape `(..., *spatial)`. All dims of `x` are treated as spatial unless `size` or `structuring_element` pins a lower rank (see [`dilate`](../nitrix-morphology/dilate.qmd) for the same convention). |
+| `size` | `Optional[Union[int, Sequence[int]]]` | — | `None` | Per-spatial-dim window size: an `int` (broadcast across all spatial dims) or a sequence matching the spatial rank. Ignored when `structuring_element` is given, which sets the window from its own shape. `None` (the default) resolves to `3`. |
+| `structuring_element` | `Optional[Num[Array, '*kspatial']]` | — | `None` | Boolean or 0-1 mask of shape `(*kspatial,)` selecting which positions of the window contribute to the median. Excluded positions are set to `NaN` so that `jax.numpy.nanmedian` skips them. `None` uses every position in the `size`-cube. |
+| `padding` | `str` | — | `'SAME'` | `"SAME"` (the default) pads the spatial dims with `NaN` so that boundary positions take the median over the available subset and the output keeps the input spatial shape. `"VALID"` computes only over full windows and returns the shrunken interior. |
+
+**Returns** `Num` — shape `...` × `*spatial`. The filtered array. Its spatial shape matches `x` when `padding="SAME"` and is reduced by `kspatial - 1` along each spatial dim when `padding="VALID"`. The result is promoted to at least float32.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:median_filter -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **338.8 µs** (median, L4); up to **23.02× faster** than `scipy.ndimage.median_filter`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_MEDIAN_FILTER.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| median_filter | jax-cpu | shape=[256, 256],size=3 | `cupyx.scipy.ndimage.median_filter` | skipped | — | — | — | — | — |
+| median_filter | jax-cpu | shape=[256, 256],size=3 | `nitrix-jax` | ok | 27.85 ms / 36.02 ms | 200.13 ms | 696 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| median_filter | jax-cpu | shape=[256, 256],size=3 | `scipy.ndimage.median_filter` | ok | 7.98 ms / 8.14 ms | 7.90 ms | 696 MB (rss) | n/a (no oracle) | 0.29x vs nitrix-jax |
+| median_filter | jax-cpu | shape=[256, 256],size=3 | `simpleitk.Median` | ok | 2.39 ms / 2.41 ms | 58.98 ms | 696 MB (rss) | n/a (no oracle) | 0.09x vs nitrix-jax |
+| median_filter | jax-cuda12 | shape=[256, 256],size=3 | `cupyx.scipy.ndimage.median_filter` | ok | 62.9 µs / 65.0 µs | 150.15 ms | 0.26 MB (hbm) | n/a (no oracle) | 0.20x vs nitrix-jax |
+| median_filter | jax-cuda12 | shape=[256, 256],size=3 | `nitrix-jax` | ok | 312.3 µs / 338.8 µs | 577.03 ms | 72.09 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| median_filter | jax-cuda12 | shape=[256, 256],size=3 | `scipy.ndimage.median_filter` | ok | 7.19 ms / 7.23 ms | 7.38 ms | 0.26 MB (hbm) | n/a (no oracle) | 23.02x vs nitrix-jax |
+| median_filter | jax-cuda12 | shape=[256, 256],size=3 | `simpleitk.Median` | ok | 2.41 ms / 2.58 ms | 59.41 ms | 0.26 MB (hbm) | n/a (no oracle) | 7.71x vs nitrix-jax |
+| median_filter | jax-cpu | shape=[64, 64],size=3 | `cupyx.scipy.ndimage.median_filter` | skipped | — | — | — | — | — |
+| median_filter | jax-cpu | shape=[64, 64],size=3 | `nitrix-jax` | ok | 1.76 ms / 1.77 ms | 143.39 ms | 696 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| median_filter | jax-cpu | shape=[64, 64],size=3 | `scipy.ndimage.median_filter` | ok | 472.8 µs / 566.7 µs | 711.8 µs | 696 MB (rss) | n/a (no oracle) | 0.27x vs nitrix-jax |
+| median_filter | jax-cpu | shape=[64, 64],size=3 | `simpleitk.Median` | ok | 502.9 µs / 532.5 µs | 64.24 ms | 696 MB (rss) | n/a (no oracle) | 0.29x vs nitrix-jax |
+| median_filter | jax-cuda12 | shape=[64, 64],size=3 | `cupyx.scipy.ndimage.median_filter` | ok | 59.1 µs / 62.7 µs | 129.36 ms | 0.02 MB (hbm) | n/a (no oracle) | 0.42x vs nitrix-jax |
+| median_filter | jax-cuda12 | shape=[64, 64],size=3 | `nitrix-jax` | ok | 141.2 µs / 142.6 µs | 491.66 ms | 33.87 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| median_filter | jax-cuda12 | shape=[64, 64],size=3 | `scipy.ndimage.median_filter` | ok | 551.8 µs / 557.4 µs | 741.5 µs | 0.02 MB (hbm) | n/a (no oracle) | 3.91x vs nitrix-jax |
+| median_filter | jax-cuda12 | shape=[64, 64],size=3 | `simpleitk.Median` | ok | 500.2 µs / 509.7 µs | 57.70 ms | 0.02 MB (hbm) | n/a (no oracle) | 3.54x vs nitrix-jax |
+:::
+
+*source: bench `44def4b7` · nitrix `d0a9ca5f`*
+::::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:median_filter -->
+::: {.callout-note}
+The cost is dominated by the median sort rather than the gather, so a
+manual sort with a valid-count index is no faster.  A hardcoded
+sorting network for the fixed small window could reduce the number of
+compare-exchanges, but NaN-padded borders make the median index depend
+on the per-window valid count, so such a network would be exact only
+on the all-valid interior and borders would need a separate path.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:median_filter -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

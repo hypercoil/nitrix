@@ -2,33 +2,32 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Tensor shape / layout utilities.
+Tensor shape and layout utilities.
 
-The "low-level building blocks" that downstream consumers compose:
+The low-level building blocks that downstream consumers compose, grouped by
+the kind of manipulation they perform:
 
-- **Axis normalisation**: ``standard_axis_number``,
-  ``negative_axis_number`` -- turn negative or out-of-range axis
-  indices into canonical positive indices.
-- **Reshape helpers**: ``fold_axis`` (one axis -> two),
-  ``unfold_axes`` (multiple -> one), and the
-  ``fold_and_promote`` / ``demote_and_unfold`` composites.
-- **Broadcasting helpers**: ``orient_and_conform`` (pad with
-  singleton axes so a vector broadcasts against a reference),
-  ``broadcast_ignoring`` (broadcast all axes except a named
-  one), ``promote_to_rank``.
-- **Complex utilities**: ``complex_decompose`` (split into
-  amplitude / phase), ``complex_recompose``, ``amplitude_apply``
-  (apply a real-valued function to a complex tensor via its
-  amplitude).
-- **Masking helpers**: ``conform_mask``, ``apply_mask``,
-  ``mask_tensor``.
+- **Axis normalisation**: :func:`standard_axis_number` and
+  :func:`negative_axis_number` turn negative or out-of-range axis indices
+  into canonical positive indices.
+- **Reshape helpers**: :func:`fold_axis` splits one axis into two,
+  :func:`unfold_axes` merges several axes into one, and
+  :func:`fold_and_promote` and :func:`demote_and_unfold` are the
+  corresponding composite operations.
+- **Broadcasting helpers**: :func:`orient_and_conform` pads a vector with
+  singleton axes so that it broadcasts against a reference tensor,
+  :func:`broadcast_ignoring` broadcasts every axis except a named one, and
+  :func:`promote_to_rank` raises a tensor to a target rank.
+- **Complex utilities**: :func:`complex_decompose` splits a complex tensor
+  into amplitude and phase, :func:`complex_recompose` reconstructs it, and
+  :func:`amplitude_apply` applies a real-valued function to a complex tensor
+  via its amplitude.
+- **Masking helpers**: :func:`conform_mask`, :func:`apply_mask` and
+  :func:`mask_tensor` restrict or reshape tensors according to a mask.
 
-Most of these existed as internal utilities in
-``nitrix._internal.util``; this module promotes the
-externally-useful subset to a public namespace.  The internal
-``_internal.util`` continues to be the implementation detail
-(used by other nitrix subpackages); this module re-exports the
-public surface with cleaner docstrings.
+This module gathers the externally useful subset of these utilities into a
+public namespace, re-exporting the shared implementations with documentation
+aimed at consumers.
 """
 
 from __future__ import annotations

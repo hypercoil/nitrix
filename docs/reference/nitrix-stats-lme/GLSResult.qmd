@@ -1,0 +1,38 @@
+---
+title: "GLSResult"
+generated: true
+description: "Per-voxel GLS fit with a structured residual."
+---
+
+[‹ back to `nitrix.stats.lme`](../nitrix-stats-lme.qmd)
+
+*Re-exported here; defined in `nitrix.stats.lme._corrfit`.*
+
+<!-- nitrix:gen sig:GLSResult -->
+```python
+class GLSResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:GLSResult -->
+Per-voxel GLS fit with a structured residual.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:GLSResult.__init__ -->
+```python
+__init__(beta_hat: Float[Array, 'V p'], sigma_e_sq: Float[Array, 'V'], rho: Float[Array, 'V'], var_params: Float[Array, 'V n_v'], log_lik: Float[Array, 'V'], fixed_cov: Float[Array, 'V p p'], df_resid: int, corr: str, weights: Optional[str]) -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:GLSResult -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `n_v` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

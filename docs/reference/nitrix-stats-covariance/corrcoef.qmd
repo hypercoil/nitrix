@@ -1,0 +1,38 @@
+---
+title: "corrcoef"
+generated: true
+description: "Alias for [`corr`](../nitrix-stats-covariance/corr.qmd) (numpy convention)."
+---
+
+[‹ back to `nitrix.stats.covariance`](../nitrix-stats-covariance.qmd)
+
+<!-- nitrix:gen sig:corrcoef -->
+```python
+corrcoef(*args, **kwargs) -> Num[Array, '... c c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:corrcoef -->
+Alias for [`corr`](../nitrix-stats-covariance/corr.qmd) (numpy convention).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:corrcoef -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `*args` | `Any` | — | `()` | — |
+| `**kwargs` | `Any` | — | `{}` | — |
+
+**Returns** `Num` — shape `...` × `c` × `c`. Correlation matrix, `(..., c, c)`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:corrcoef -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `c` | feature channels (channels-last) |
+<!-- nitrix:/gen -->

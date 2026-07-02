@@ -1,0 +1,52 @@
+---
+title: "icosphere_hierarchy_from_levels"
+generated: true
+description: "Package caller-supplied per-level meshes + parent tables into a hierarchy."
+---
+
+[‹ back to `nitrix.sparse.mesh`](../nitrix-sparse-mesh.qmd)
+
+<!-- nitrix:gen sig:icosphere_hierarchy_from_levels -->
+```python
+icosphere_hierarchy_from_levels(meshes: Sequence[Mesh], parents: Sequence[Optional[Int[Array, 'n_fine 2']]]) -> IcosphereHierarchy
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:icosphere_hierarchy_from_levels -->
+Package caller-supplied per-level meshes + parent tables into a hierarchy.
+
+Use this when the subdivision hierarchy does **not** come from
+nitrix's own math-canonical [`icosphere`](../nitrix-sparse-mesh/icosphere.qmd) -- most importantly when
+the per-level meshes are an external icosphere-subdivision family
+with a different vertex ordering and coordinates, e.g. FreeSurfer's
+`fsaverage{0..6}.sphere`.  Pre-trained surface models (SUGAR,
+SphereMorph, ...) are tied to the *exact* topology they were trained
+on, so inference must run on that topology, not the math icosphere.
+
+**nitrix does not source the topology.**  Reading FreeSurfer
+`.sphere` binaries (`nibabel.freesurfer.read_geometry`),
+resolving `$SUBJECTS_DIR`, or loading any neuroimaging container
+is outside nitrix's dependency contract (no `nibabel`, no
+filesystem / container concerns -- those live in `thrux` or the
+consuming port).  The caller reads the files and hands nitrix plain
+arrays; this constructor validates them and produces the same
+[`IcosphereHierarchy`](../nitrix-sparse-mesh/IcosphereHierarchy.qmd) that [`icosphere_hierarchy`](../nitrix-sparse-mesh/icosphere_hierarchy.qmd) builds.
+Every cross-level operator -- [`icosphere_cross_level_adjacency`](../nitrix-sparse-mesh/icosphere_cross_level_adjacency.qmd),
+[`icosphere_bary_upsampler`](../nitrix-sparse-mesh/icosphere_bary_upsampler.qmd), [`mesh_pool_max`](../nitrix-sparse-mesh/mesh_pool_max.qmd),
+[`mesh_coarsen_meanpool`](../nitrix-sparse-mesh/mesh_coarsen_meanpool.qmd) -- then works unchanged and with no
+topology-source branching, because they depend only on the parent
+tables and per-level vertex counts, not on the coordinates being
+math-canonical.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:icosphere_hierarchy_from_levels -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `meshes` | `Sequence[Mesh]` | — | — | Per-level `Mesh` objects at consecutive subdivision levels, coarse first. `meshes[0]` is the base level. |
+| `parents` | `Sequence[Optional[Int[Array, 'n_fine 2']]]` | — | — | Same length as `meshes`. `parents[0]` must be `None` (the base level has no parent). For `L >= 1`, `parents[L]` is an `(n_vertices_at_L, 2)` integer array giving each fine vertex's parentage relative to level `L - 1`, following the `IcosphereHierarchy.parents` convention: - a coarse-original fine vertex (preserved in place at the same index `v`) has `parents[L][v] == (v, v)`; - a midpoint of coarse edge `(a, b)` has `parents[L][v] == (a, b)`. For a FreeSurfer hierarchy the consumer derives these triples from the precomputed mid-edge tables (e.g. SUGAR's `fsaverage{i}_upsample_neighbors.npz`). |
+
+**Returns** `IcosphereHierarchy`. The validated [`IcosphereHierarchy`](../nitrix-sparse-mesh/IcosphereHierarchy.qmd).
+<!-- nitrix:/gen -->
+

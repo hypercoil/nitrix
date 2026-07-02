@@ -1,0 +1,48 @@
+---
+title: "affine_matrix_to_params"
+generated: true
+description: "Recover geometric parameters from an affine matrix."
+---
+
+[‹ back to `nitrix.geometry.affine`](../nitrix-geometry-affine.qmd)
+
+<!-- nitrix:gen sig:affine_matrix_to_params -->
+```python
+affine_matrix_to_params(mat: Float[Array, '... d d1'], *, deg: bool = True) -> Float[Array, '... p']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:affine_matrix_to_params -->
+Recover geometric parameters from an affine matrix.
+
+Inverse of [`params_to_affine_matrix`](../nitrix-geometry-affine/params_to_affine_matrix.qmd).  The linear block is
+factored into rotation, scale, and shear via the Cholesky of
+$m^{\top} m$ (an RQ-style decomposition); the scale sign is fixed
+up with the determinant so a negative-determinant (reflection) matrix is
+representable.  The dimensionality is inferred as `mat.shape[-1] - 1`,
+so both the `(..., d, d+1)` and square `(..., d+1, d+1)` forms are
+accepted.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:affine_matrix_to_params -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mat` | `Float` | `...` × `d` × `d1` | — | Batched affine matrices in `(..., ndim, ndim+1)` form (or square `(..., ndim+1, ndim+1)`). |
+| `deg` | `bool` | — | `True` | If `True` (the default), the returned rotation parameters are in degrees; if `False`, in radians. |
+
+**Returns** `Float` — shape `...` × `p`. Batched parameter vectors laid out as translation (`ndim`), rotation (`ndim(ndim-1)/2`), scale (`ndim`), and shear (`ndim(ndim-1)/2`), matching the convention of [`params_to_affine_matrix`](../nitrix-geometry-affine/params_to_affine_matrix.qmd).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:affine_matrix_to_params -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `d` | spatial dimension (2 or 3) |
+| `d1` | *(undocumented — add to `_dimensions.yml`)* |
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

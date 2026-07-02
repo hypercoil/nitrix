@@ -1,0 +1,91 @@
+---
+title: "tsconv"
+generated: true
+description: "1-D convolution along the trailing axis."
+---
+
+[‹ back to `nitrix.signal.tsconv`](../nitrix-signal-tsconv.qmd)
+
+<!-- nitrix:gen sig:tsconv -->
+```python
+tsconv(X: Num[Array, '... C obs'], weight: Float[Array, 'C_out C K'], *, padding: Padding = 'SAME') -> Num[Array, '... C_out obs_out']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:tsconv -->
+1-D convolution along the trailing axis.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:tsconv -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X` | `Num` | `...` × `C` × `obs` | — | Input time series, `(..., C, obs)` -- the trailing two axes are channels and observations. Leading axes are broadcast / batched. |
+| `weight` | `Float` | `C_out` × `C` × `K` | — | Convolution kernel, `(C_out, C, K)` -- standard channels-out / channels-in / kernel-size layout. |
+| `padding` | `Padding` | — | `'SAME'` | `"SAME"` (default): output has the same observation length as the input. `"VALID"`: output length is `obs - K + 1`. |
+
+**Returns** `Num` — shape `...` × `C_out` × `obs_out`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:tsconv -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **125.6 µs** (median, L4); up to **12.88× faster** than `scipy.signal.correlate`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_TSCONV.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| tsconv | jax-cpu | obs=16384,k=63 | `cupyx.scipy.signal.correlate` | skipped | — | — | — | — | — |
+| tsconv | jax-cpu | obs=16384,k=63 | `nitrix-jax` | ok | 540.9 µs / 654.4 µs | 85.39 ms | 543 MB (rss) | ✓ 0.0091×tol | 1.00x vs nitrix-jax |
+| tsconv | jax-cpu | obs=16384,k=63 | `scipy.signal.correlate` | ok | 432.6 µs / 435.7 µs | 459.0 µs | 506 MB (rss) | ✓ 0.0095×tol | 0.80x vs nitrix-jax |
+| tsconv | jax-cuda12 | obs=16384,k=63 | `cupyx.scipy.signal.correlate` | ok | 219.9 µs / 230.2 µs | 473.32 ms | 0.07 MB (hbm) | ✓ 0.054×tol | 1.77x vs nitrix-jax |
+| tsconv | jax-cuda12 | obs=16384,k=63 | `nitrix-jax` | ok | 124.4 µs / 125.6 µs | 326.18 ms | 67.31 MB (hbm) | ✓ 0.022×tol | 1.00x vs nitrix-jax |
+| tsconv | jax-cuda12 | obs=16384,k=63 | `scipy.signal.correlate` | ok | 428.9 µs / 434.3 µs | 458.4 µs | 0.07 MB (hbm) | ✓ 0.0095×tol | 3.45x vs nitrix-jax |
+| tsconv | jax-cpu | obs=4096,k=15 | `cupyx.scipy.signal.correlate` | skipped | — | — | — | — | — |
+| tsconv | jax-cpu | obs=4096,k=15 | `nitrix-jax` | ok | 230.7 µs / 241.9 µs | 81.56 ms | 533 MB (rss) | ✓ 0.0046×tol | 1.00x vs nitrix-jax |
+| tsconv | jax-cpu | obs=4096,k=15 | `scipy.signal.correlate` | ok | 64.6 µs / 85.3 µs | 102.7 µs | 506 MB (rss) | ✓ 0.0015×tol | 0.28x vs nitrix-jax |
+| tsconv | jax-cuda12 | obs=4096,k=15 | `cupyx.scipy.signal.correlate` | ok | 226.8 µs / 232.5 µs | 2.030 s | 0.02 MB (hbm) | ✓ 0.032×tol | 2.22x vs nitrix-jax |
+| tsconv | jax-cuda12 | obs=4096,k=15 | `nitrix-jax` | ok | 102.2 µs / 105.6 µs | 1.433 s | 67.16 MB (hbm) | ✓ 0.0048×tol | 1.00x vs nitrix-jax |
+| tsconv | jax-cuda12 | obs=4096,k=15 | `scipy.signal.correlate` | ok | 99.7 µs / 102.4 µs | 131.5 µs | 0.02 MB (hbm) | ✓ 0.0015×tol | 0.98x vs nitrix-jax |
+| tsconv | jax-cpu | obs=65536,k=127 | `cupyx.scipy.signal.correlate` | skipped | — | — | — | — | — |
+| tsconv | jax-cpu | obs=65536,k=127 | `nitrix-jax` | ok | 2.21 ms / 2.51 ms | 102.25 ms | 560 MB (rss) | ✓ 0.027×tol | 1.00x vs nitrix-jax |
+| tsconv | jax-cpu | obs=65536,k=127 | `scipy.signal.correlate` | ok | 1.87 ms / 2.17 ms | 2.61 ms | 506 MB (rss) | ✓ 0.016×tol | 0.85x vs nitrix-jax |
+| tsconv | jax-cuda12 | obs=65536,k=127 | `cupyx.scipy.signal.correlate` | ok | 232.6 µs / 245.9 µs | 358.95 ms | 0.26 MB (hbm) | ✓ 0.11×tol | 1.62x vs nitrix-jax |
+| tsconv | jax-cuda12 | obs=65536,k=127 | `nitrix-jax` | ok | 143.6 µs / 144.9 µs | 306.24 ms | 67.90 MB (hbm) | ✓ 0.047×tol | 1.00x vs nitrix-jax |
+| tsconv | jax-cuda12 | obs=65536,k=127 | `scipy.signal.correlate` | ok | 1.85 ms / 1.88 ms | 1.89 ms | 0.26 MB (hbm) | ✓ 0.016×tol | 12.88x vs nitrix-jax |
+:::
+
+*source: bench `fa0a230c` · nitrix `ff2bf24d`*
+::::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:tsconv -->
+::: {.callout-note}
+Wraps `jax.lax.conv_general_dilated` with the standard
+NCW (batch, channel, time) dim spec.  Batches over any leading
+axes by reshaping into a single batch dim and unwrapping.
+For multi-channel or multi-subject fMRI `(B, C, T)` is the
+natural input shape.
+
+This is the **cross-correlation** convention (the kernel is
+**not** flipped), as in deep-learning conv layers
+(`torch.nn.Conv1d` is likewise cross-correlation).  A DSP
+"convolution" flips the kernel about its centre; reverse
+`weight` along its last (`K`) axis -- `weight[..., ::-1]`
+-- if you need a true (flipped) convolution.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:tsconv -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `C` | *(undocumented — add to `_dimensions.yml`)* |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+| `C_out` | *(undocumented — add to `_dimensions.yml`)* |
+| `K` | *(undocumented — add to `_dimensions.yml`)* |
+| `obs_out` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

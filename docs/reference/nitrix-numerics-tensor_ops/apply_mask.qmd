@@ -1,0 +1,48 @@
+---
+title: "apply_mask"
+generated: true
+description: "Mask a tensor along an axis."
+---
+
+[‹ back to `nitrix.numerics.tensor_ops`](../nitrix-numerics-tensor_ops.qmd)
+
+*Re-exported here; defined in `nitrix._internal.util`.*
+
+<!-- nitrix:gen sig:apply_mask -->
+```python
+apply_mask(tensor: Shaped[Array, ...], msk: Bool[Array, ...], axis: int) -> Shaped[Array, ...]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:apply_mask -->
+Mask a tensor along an axis.
+
+::: {.callout-warning}
+This function will only work if the mask is one-dimensional. For
+multi-dimensional masks, use [`conform_mask`](../nitrix-numerics-tensor_ops/conform_mask.qmd).
+::
+::: {.callout-warning}
+Use of this function is strongly discouraged. It is incompatible with
+`jax.jit`.
+::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:apply_mask -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `tensor` | `Shaped[Array, ...]` | — | — | — |
+| `msk` | `Bool[Array, ...]` | — | — | — |
+| `axis` | `int` | — | — | — |
+
+**Returns** `Shaped[Array, ...]`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:apply_mask -->
+### See also
+
+[`conform_mask`](../nitrix-numerics-tensor_ops/conform_mask.qmd)
+[`mask_tensor`](../nitrix-numerics-tensor_ops/mask_tensor.qmd)
+<!-- nitrix:/gen -->
+

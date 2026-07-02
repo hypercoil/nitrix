@@ -1,0 +1,45 @@
+---
+title: "var_power"
+generated: true
+description: "Power-of-covariate residual variance function (`nlme` `varPower`)."
+---
+
+[‹ back to `nitrix.stats.lme`](../nitrix-stats-lme.qmd)
+
+*Re-exported here; defined in `nitrix.stats.lme._varfunc`.*
+
+<!-- nitrix:gen sig:var_power -->
+```python
+var_power(v: Float[Array, 'N']) -> VarFunc
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:var_power -->
+Power-of-covariate residual variance function (`nlme` `varPower`).
+
+Models the residual scale as a power of an external covariate,
+$\operatorname{Var}(\varepsilon_i) = \sigma_e^2 |v_i|^{2 \delta}$.
+`v` is passed explicitly, so the fit stays non-circular -- it is *not* the
+fitted value.  There is one unconstrained parameter $\delta$ (any real;
+$\delta = 0$ recovers homoscedasticity), with $\log g_i = \delta
+\log|v_i|$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:var_power -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `v` | `Float` | `N` | — | The `(N,)` variance covariate, one value per observation. An external (non-circular) covariate such as a baseline level; its magnitude $\|v_i\|$ drives the residual scale. |
+
+**Returns** `VarFunc`. A variance-function record named `'varPower'` with a single parameter, carrying `v` as its covariate and the $\log g_i = \delta \log|v_i|$ log-scale map.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:var_power -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `N` | observations — time points, subjects, or sampled points |
+<!-- nitrix:/gen -->

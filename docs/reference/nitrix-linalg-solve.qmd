@@ -1,0 +1,58 @@
+---
+title: "nitrix.linalg.solve"
+generated: true
+signature-hash: eda0c68cbb071a4b
+description: "Dense linear solves: general and SPD-Cholesky."
+listing:
+  id: nitrix-linalg-solve-symbols
+  contents: "nitrix-linalg-solve/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.linalg.solve`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Dense linear solves: general and SPD-Cholesky.
+
+The public surface for the small dense solves the rest of the library
+implied but never exposed first-class.  [`cho_solve`](nitrix-linalg-solve/cho_solve.qmd) is the SPD
+normal-equation solve behind the registration Gauss-Newton /
+Levenberg-Marquardt step ($(J^{\top}J + \lambda I)\,\delta =
+-J^{\top}r$) and any small symmetric-positive-definite system;
+`solve` is the general (non-symmetric) $A x = b$.
+
+Both batch over leading dimensions and are reverse-mode differentiable.
+The right-hand side may be a vector `(..., n)` or a matrix
+`(..., n, m)`; the trailing shape of the result matches.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+::: {.callout-note}
+These delegate to the cuSolver-robust `safe_cho_solve` /
+`safe_solve` wrappers, which route the factorisation to a device
+where it works (CPU on stacks with the broken cuSolver handle pool) and
+move the result back.  On a healthy GPU stack there is no overhead;
+the triangular solve (cuBLAS) stays on-device.
+:::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-linalg-solve-symbols}
+:::

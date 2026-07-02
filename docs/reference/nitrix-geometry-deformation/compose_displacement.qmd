@@ -1,0 +1,47 @@
+---
+title: "compose_displacement"
+generated: true
+description: "Displacement of the composed deformation $( mathrm{id} +  mathrm{outer})  circ ( mathrm{id} +  mathrm{inner})$."
+---
+
+[‹ back to `nitrix.geometry.deformation`](../nitrix-geometry-deformation.qmd)
+
+<!-- nitrix:gen sig:compose_displacement -->
+```python
+compose_displacement(outer: Float[Array, '*spatial ndim'], inner: Float[Array, '*spatial ndim'], *, mode: BoundaryMode = 'nearest') -> Float[Array, '*spatial ndim']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:compose_displacement -->
+Displacement of the composed deformation
+$(\mathrm{id} + \mathrm{outer}) \circ (\mathrm{id} + \mathrm{inner})$.
+
+The composed deformation maps
+$x \mapsto x + \mathrm{inner}(x) + \mathrm{outer}(x + \mathrm{inner}(x))$,
+so the displacement is
+$\mathrm{inner} + \mathrm{outer} \circ (\mathrm{id} + \mathrm{inner})$.
+Warping an image by the result equals warping by `inner` then by
+`outer`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:compose_displacement -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `outer` | `Float` | `*spatial` × `ndim` | — | Displacement fields, `(*spatial, ndim)` (the trailing axis is the displacement vector). |
+| `inner` | `Float` | `*spatial` × `ndim` | — | Displacement fields, `(*spatial, ndim)` (the trailing axis is the displacement vector). |
+| `mode` | `BoundaryMode` | — | `'nearest'` | Boundary mode for sampling `outer` at the deformed positions (default `"nearest"` -- edge-replicate, the flow-field convention). |
+
+**Returns** `Float` — shape `*spatial` × `ndim`. The displacement field of the composed deformation, `(*spatial, ndim)`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:compose_displacement -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->

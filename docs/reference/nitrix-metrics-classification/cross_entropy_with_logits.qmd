@@ -1,0 +1,43 @@
+---
+title: "cross_entropy_with_logits"
+generated: true
+description: "Categorical cross-entropy from logits against integer targets."
+---
+
+[‹ back to `nitrix.metrics.classification`](../nitrix-metrics-classification.qmd)
+
+<!-- nitrix:gen sig:cross_entropy_with_logits -->
+```python
+cross_entropy_with_logits(logits: Float[Array, '...'], target: Int[Array, '...'], *, axis: int = 1, reduction: Reduction = 'mean') -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:cross_entropy_with_logits -->
+Categorical cross-entropy from logits against integer targets.
+
+`-log softmax(logits)[target]` along the class `axis`, via a
+`log_softmax` and a gather (so no explicit one-hot is
+materialised).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:cross_entropy_with_logits -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `logits` | `Float` | `...` | — | Class scores with the class axis at `axis`. |
+| `target` | `Int` | `...` | — | Integer class indices, the shape of `logits` with the class axis removed (e.g. `(batch, *spatial)` for `logits` of `(batch, class, *spatial)`). |
+| `axis` | `int` | — | `1` | The class axis of `logits`. Default `1` (the channel-first `(batch, class, *spatial)` convention). |
+| `reduction` | `Reduction` | — | `'mean'` | `"mean"` (default), `"sum"`, or `"none"`. |
+
+**Returns** `Float` — shape `...`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:cross_entropy_with_logits -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

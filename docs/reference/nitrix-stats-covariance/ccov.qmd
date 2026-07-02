@@ -1,0 +1,38 @@
+---
+title: "ccov"
+generated: true
+description: "Alias for [`conditionalcov`](../nitrix-stats-covariance/conditionalcov.qmd)."
+---
+
+[‹ back to `nitrix.stats.covariance`](../nitrix-stats-covariance.qmd)
+
+<!-- nitrix:gen sig:ccov -->
+```python
+ccov(*args, **kwargs) -> Num[Array, '... c c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:ccov -->
+Alias for [`conditionalcov`](../nitrix-stats-covariance/conditionalcov.qmd).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:ccov -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `*args` | `Any` | — | `()` | — |
+| `**kwargs` | `Any` | — | `{}` | — |
+
+**Returns** `Num` — shape `...` × `c` × `c`. Conditional covariance matrix, `(..., c, c)`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:ccov -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `c` | feature channels (channels-last) |
+<!-- nitrix:/gen -->

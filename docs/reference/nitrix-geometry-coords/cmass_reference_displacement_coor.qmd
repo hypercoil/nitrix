@@ -1,0 +1,12 @@
+---
+title: "cmass_reference_displacement_coor"
+generated: true
+description: "Alias for displacement_from_reference_points."
+---
+
+[‹ back to `nitrix.geometry.coords`](../nitrix-geometry-coords.qmd)
+
+<!-- nitrix:gen sig:cmass_reference_displacement_coor -->
+`cmass_reference_displacement_coor` is an alias for [`displacement_from_reference_points`](displacement_from_reference_points.qmd).
+<!-- nitrix:/gen -->
+

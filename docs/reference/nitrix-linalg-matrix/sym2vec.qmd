@@ -1,0 +1,54 @@
+---
+title: "sym2vec"
+generated: true
+description: "Vec of the upper triangle of a symmetric matrix block."
+---
+
+[‹ back to `nitrix.linalg.matrix`](../nitrix-linalg-matrix.qmd)
+
+*decorated:* `@partial(jax.custom_vjp, nondiff_argnums=(1,))`
+
+<!-- nitrix:gen sig:sym2vec -->
+```python
+sym2vec(sym: Num[Array, '... i i'], offset: int = 1) -> Num[Array, '... n']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:sym2vec -->
+Vec of the upper triangle of a symmetric matrix block.
+
+Output entries follow the row-major order of the upper triangle
+starting at the diagonal offset by `offset`.  This is the inverse
+of [`vec2sym`](../nitrix-linalg-matrix/vec2sym.qmd).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:sym2vec -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `sym` | `Num` | `...` × `i` × `i` | — | Symmetric matrix block. (Symmetry is assumed, not checked.) |
+| `offset` | `int` | — | `1` | Diagonal offset. Default `1` (skip the main diagonal, producing $\binom{i}{2} = i (i - 1) / 2$ entries). Use `offset=0` to include the main diagonal. |
+
+**Returns** `Num` — shape `...` × `n`. The vectorised upper triangle, carrying the leading batch axes of `sym` and a trailing axis of length `n` equal to the number of selected entries.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:sym2vec -->
+::: {.callout-note}
+The hand-rolled `custom_vjp` reflects that this operation strictly
+drops half the matrix, so its backward is masked to the upper
+triangle: the gradient through the dropped lower triangle is zero
+rather than mirrored.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:sym2vec -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `i` | *(undocumented — add to `_dimensions.yml`)* |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

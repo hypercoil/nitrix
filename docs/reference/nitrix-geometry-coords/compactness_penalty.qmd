@@ -1,0 +1,79 @@
+---
+title: "compactness_penalty"
+generated: true
+description: "How spread-out is each region's weight from its own centre of mass?"
+---
+
+[‹ back to `nitrix.geometry.coords`](../nitrix-geometry-coords.qmd)
+
+<!-- nitrix:gen sig:compactness_penalty -->
+```python
+compactness_penalty(weight: Float[Array, '... n_regions n_points'], coords: Float[Array, '... n_points ndim'], *, norm: Union[int, float] = 2, floor: float = 0.0, radius: Optional[float] = None) -> Float[Array, '... n_regions']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:compactness_penalty -->
+How spread-out is each region's weight from its own centre of mass?
+
+Returns a scalar per region: large values mean the weight is
+dispersed (incoherent region); small values mean it concentrates
+near a single locus.  The standard use is as a regulariser
+pulling region weights toward compact, contiguous supports.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:compactness_penalty -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `weight` | `Float` | `...` × `n_regions` × `n_points` | — | Non-negative weights, `(..., n_regions, n_points)`. |
+| `coords` | `Float` | `...` × `n_points` × `ndim` | — | Per-point coordinates, `(..., n_points, ndim)`. |
+| `norm` | `Union[int, float]` | — | `2` | The order $p$ of the $L_p$ norm used as the distance from each point to the region's centre of mass. Default `2` (Euclidean). |
+| `floor` | `float` | — | `0.0` | Distances below `floor` are clamped to zero. Useful when the centre-of-mass lies inside a coherent support and we want the penalty to only "punish" points truly outside. |
+| `radius` | `Optional[float]` | — | `None` | If given, the centre of mass is projected onto a sphere of that radius and distances are spherical geodesics. Use this for region weights defined over a 2-sphere. |
+
+**Returns** `Float` — shape `...` × `n_regions`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:compactness_penalty -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **124.4 µs** (median, L4); up to **223.76× faster** than `numpy.compactness`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_COMPACTNESS_PENALTY.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| compactness_penalty | jax-cpu | p=1024 | `cupy.compactness_penalty` | skipped | — | — | — | — | — |
+| compactness_penalty | jax-cpu | p=1024 | `nitrix-jax` | ok | 99.0 µs / 103.1 µs | 109.55 ms | 774 MB (rss) | ✓ 0.00019×tol | 1.00x vs nitrix-jax |
+| compactness_penalty | jax-cpu | p=1024 | `numpy.compactness` | ok | 2.16 ms / 2.16 ms | 2.24 ms | 774 MB (rss) | ✓ 5.9e-05×tol | 21.81x vs nitrix-jax |
+| compactness_penalty | jax-cuda12 | p=1024 | `cupy.compactness_penalty` | ok | 276.4 µs / 281.8 µs | 460.66 ms | 0.27 MB (hbm) | ✓ 9.6e-05×tol | 2.37x vs nitrix-jax |
+| compactness_penalty | jax-cuda12 | p=1024 | `nitrix-jax` | ok | 116.4 µs / 124.4 µs | 517.27 ms | 100.94 MB (hbm) | ✓ 7.6e-05×tol | 1.00x vs nitrix-jax |
+| compactness_penalty | jax-cuda12 | p=1024 | `numpy.compactness` | ok | 2.34 ms / 2.35 ms | 3.04 ms | 0.27 MB (hbm) | ✓ 5.9e-05×tol | 20.14x vs nitrix-jax |
+| compactness_penalty | jax-cpu | p=16384 | `cupy.compactness_penalty` | skipped | — | — | — | — | — |
+| compactness_penalty | jax-cpu | p=16384 | `nitrix-jax` | ok | 930.5 µs / 1.98 ms | 183.39 ms | 774 MB (rss) | ✓ 7.6e-05×tol | 1.00x vs nitrix-jax |
+| compactness_penalty | jax-cpu | p=16384 | `numpy.compactness` | ok | 31.41 ms / 41.47 ms | 35.44 ms | 774 MB (rss) | ✓ 7e-05×tol | 33.76x vs nitrix-jax |
+| compactness_penalty | jax-cuda12 | p=16384 | `cupy.compactness_penalty` | ok | 1.91 ms / 1.93 ms | 237.06 ms | 4.39 MB (hbm) | ✓ 9.1e-05×tol | 14.35x vs nitrix-jax |
+| compactness_penalty | jax-cuda12 | p=16384 | `nitrix-jax` | ok | 133.4 µs / 140.2 µs | 681.70 ms | 75.74 MB (hbm) | ✓ 7.4e-05×tol | 1.00x vs nitrix-jax |
+| compactness_penalty | jax-cuda12 | p=16384 | `numpy.compactness` | ok | 29.84 ms / 30.00 ms | 30.07 ms | 4.39 MB (hbm) | ✓ 7e-05×tol | 223.76x vs nitrix-jax |
+| compactness_penalty | jax-cpu | p=4096 | `cupy.compactness_penalty` | skipped | — | — | — | — | — |
+| compactness_penalty | jax-cpu | p=4096 | `nitrix-jax` | ok | 250.4 µs / 262.9 µs | 169.71 ms | 774 MB (rss) | ✓ 0.00012×tol | 1.00x vs nitrix-jax |
+| compactness_penalty | jax-cpu | p=4096 | `numpy.compactness` | ok | 7.59 ms / 7.82 ms | 7.65 ms | 774 MB (rss) | ✓ 6.5e-05×tol | 30.31x vs nitrix-jax |
+| compactness_penalty | jax-cuda12 | p=4096 | `cupy.compactness_penalty` | ok | 592.0 µs / 599.4 µs | 214.10 ms | 1.10 MB (hbm) | ✓ 0.00012×tol | 5.09x vs nitrix-jax |
+| compactness_penalty | jax-cuda12 | p=4096 | `nitrix-jax` | ok | 116.4 µs / 120.3 µs | 643.35 ms | 84.99 MB (hbm) | ✓ 8.4e-05×tol | 1.00x vs nitrix-jax |
+| compactness_penalty | jax-cuda12 | p=4096 | `numpy.compactness` | ok | 7.39 ms / 7.54 ms | 8.25 ms | 1.10 MB (hbm) | ✓ 6.5e-05×tol | 63.52x vs nitrix-jax |
+:::
+
+*source: bench `8171f3fa` · nitrix `f42e7ff8`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:compactness_penalty -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n_regions` | *(undocumented — add to `_dimensions.yml`)* |
+| `n_points` | *(undocumented — add to `_dimensions.yml`)* |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->

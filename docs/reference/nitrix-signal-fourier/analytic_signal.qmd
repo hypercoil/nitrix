@@ -1,0 +1,75 @@
+---
+title: "analytic_signal"
+generated: true
+description: "Complex analytic signal of a real time series."
+---
+
+[‹ back to `nitrix.signal.fourier`](../nitrix-signal-fourier.qmd)
+
+<!-- nitrix:gen sig:analytic_signal -->
+```python
+analytic_signal(X: Float[Array, '...'], *, axis: int = -1, n: Optional[int] = None) -> Complex[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:analytic_signal -->
+Complex analytic signal of a real time series.
+
+The analytic signal $X_a$ satisfies
+$\operatorname{Re}(X_a) = X$ and
+$\operatorname{Im}(X_a) = \operatorname{Hilbert}(X)$;
+its magnitude $|X_a|$ is the envelope and its argument
+$\arg(X_a)$ is the instantaneous phase.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:analytic_signal -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X` | `Float` | `...` | — | Real-valued signal. Complex input raises a `TypeError`. |
+| `axis` | `int` | — | `-1` | Axis along which the FFT is taken. Default `-1`. |
+| `n` | `Optional[int]` | — | `None` | FFT length. `None` (default) uses `X.shape[axis]`; a larger `n` zero-pads. |
+
+**Returns** `Complex` — shape `...`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:analytic_signal -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **722.3 µs** (median, L4); up to **77.7× faster** than `scipy.signal.hilbert`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_ANALYTIC_SIGNAL.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| analytic_signal | jax-cpu | n_sig=2048,t=2048 | `cupyx.scipy.signal.hilbert` | skipped | — | — | — | — | — |
+| analytic_signal | jax-cpu | n_sig=2048,t=2048 | `nitrix-jax` | ok | 27.22 ms / 32.95 ms | 119.14 ms | 1364 MB (rss) | ✓ 0.0053×tol | 1.00x vs nitrix-jax |
+| analytic_signal | jax-cpu | n_sig=2048,t=2048 | `scipy.signal.hilbert` | ok | 56.52 ms / 57.20 ms | 54.65 ms | 1364 MB (rss) | ✓ 0.0058×tol | 2.08x vs nitrix-jax |
+| analytic_signal | jax-cuda12 | n_sig=2048,t=2048 | `cupyx.scipy.signal.hilbert` | ok | 792.9 µs / 802.1 µs | 412.75 ms | 16.78 MB (hbm) | ✓ 0.0078×tol | 1.11x vs nitrix-jax |
+| analytic_signal | jax-cuda12 | n_sig=2048,t=2048 | `nitrix-jax` | ok | 716.6 µs / 722.3 µs | 239.31 ms | 117.44 MB (hbm) | ✓ 0.0078×tol | 1.00x vs nitrix-jax |
+| analytic_signal | jax-cuda12 | n_sig=2048,t=2048 | `scipy.signal.hilbert` | ok | 55.67 ms / 55.94 ms | 53.72 ms | 16.78 MB (hbm) | ✓ 0.0058×tol | 77.70x vs nitrix-jax |
+| analytic_signal | jax-cpu | n_sig=4096,t=4096 | `cupyx.scipy.signal.hilbert` | skipped | — | — | — | — | — |
+| analytic_signal | jax-cpu | n_sig=4096,t=4096 | `nitrix-jax` | ok | 153.47 ms / 200.99 ms | 225.65 ms | 1364 MB (rss) | ✓ 0.006×tol | 1.00x vs nitrix-jax |
+| analytic_signal | jax-cpu | n_sig=4096,t=4096 | `scipy.signal.hilbert` | ok | 229.59 ms / 233.93 ms | 218.48 ms | 1364 MB (rss) | ✓ 0.0069×tol | 1.50x vs nitrix-jax |
+| analytic_signal | jax-cuda12 | n_sig=4096,t=4096 | `cupyx.scipy.signal.hilbert` | ok | 5.35 ms / 5.37 ms | 369.23 ms | 67.11 MB (hbm) | ✓ 0.0088×tol | 0.98x vs nitrix-jax |
+| analytic_signal | jax-cuda12 | n_sig=4096,t=4096 | `nitrix-jax` | ok | 5.49 ms / 5.51 ms | 218.53 ms | 469.76 MB (hbm) | ✓ 0.0088×tol | 1.00x vs nitrix-jax |
+| analytic_signal | jax-cuda12 | n_sig=4096,t=4096 | `scipy.signal.hilbert` | ok | 229.60 ms / 230.64 ms | 221.95 ms | 67.11 MB (hbm) | ✓ 0.0069×tol | 41.85x vs nitrix-jax |
+| analytic_signal | jax-cpu | n_sig=512,t=1024 | `cupyx.scipy.signal.hilbert` | skipped | — | — | — | — | — |
+| analytic_signal | jax-cpu | n_sig=512,t=1024 | `nitrix-jax` | ok | 2.31 ms / 2.35 ms | 90.68 ms | 1364 MB (rss) | ✓ 0.0047×tol | 1.00x vs nitrix-jax |
+| analytic_signal | jax-cpu | n_sig=512,t=1024 | `scipy.signal.hilbert` | ok | 2.76 ms / 2.84 ms | 5.71 ms | 1364 MB (rss) | ✓ 0.0048×tol | 1.20x vs nitrix-jax |
+| analytic_signal | jax-cuda12 | n_sig=512,t=1024 | `cupyx.scipy.signal.hilbert` | ok | 172.3 µs / 178.4 µs | 2.065 s | 2.10 MB (hbm) | ✓ 0.0072×tol | 1.34x vs nitrix-jax |
+| analytic_signal | jax-cuda12 | n_sig=512,t=1024 | `nitrix-jax` | ok | 128.7 µs / 193.2 µs | 340.42 ms | 14.68 MB (hbm) | ✓ 0.0072×tol | 1.00x vs nitrix-jax |
+| analytic_signal | jax-cuda12 | n_sig=512,t=1024 | `scipy.signal.hilbert` | ok | 2.82 ms / 4.31 ms | 5.96 ms | 2.10 MB (hbm) | ✓ 0.0048×tol | 21.93x vs nitrix-jax |
+:::
+
+*source: bench `5229f3d4` · nitrix `fcbe94d3`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:analytic_signal -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

@@ -1,0 +1,51 @@
+---
+title: "nitrix.semiring.algebras"
+generated: true
+signature-hash: 2f0984cddffcb05e
+description: "Built-in algebras shipped with `nitrix.semiring`."
+listing:
+  id: nitrix-semiring-algebras-symbols
+  contents: "nitrix-semiring-algebras/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.semiring.algebras`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Built-in algebras shipped with `nitrix.semiring`.
+
+Each algebra is exported as a module-level [`Semiring`](nitrix-semiring/Semiring.qmd) (relaxed) or
+[`StrictSemiring`](nitrix-semiring/StrictSemiring.qmd) instance:
+
+================== ===================== ============== ========================
+Algebra            Type                  Identity       Backward
+================== ===================== ============== ========================
+REAL               StrictSemiring        `0`          transpose-matmul
+LOG                StrictSemiring        `-inf`       softmax-weighted
+TROPICAL_MAX_PLUS  StrictSemiring        `-inf`       argmax-gather (subgrad)
+TROPICAL_MIN_PLUS  StrictSemiring        `+inf`       argmin-gather (subgrad)
+BOOLEAN            StrictSemiring        `False`      n/a (raises)
+EUCLIDEAN          Semiring (relaxed)    `0`          normalised-diff w/ guard
+================== ===================== ============== ========================
+
+The pre-built instances are intended for module-level use:
+    from nitrix.semiring import REAL, LOG, TROPICAL_MAX_PLUS
+    semiring_matmul(A, B, semiring=LOG)
+
+A user can compose their own [`Semiring`](nitrix-semiring/Semiring.qmd) by combining a
+[`Monoid`](nitrix-semiring/Monoid.qmd) with a [`Semigroup`](nitrix-semiring/Semigroup.qmd); the kernel substrate does not
+care whether the algebra is built-in or user-defined as long as the
+protocol shape is honoured.
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-semiring-algebras-symbols}
+:::

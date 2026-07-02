@@ -7,17 +7,17 @@ Intensity-domain augmentation transforms.
 Image-only perturbations of the intensity histogram -- the building
 blocks of contrast / appearance augmentation:
 
-- ``gamma_contrast`` -- a gamma (power-law) tone curve applied inside a
-  normalised intensity bracket.  Deterministic in the gamma (draw the
+- :func:`gamma_contrast` -- a gamma (power-law) tone curve applied inside
+  a normalised intensity bracket.  Deterministic in the gamma (draw the
   exponent in the caller); ``gamma < 1`` raises contrast, ``gamma > 1``
   lowers it.
-- ``random_histogram_shift`` -- a random, monotone, piecewise-linear
+- :func:`random_histogram_shift` -- a random, monotone, piecewise-linear
   remap of the intensity range through perturbed control points.
-- ``gibbs_ringing`` -- Gibbs (truncation) ringing from high-frequency
+- :func:`gibbs_ringing` -- Gibbs (truncation) ringing from high-frequency
   k-space truncation, the artefact of a finitely-sampled acquisition.
   Deterministic in the truncation strength (draw it in the caller).
-- ``gaussian_noise`` / ``rician_noise`` -- additive Gaussian noise and
-  the Rician magnitude-noise model.
+- :func:`gaussian_noise` / :func:`rician_noise` -- additive Gaussian
+  noise and the Rician magnitude-noise model.
 
 The noise generators take an explicit ``sigma`` (and a PRNG key, which
 the draw is intrinsic to); a randomly-drawn ``sigma`` is one
@@ -197,7 +197,26 @@ def gaussian_noise(
     *,
     sigma: Float[Array, '...'],
 ) -> Float[Array, '...']:
-    """Add i.i.d. Gaussian noise ``N(0, sigma**2)`` per element."""
+    """Add i.i.d. Gaussian noise per element.
+
+    Draws independent zero-mean Gaussian noise with standard deviation
+    ``sigma`` for every element of ``x`` and adds it to the input, so each
+    perturbation is distributed as :math:`\\mathcal{N}(0, \\sigma^2)`.
+
+    Parameters
+    ----------
+    x
+        Intensity tensor.
+    key
+        PRNG key.
+    sigma
+        Standard deviation of the additive noise (scalar or broadcastable
+        to ``x``).  Drawing it randomly is the caller's concern.
+
+    Returns
+    -------
+    Noised tensor of the same shape as ``x``.
+    """
     noise = jax.random.normal(key, x.shape, dtype=x.dtype)
     return x + sigma * noise
 
@@ -210,10 +229,27 @@ def rician_noise(
 ) -> Float[Array, '...']:
     """Add Rician noise -- the magnitude-image noise model.
 
-    ``sqrt((x + n_r)**2 + n_i**2)`` with ``n_r, n_i ~ N(0, sigma**2)``
-    independent.  Reduces to ``|x|`` at ``sigma = 0``.  This is the
-    noise distribution of the magnitude of a complex signal with
-    independent Gaussian real / imaginary perturbations.
+    Returns :math:`\\sqrt{(x + n_r)^2 + n_i^2}` with independent noise
+    terms :math:`n_r, n_i \\sim \\mathcal{N}(0, \\sigma^2)`.  Reduces to
+    :math:`|x|` at :math:`\\sigma = 0`.  This is the noise distribution of
+    the magnitude of a complex signal whose real and imaginary parts carry
+    independent Gaussian perturbations.
+
+    Parameters
+    ----------
+    x
+        Intensity tensor, interpreted as the true magnitude signal.
+    key
+        PRNG key.  It is split into two independent streams for the real
+        and imaginary noise components.
+    sigma
+        Standard deviation of the Gaussian perturbation on each of the
+        real and imaginary parts (scalar or broadcastable to ``x``).
+        Drawing it randomly is the caller's concern.
+
+    Returns
+    -------
+    Noised magnitude tensor of the same shape as ``x``.
     """
     k_r, k_i = jax.random.split(key, 2)
     n_r = jax.random.normal(k_r, x.shape, dtype=x.dtype) * sigma

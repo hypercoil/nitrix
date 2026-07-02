@@ -1,0 +1,72 @@
+---
+title: "reference_semiring_ell_rmatvec"
+generated: true
+description: "REAL adjoint (transpose) of the ELL matvec: $Y = A^{ top} X$."
+---
+
+[‹ back to `nitrix.semiring.ell`](../nitrix-semiring-ell.qmd)
+
+*Re-exported here; defined in `nitrix.semiring._reference`.*
+
+<!-- nitrix:gen sig:reference_semiring_ell_rmatvec -->
+```python
+reference_semiring_ell_rmatvec(values: Num[Array, 'm kmax'], indices: Num[Array, 'm kmax'], X: Num[Array, 'm ncol'], *, semiring: Semiring[S], n_cols: int) -> Num[Array, 'n_cols ncol']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:reference_semiring_ell_rmatvec -->
+REAL adjoint (transpose) of the ELL matvec: $Y = A^{\top} X$.
+
+Where [`semiring_ell_matmul`](../nitrix-semiring-ell/semiring_ell_matmul.qmd) gathers --
+$(A X)_i = \sum_p \mathtt{values}_{ip} \cdot
+X_{\,\mathtt{indices}_{ip}}$ -- this routine scatters,
+
+$$
+Y_{cj} = \sum_{(i, p)\,:\,\mathtt{indices}_{ip} = c}
+    \mathtt{values}_{ip} \cdot X_{ij},
+$$
+
+for the same implicit $m \times n_{\mathrm{cols}}$ operand
+$A$, accumulating with `jax.lax.fori_loop` over the ELL
+columns.  This is the **additive** adjoint: the scatter reduction is
+$+$ (not a general monoid), so pad positions -- whose `values`
+carry REAL's additive identity `0` -- contribute nothing, exactly as
+in the gather direction.  It is the single source of truth for both
+the `g_B` term of `real_ell_matmul_vjp` and the symmetric
+matvec $\tfrac{1}{2}(A X + A^{\top} X)$ used by the spectral
+solvers on adjacencies whose top-`k` construction did not preserve
+symmetry.
+
+`semiring` mirrors [`reference_semiring_ell_matmul`](../nitrix-semiring-ell/reference_semiring_ell_matmul.qmd)'s
+signature, but only **REAL** is implemented: the additive scatter has
+no meaning for a general monoid (the $\tfrac{1}{2}(A +
+A^{\top})$ averaging needs the linear structure, and a non-zero pad
+identity would inject spurious mass).  Any other algebra raises
+`NotImplementedError` rather than silently mis-reducing.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:reference_semiring_ell_rmatvec -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `values` | `Num` | `m` × `kmax` | — | ELL values, shape `(m, k_max)`. Pad positions must hold `0`. |
+| `indices` | `Num` | `m` × `kmax` | — | ELL column indices, shape `(m, k_max)`; the scatter targets. |
+| `X` | `Num` | `m` × `ncol` | — | Dense operand indexed by the ELL *row*, shape `(m, ncol)`. |
+| `semiring` | `Semiring[S]` | — | — | The algebra to reduce under. REAL only (see above). |
+| `n_cols` | `int` | — | — | Outer dimension of the implicit operand $A$ -- the length of `Y`'s leading axis (the scatter range). |
+
+**Returns** `Num` — shape `n_cols` × `ncol`. The adjoint product `Y`, shape `(n_cols, ncol)`, with dtype given by `jnp.result_type(values.dtype, X.dtype)`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:reference_semiring_ell_rmatvec -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `m` | rows of a multi-row contrast |
+| `kmax` | *(undocumented — add to `_dimensions.yml`)* |
+| `ncol` | *(undocumented — add to `_dimensions.yml`)* |
+| `n_cols` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

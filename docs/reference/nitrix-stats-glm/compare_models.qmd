@@ -1,0 +1,34 @@
+---
+title: "compare_models"
+generated: true
+description: "Per-element nested-model comparison (ModelArray full vs. reduced)."
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+<!-- nitrix:gen sig:compare_models -->
+```python
+compare_models(full: GLMResult, reduced: GLMResult, *, test: CompareTest = 'auto') -> Tuple[Float[Array, 'V'], Float[Array, 'V']]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:compare_models -->
+Per-element nested-model comparison (ModelArray full vs. reduced).
+
+Compares a `reduced` model nested within a `full` model (fewer
+parameters, fit on the same data) element by element, returning a test
+statistic and its p-value.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:compare_models -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `full` | `GLMResult` | — | — | The larger fitted [`GLMResult`](../nitrix-stats-glm/GLMResult.qmd) (more parameters). |
+| `reduced` | `GLMResult` | — | — | The nested fitted [`GLMResult`](../nitrix-stats-glm/GLMResult.qmd) (fewer parameters, same data). |
+| `test` | `CompareTest` | — | `'auto'` | Which test to run. `'F'` uses the extra-sum-of-squares F-test, $F = ((D_r - D_f) / (k_f - k_r)) / (D_f / \mathrm{dof}_f)$ on $(k_f - k_r, \mathrm{dof}_f)$ degrees of freedom. `'LRT'` uses the likelihood-ratio test, $2(\ell_f - \ell_r) \sim \chi^2(k_f - k_r)$. `'auto'` (default) selects `'F'` for a Gaussian family and `'LRT'` otherwise. |
+
+**Returns** `Tuple[Float[Array, 'V'], Float[Array, 'V']]`. `(V,)` test statistic (F or likelihood-ratio), one per element. `(V,)` upper-tail p-value of the statistic.
+<!-- nitrix:/gen -->
+

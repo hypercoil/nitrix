@@ -1,0 +1,60 @@
+---
+title: "nitrix.stats.priors"
+generated: true
+signature-hash: 0606f7bc556deec9
+description: "Lengthscale priors as REML regularisers (the `map_rho=` penalties)."
+listing:
+  id: nitrix-stats-priors-symbols
+  contents: "nitrix-stats-priors/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.stats.priors`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Lengthscale priors as REML regularisers (the `map_rho=` penalties).
+
+A small, curated set of priors on the Gaussian-process lengthscale
+$\rho$, each returned as a callable $\rho \mapsto -\log p(\rho)$
+suitable for the `map_rho=` argument of [`nitrix.stats.gp_fit`](nitrix-stats.qmd) and
+[`nitrix.stats.hgp_fit`](nitrix-stats.qmd).  This is the lightweight *penalised / maximum a
+posteriori* lengthscale: the REML objective $-2 l_R(\rho)$ gains
+$-2 \log p(\rho)$, so the selected $\rho$ is the *maximum a
+posteriori* value rather than the pure REML maximiser.  (A full posterior over
+$\rho$ is a separate concern, addressed by dedicated probabilistic
+programming tools such as Stan or `brms`.)
+
+Each builder returns $-\log p(\rho)$ up to an additive constant (the
+normaliser is irrelevant to the argmin), so they compose directly:
+    from nitrix.stats import gp_fit, invgamma_prior
+    res = gp_fit(Y, x, map_rho=invgamma_prior(a=3.0, b=0.5))
+
+The penalties are pure JAX (they ride the jitted $\rho$-search),
+elementwise on a scalar $\rho$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### Which prior?
+
+- [`halfnormal_prior`](nitrix-stats-priors/halfnormal_prior.qmd) -- shrinks large $\rho$ (keeps the GP from
+  going near-linear); a soft upper scale.
+- [`invgamma_prior`](nitrix-stats-priors/invgamma_prior.qmd) -- penalises small $\rho$ (the usual
+  penalised-complexity-style regulariser that stops the lengthscale collapsing
+  into noise-fitting); the practical default when $\rho$ is weakly
+  identified.
+- [`lognormal_prior`](nitrix-stats-priors/lognormal_prior.qmd) -- centres $\rho$ on a prior median
+  $\exp(\mu)$ with multiplicative spread; symmetric in
+  $\log \rho$.
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-stats-priors-symbols}
+:::

@@ -4,17 +4,16 @@
 """
 Exponential families for the GLM / GAM IRLS core.
 
-A ``Family`` is a frozen record of the pure GLM/IRLS primitives (link,
+A :class:`Family` is a frozen record of the pure GLM/IRLS primitives (link,
 variance, deviance, log-likelihood, an IRLS initialiser).  It is kept frozen --
 **not** a bare ``Protocol`` -- because hashability is load-bearing: a family
 rides as a static ``vmap`` / ``custom_vjp`` non-differentiable argument, exactly
-like ``VarCompSpec`` / ``SolverSpec``.  The *open set* is served by the
-``_FAMILIES`` registry + ``resolve_family``: callers pass ``str`` (a built-in)
-or any ``Family`` instance.
+like a variance-component or solver specification.  The *open set* of families is
+served by a built-in registry together with :func:`resolve_family`: callers pass
+a ``str`` (a built-in name) or any :class:`Family` instance.
 
-This lives in its own module (not ``glm``) so the IRLS core (``_irls``), the
-GLM surface (``glm``), and the GAM surface (``gam``) can all import the family
-type without a cycle.
+This lives in its own module (not ``glm``) so the IRLS core, the GLM surface, and
+the GAM surface can all import the family type without a cycle.
 """
 
 from __future__ import annotations
@@ -67,32 +66,53 @@ _ETA_MAX = 20.0
 
 
 def _safe_exp(eta: Array) -> Array:
-    """Overflow-safe ``exp`` inverse link: ``exp`` of an ``eta`` clamped to the
-    ``+-_ETA_MAX`` numerically-sane range (shared by the log-link families)."""
+    """Overflow-safe exponential inverse link shared by the log-link families.
+
+    Computes :math:`\\exp(\\eta)` after clamping the linear predictor to the
+    numerically-sane range :math:`\\pm` ``_ETA_MAX``, so the exponential cannot
+    overflow and the IRLS weights cannot run away.
+
+    Parameters
+    ----------
+    eta : Array
+        Linear predictor :math:`\\eta`, of arbitrary shape.
+
+    Returns
+    -------
+    Array
+        The clamped inverse link :math:`\\exp(\\operatorname{clip}(\\eta))`, of
+        the same shape as ``eta``.
+    """
     return jnp.exp(jnp.clip(eta, -_ETA_MAX, _ETA_MAX))
 
 
 @dataclass(frozen=True)
 class Family:
-    """An exponential-family + link, as a record of pure functions.
+    """An exponential family together with a link, as a record of pure functions.
 
-    Frozen and hashable so it rides as a static config (and a future
-    ``custom_vjp`` nondiff arg).  The fields are the GLM/IRLS primitives:
+    Frozen and hashable so it rides as a static configuration argument (and a
+    future ``custom_vjp`` non-differentiable argument).  The fields are the
+    GLM/IRLS primitives:
 
-    - ``link`` / ``linkinv`` -- ``g(mu)`` and ``g^{-1}(eta)``.
-    - ``mu_eta`` -- ``d mu / d eta`` as a function of ``eta`` (IRLS weight).
-    - ``variance`` -- the variance function ``V(mu)``.
-    - ``unit_deviance`` -- per-observation deviance contribution ``d(y, mu)``.
-    - ``init_mu`` -- a fitted-mean initialiser from ``y`` (IRLS start).
-    - ``loglik`` -- per-observation log-likelihood ``l(y, mu, dispersion)``
-      (the dispersion argument is ignored by the fixed-dispersion families).
+    - ``link`` / ``linkinv`` -- the link :math:`g(\\mu)` and inverse link
+      :math:`g^{-1}(\\eta)`.
+    - ``mu_eta`` -- the derivative :math:`\\mathrm{d}\\mu / \\mathrm{d}\\eta` as
+      a function of :math:`\\eta` (an IRLS weight).
+    - ``variance`` -- the variance function :math:`V(\\mu)`.
+    - ``unit_deviance`` -- the per-observation deviance contribution
+      :math:`d(y, \\mu)`.
+    - ``init_mu`` -- a fitted-mean initialiser from :math:`y` (the IRLS start).
+    - ``loglik`` -- the per-observation log-likelihood
+      :math:`\\ell(y, \\mu, \\phi)` (the dispersion argument :math:`\\phi` is
+      ignored by the fixed-dispersion families).
     - ``has_fixed_dispersion`` -- ``True`` when the dispersion is 1 (binomial /
       Poisson; negative-binomial with a *known* ``alpha``); ``False`` when it is
       estimated (Gaussian, Gamma).
-    - ``eta_bound`` -- the IRLS clamp on the linear predictor (``inf`` for the
-      bounded identity / logit links; ``_ETA_MAX`` for the unbounded ``exp``
-      links, where it stabilises the working response).  The IRLS core
-      (:func:`~nitrix.stats._irls._working`) clamps ``eta`` to ``+-eta_bound``.
+    - ``eta_bound`` -- the IRLS clamp on the linear predictor
+      (:math:`\\infty` for the bounded identity / logit links; ``_ETA_MAX`` for
+      the unbounded exponential links, where it stabilises the working
+      response).  The IRLS core clamps :math:`\\eta` to
+      :math:`\\pm` ``eta_bound``.
     """
 
     name: str
@@ -109,11 +129,22 @@ class Family:
     def clip_eta(self, eta: Array) -> Array:
         """Clamp the linear predictor to the family's numerically-sane range.
 
-        ``+-eta_bound`` -- ``inf`` for the bounded identity / logit links (a
-        no-op), ``_ETA_MAX`` for the unbounded ``exp`` links (where an
-        un-clamped ``eta`` blows up ``exp(eta)`` and the IRLS weights).  The
-        single source of truth for the clamp across the IRLS / PQL / Laplace
+        Clamps :math:`\\eta` to :math:`\\pm` ``eta_bound`` -- :math:`\\infty`
+        for the bounded identity / logit links (a no-op), ``_ETA_MAX`` for the
+        unbounded exponential links (where an un-clamped :math:`\\eta` blows up
+        :math:`\\exp(\\eta)` and the IRLS weights).  This is the single source
+        of truth for the clamp across the IRLS, PQL, and Laplace
         working-response sites.
+
+        Parameters
+        ----------
+        eta : Array
+            Linear predictor :math:`\\eta`, of arbitrary shape.
+
+        Returns
+        -------
+        Array
+            The clamped linear predictor, of the same shape as ``eta``.
         """
         return jnp.clip(eta, -self.eta_bound, self.eta_bound)
 
@@ -122,12 +153,26 @@ class Family:
 
         Only the link triple (``link`` / ``linkinv`` / ``mu_eta``) and the IRLS
         ``eta_bound`` change; the distribution -- ``variance`` / ``unit_deviance``
-        / ``loglik`` / ``init_mu`` (all functions of ``mu``, not ``eta``) -- is
-        untouched, so e.g. ``BINOMIAL.with_link('probit')`` is the probit model
-        and ``POISSON.with_link('sqrt')`` the square-root-link Poisson, exactly as
-        in ``statsmodels`` ``Family(link=...)`` / mgcv.  The shared IRLS core is
-        Fisher scoring (``w = mu_eta^2 / V``, ``z = eta + (y - mu) / mu_eta``), so
-        any link composes without a solver change.
+        / ``loglik`` / ``init_mu`` (all functions of :math:`\\mu`, not
+        :math:`\\eta`) -- is untouched, so e.g. ``BINOMIAL.with_link('probit')``
+        is the probit model and ``POISSON.with_link('sqrt')`` the
+        square-root-link Poisson, exactly as in ``statsmodels``'
+        ``Family(link=...)`` or ``mgcv``.  The shared IRLS core is Fisher scoring
+        (weight :math:`w = (\\mathrm{d}\\mu/\\mathrm{d}\\eta)^2 / V` and working
+        response :math:`z = \\eta + (y - \\mu) / (\\mathrm{d}\\mu/\\mathrm{d}\\eta)`),
+        so any link composes without a solver change.
+
+        Parameters
+        ----------
+        link : str or Link
+            The replacement link, as a built-in name or a :class:`Link`
+            instance; resolved via :func:`resolve_link`.
+
+        Returns
+        -------
+        Family
+            A copy of this family carrying the substituted link (and its
+            ``eta_bound``), with the name suffixed by the link's name.
         """
         lk = resolve_link(link)
         return replace(
@@ -144,9 +189,10 @@ class Family:
 class Link:
     """A link function as a record of its three IRLS primitives.
 
-    ``link`` = ``g(mu)``, ``linkinv`` = ``g^{-1}(eta)``, ``mu_eta`` = ``d mu /
-    d eta`` (as a function of ``eta``); ``eta_bound`` is the IRLS linear-predictor
-    clamp (``inf`` unless the inverse link can overflow).  Compose onto a
+    Here ``link`` is :math:`g(\\mu)`, ``linkinv`` is :math:`g^{-1}(\\eta)`, and
+    ``mu_eta`` is :math:`\\mathrm{d}\\mu / \\mathrm{d}\\eta` (as a function of
+    :math:`\\eta`); ``eta_bound`` is the IRLS linear-predictor clamp
+    (:math:`\\infty` unless the inverse link can overflow).  Compose onto a
     distribution with :meth:`Family.with_link`.
     """
 
@@ -181,6 +227,7 @@ GAUSSIAN = Family(
     init_mu=_identity,
     loglik=_gaussian_loglik,
 )
+r"""The Gaussian family: identity link, constant unit variance -- ordinary least squares."""
 
 
 def _logit(mu: Array) -> Array:
@@ -218,6 +265,7 @@ BINOMIAL = Family(
     init_mu=lambda y: (y + 0.5) / 2.0,
     loglik=_binomial_loglik,
 )
+r"""The binomial family: logit link, variance :math:`\mu(1 - \mu)` -- logistic regression."""
 
 
 def _poisson_deviance(y: Array, mu: Array) -> Array:
@@ -242,6 +290,7 @@ POISSON = Family(
     loglik=_poisson_loglik,
     eta_bound=_ETA_MAX,
 )
+r"""The Poisson family: log link, variance :math:`\mu` -- log-linear counts."""
 
 
 def _log_link(mu: Array) -> Array:
@@ -284,16 +333,30 @@ GAMMA = Family(
     loglik=_gamma_loglik,
     eta_bound=_ETA_MAX,
 )
+r"""The gamma family: log link, variance :math:`\mu^2` -- positive continuous responses."""
 
 
 def negbinomial(alpha: float = 1.0) -> Family:
     """A negative-binomial (NB2) family with **known** dispersion ``alpha``.
 
-    NB2 parameterisation: ``V(mu) = mu + alpha * mu^2`` (overdispersed counts),
-    log link.  ``alpha`` is fixed at construction -- with it known, NB2 is a
-    proper one-parameter family (GLM dispersion 1), so the shared IRLS core fits
-    it directly.  Jointly *estimating* ``alpha`` (the profile-MLE outer loop) is
-    a documented follow-up.  ``alpha -> 0`` recovers Poisson.
+    NB2 parameterisation: variance :math:`V(\\mu) = \\mu + \\alpha \\mu^2`
+    (overdispersed counts), log link.  ``alpha`` is fixed at construction --
+    with it known, NB2 is a proper one-parameter family (GLM dispersion 1), so
+    the shared IRLS core fits it directly.  Jointly *estimating* ``alpha`` (the
+    profile-MLE outer loop) is a follow-up.  The limit
+    :math:`\\alpha \\to 0` recovers the Poisson family.
+
+    Parameters
+    ----------
+    alpha : float, default=1.0
+        The known NB2 dispersion :math:`\\alpha`, entering the variance as
+        :math:`\\mu + \\alpha \\mu^2`.  Must be strictly positive.
+
+    Returns
+    -------
+    Family
+        A negative-binomial family with the given fixed dispersion and a log
+        link.
     """
     if alpha <= 0.0:
         raise ValueError(f'negbinomial: alpha must be > 0, got {alpha}.')
@@ -338,26 +401,40 @@ def negbinomial(alpha: float = 1.0) -> Family:
 
 # Default NB2 (alpha = 1); for another dispersion pass ``negbinomial(alpha)``.
 NEGBINOMIAL = negbinomial(1.0)
+r"""The negative-binomial family at dispersion ``1.0`` (log link) -- a default for overdispersed counts; build others with ``negbinomial(theta)``."""
 
 
 def tweedie(p: float = 1.5) -> Family:
     """A Tweedie family with **fixed** power ``p`` (compound Poisson-Gamma).
 
-    ``1 < p < 2`` -- the semicontinuous regime (an exact zero with probability
-    mass plus a continuous positive part: rainfall, insurance claims, some
-    imaging measures).  Variance ``V(mu) = mu^p``, log link, dispersion estimated
-    (``has_fixed_dispersion=False``, like Gamma).  With ``p`` fixed the *mean*
-    coefficients fit the shared IRLS core directly (working weight ``mu^{2-p}``);
-    jointly profiling ``p`` is a follow-up (``p -> 1`` recovers Poisson, ``p -> 2``
-    Gamma).
+    The regime :math:`1 < p < 2` is the semicontinuous one (an exact zero with
+    probability mass plus a continuous positive part: rainfall, insurance claims,
+    some imaging measures).  Variance :math:`V(\\mu) = \\mu^p`, log link,
+    dispersion estimated (``has_fixed_dispersion=False``, like Gamma).  With
+    ``p`` fixed the *mean* coefficients fit the shared IRLS core directly
+    (working weight :math:`\\mu^{2-p}`); jointly profiling ``p`` is a follow-up
+    (:math:`p \\to 1` recovers Poisson, :math:`p \\to 2` Gamma).
 
     The unit deviance is the closed form
 
-        d(y, mu) = 2[ y^{2-p}/((1-p)(2-p)) - y mu^{1-p}/(1-p) + mu^{2-p}/(2-p) ];
+    :math:`d(y, \\mu) = 2\\left[ y^{2-p}/((1-p)(2-p)) - y\\,\\mu^{1-p}/(1-p) + \\mu^{2-p}/(2-p) \\right]`;
 
     the log-likelihood uses the **saddlepoint approximation** (with the exact
-    compound-Poisson zero mass at ``y = 0``) -- enough for ``aic`` / ``bic`` model
-    comparison; the exact Dunn-Smyth series is the follow-up.
+    compound-Poisson zero mass at :math:`y = 0`) -- enough for :func:`aic` /
+    :func:`bic` model comparison; the exact Dunn-Smyth series is a follow-up.
+
+    Parameters
+    ----------
+    p : float, default=1.5
+        The fixed Tweedie power :math:`p`, entering the variance as
+        :math:`\\mu^p`.  Must satisfy :math:`1 < p < 2` (the compound
+        Poisson-Gamma regime).
+
+    Returns
+    -------
+    Family
+        A Tweedie family with the given fixed power, a log link, and an
+        estimated dispersion.
     """
     if not 1.0 < p < 2.0:
         raise ValueError(
@@ -408,6 +485,7 @@ def tweedie(p: float = 1.5) -> Family:
 
 # Default Tweedie (p = 1.5); for another power pass ``tweedie(p)``.
 TWEEDIE = tweedie(1.5)
+r"""The Tweedie family at power ``1.5`` (log link) -- compound Poisson-gamma responses; build others with ``tweedie(p)``."""
 
 
 # ---------------------------------------------------------------------------
@@ -417,6 +495,7 @@ TWEEDIE = tweedie(1.5)
 IDENTITY_LINK = Link(
     name='identity', link=_identity, linkinv=_identity, mu_eta=_ones_like
 )
+r"""The identity link :math:`g(\mu) = \mu`."""
 
 LOG_LINK = Link(
     name='log',
@@ -425,10 +504,12 @@ LOG_LINK = Link(
     mu_eta=_safe_exp,
     eta_bound=_ETA_MAX,
 )
+r"""The log link :math:`g(\mu) = \log \mu`."""
 
 LOGIT_LINK = Link(
     name='logit', link=_logit, linkinv=_expit, mu_eta=_binomial_mu_eta
 )
+r"""The logit link :math:`g(\mu) = \log(\mu / (1 - \mu))`."""
 
 
 def _probit_linkinv(eta: Array) -> Array:
@@ -445,6 +526,7 @@ PROBIT_LINK = Link(
     linkinv=_probit_linkinv,
     mu_eta=_probit_mu_eta,
 )
+r"""The probit link :math:`g(\mu) = \Phi^{-1}(\mu)`."""
 
 
 def _cloglog_link(mu: Array) -> Array:
@@ -469,6 +551,7 @@ CLOGLOG_LINK = Link(
     mu_eta=_cloglog_mu_eta,
     eta_bound=_ETA_MAX,
 )
+r"""The complementary log-log link :math:`g(\mu) = \log(-\log(1 - \mu))`."""
 
 SQRT_LINK = Link(
     name='sqrt',
@@ -476,6 +559,7 @@ SQRT_LINK = Link(
     linkinv=lambda eta: eta * eta,
     mu_eta=lambda eta: 2.0 * eta,
 )
+r"""The square-root link :math:`g(\mu) = \sqrt{\mu}`."""
 
 
 def _inverse_mu_eta(eta: Array) -> Array:
@@ -493,6 +577,7 @@ INVERSE_LINK = Link(
     mu_eta=_inverse_mu_eta,
     eta_bound=float('inf'),
 )
+r"""The inverse link :math:`g(\mu) = 1 / \mu`."""
 
 
 _LINKS: Mapping[str, Link] = {
@@ -511,6 +596,22 @@ def resolve_link(link: Union[str, Link]) -> Link:
 
     Built-ins: ``'identity'`` / ``'log'`` / ``'logit'`` / ``'probit'`` /
     ``'cloglog'`` / ``'sqrt'`` / ``'inverse'``; or pass a :class:`Link` directly.
+
+    Parameters
+    ----------
+    link : str or Link
+        A built-in link name or a :class:`Link` instance.  A :class:`Link` is
+        returned unchanged.
+
+    Returns
+    -------
+    Link
+        The resolved link.
+
+    Raises
+    ------
+    ValueError
+        If ``link`` is a string that names no built-in link.
     """
     if isinstance(link, Link):
         return link
@@ -536,12 +637,29 @@ _FAMILIES: Mapping[str, Family] = {
 
 
 def resolve_family(family: Union[str, Family]) -> Family:
-    """Resolve a ``str`` name (a built-in) or a ``Family`` instance to a family.
+    """Resolve a ``str`` name (a built-in) or a :class:`Family` instance to a family.
 
-    ``glm_fit`` / ``gam_fit`` accept either; a string is looked up in the
-    built-in registry (``'gaussian'`` / ``'binomial'`` / ``'poisson'`` /
-    ``'gamma'`` / ``'negbinomial'``).  ``'negbinomial'`` resolves to the default
-    ``alpha = 1``; for another dispersion pass ``negbinomial(alpha)`` directly.
+    :func:`glm_fit` / :func:`gam_fit` accept either; a string is looked up in
+    the built-in registry (``'gaussian'`` / ``'binomial'`` / ``'poisson'`` /
+    ``'gamma'`` / ``'negbinomial'`` / ``'tweedie'``).  ``'negbinomial'`` resolves
+    to the default :math:`\\alpha = 1`; for another dispersion pass
+    :func:`negbinomial` directly.
+
+    Parameters
+    ----------
+    family : str or Family
+        A built-in family name or a :class:`Family` instance.  A :class:`Family`
+        is returned unchanged.
+
+    Returns
+    -------
+    Family
+        The resolved family.
+
+    Raises
+    ------
+    ValueError
+        If ``family`` is a string that names no built-in family.
     """
     if isinstance(family, Family):
         return family

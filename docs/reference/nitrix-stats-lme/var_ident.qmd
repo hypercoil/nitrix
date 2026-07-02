@@ -1,0 +1,44 @@
+---
+title: "var_ident"
+generated: true
+description: "Per-stratum residual variance function (`nlme` `varIdent`)."
+---
+
+[‹ back to `nitrix.stats.lme`](../nitrix-stats-lme.qmd)
+
+*Re-exported here; defined in `nitrix.stats.lme._varfunc`.*
+
+<!-- nitrix:gen sig:var_ident -->
+```python
+var_ident(strata: Float[Array, 'N']) -> VarFunc
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:var_ident -->
+Per-stratum residual variance function (`nlme` `varIdent`).
+
+Fits a separate residual variance for each stratum,
+$\operatorname{Var}(\varepsilon_i) = \sigma_e^2 \exp(2 \tau_{s(i)})$.
+`strata` is an integer factor with levels `0 .. S-1`; the first level is
+the reference ($\tau_0 = 0$, $g = 1$), leaving $S - 1$ free
+parameters, with $\log g_i = \tau_{s(i)}$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:var_ident -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `strata` | `Float` | `N` | — | The `(N,)` stratum factor, one integer-valued level per observation in `0 .. S-1`. The number of strata $S$ is inferred as one plus the maximum level; level `0` is the reference. |
+
+**Returns** `VarFunc`. A variance-function record named `'varIdent'` with $S - 1$ parameters, carrying the stratum index as its covariate and the stratum-lookup log-scale map.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:var_ident -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `N` | observations — time points, subjects, or sampled points |
+<!-- nitrix:/gen -->

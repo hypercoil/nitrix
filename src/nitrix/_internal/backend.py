@@ -4,7 +4,7 @@
 """
 Backend selection and fallback observability.
 
-Implements the three-level resolution required by SPEC §3.2:
+Implements a three-level resolution of the execution backend:
 
     explicit ``backend=`` keyword > ``NITRIX_BACKEND`` env var > auto-detect
 
@@ -12,7 +12,7 @@ Auto-detect resolves to ``pallas-cuda`` only when an NVIDIA GPU of Ampere
 generation (compute capability ``sm_80``) or newer is present; otherwise
 to ``jax``.
 
-The ``NitrixBackendFallback`` warning category is emitted at most once
+The :class:`NitrixBackendFallback` warning category is emitted at most once
 per ``(function, shape-signature, dtype, backend)`` tuple per process.
 Set ``NITRIX_SILENCE_FALLBACK=1`` to suppress; set
 ``NITRIX_STRICT_BACKEND=1`` to convert fallback to error.
@@ -40,11 +40,11 @@ _VALID_BACKENDS: tuple[Backend, ...] = ('auto', 'pallas-cuda', 'jax')
 class NitrixBackendFallback(UserWarning):
     """Emitted when a backend resolves to a fallback path.
 
-    Per SPEC §2 tenet 7 ("Loud fallbacks"), silent perf regressions are
-    a bug. Whenever Pallas Triton cannot tile a given shape × algebra
-    combination, the resolved backend changes to ``jax`` and this
-    warning is raised exactly once per ``(function, shape-signature,
-    dtype, backend)`` tuple per process.
+    Fallbacks are made loud on the principle that a silent performance
+    regression is a bug. Whenever Pallas Triton cannot tile a given
+    shape × algebra combination, the resolved backend changes to ``jax``
+    and this warning is raised exactly once per ``(function,
+    shape-signature, dtype, backend)`` tuple per process.
 
     To silence: ``NITRIX_SILENCE_FALLBACK=1``.
     To escalate to error: ``NITRIX_STRICT_BACKEND=1``.
@@ -52,8 +52,12 @@ class NitrixBackendFallback(UserWarning):
 
 
 class NitrixBackendError(RuntimeError):
-    """Raised when ``NITRIX_STRICT_BACKEND=1`` and a fallback would occur,
-    or when a user-requested backend is unsupported on this host."""
+    """Raised when a backend cannot be honoured on this host.
+
+    This occurs either when ``NITRIX_STRICT_BACKEND=1`` and a fallback
+    would otherwise occur, or when a user-requested backend is
+    unsupported on the current hardware.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +76,14 @@ def _has_ampere_or_newer_nvidia() -> bool:
     tuple or as a dotted-string).  If the capability is not exposed,
     we conservatively trust ``device_kind`` for the Ampere+ family
     names.  Pre-Ampere NVIDIA falls back to JAX with a one-time warning.
+
+    Returns
+    -------
+    bool
+        ``True`` if every visible GPU is of Ampere generation
+        (compute capability major version 8) or newer, ``False`` if
+        no GPU is visible or any visible GPU is pre-Ampere or of an
+        undetermined capability.
     """
     try:
         gpus = jax.devices('gpu')
@@ -167,6 +179,13 @@ def auto_backend() -> ResolvedBackend:
     backend-axis half of the reproducible-dispatch principle; an explicit
     ``backend=`` keyword or ``NITRIX_BACKEND`` still overrides (explicit > mode),
     exactly as an explicit ``driver=`` overrides the numerical-variant axis.
+
+    Returns
+    -------
+    {'pallas-cuda', 'jax'}
+        ``'pallas-cuda'`` when an Ampere+ NVIDIA GPU is present and
+        reproducibility mode is off; ``'jax'`` otherwise (including
+        whenever reproducibility mode is enabled).
     """
     # Local import to avoid any import-order coupling (config imports no
     # backend symbols, so this direction is acyclic).
@@ -180,16 +199,24 @@ def auto_backend() -> ResolvedBackend:
 
 
 def default_backend_is_gpu() -> bool:
-    """Whether JAX's default backend is a GPU.
+    r"""Whether JAX's default backend is a GPU.
 
     The static (trace-time) signal for *platform-dependent algorithm*
-    selection -- distinct from ``auto_backend``, which picks a *kernel*
+    selection -- distinct from :func:`auto_backend`, which picks a *kernel*
     backend from host capability.  The motivating case is the recursive IIR
-    filters (``signal._iir``): the sequential ``lax.scan`` recurrence wins on
-    the CPU (low overhead, no parallelism to exploit) while the parallel-prefix
-    ``associative_scan`` wins on the GPU (``O(log T)`` depth fills the device),
-    so the optimal engine flips with the deployment target.  ``jax.default_
-    backend()`` is concrete at trace time, so branching on it is ``jit``-safe.
+    filters: the sequential ``lax.scan`` recurrence wins on the CPU (low
+    overhead, no parallelism to exploit) while the parallel-prefix
+    ``associative_scan`` wins on the GPU (:math:`O(\log T)` depth fills the
+    device), so the optimal engine flips with the deployment target.
+    ``jax.default_backend()`` is concrete at trace time, so branching on it
+    is ``jit``-safe.
+
+    Returns
+    -------
+    bool
+        ``True`` if JAX's default backend platform is ``'gpu'``,
+        ``False`` otherwise (including when no default backend can be
+        determined).
     """
     try:
         return jax.default_backend() == 'gpu'
@@ -250,7 +277,22 @@ _warned_lock = threading.Lock()
 
 
 def _shape_signature(*shapes: Any) -> str:
-    """Stringify shapes for the dedupe key."""
+    """Stringify shapes for the deduplication key.
+
+    Parameters
+    ----------
+    *shapes
+        Variadic shape descriptors. Each may be ``None``, a tuple or
+        list of dimension sizes, or any other object; tuples and lists
+        are rendered as their dimensions joined by ``'x'``, and other
+        values via :func:`str`.
+
+    Returns
+    -------
+    str
+        A single string encoding every argument, with per-shape
+        descriptors joined by ``';'``.
+    """
     parts = []
     for s in shapes:
         if s is None:
@@ -287,6 +329,18 @@ def fallback(
         Tuple of input shape tuples (or scalar descriptors) for the dedupe key.
     dtype
         The relevant dtype (or ``None``) for the dedupe key.
+
+    Returns
+    -------
+    {'pallas-cuda', 'jax'}
+        The ``resolved`` backend, returned unchanged so the caller can
+        proceed on the backend that will actually run.
+
+    Raises
+    ------
+    NitrixBackendError
+        If ``NITRIX_STRICT_BACKEND=1`` and ``requested`` differs from
+        ``resolved`` (a fallback is escalated to an error).
     """
     if requested == resolved:
         return resolved

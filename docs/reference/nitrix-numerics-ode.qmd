@@ -1,0 +1,80 @@
+---
+title: "nitrix.numerics.ode"
+generated: true
+signature-hash: b2bdb6f3bcf0de27
+description: "Fixed-step ODE integrators."
+listing:
+  id: nitrix-numerics-ode-symbols
+  contents: "nitrix-numerics-ode/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.numerics.ode`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Fixed-step ODE integrators.
+
+Pure-JAX explicit integrators for $dy/dt = f(t, y)$, returning the state
+at each requested time point.  These are the substrate for continuous-time
+("neural-ODE") models -- a portable, differentiable alternative to a
+third-party ODE library (the integration is a `lax.scan`, so reverse-mode
+`grad` differentiates straight through the solver).
+
+- [`euler`](nitrix-numerics-ode/euler.qmd) -- the first-order explicit step (cheap, low accuracy).
+- [`midpoint`](nitrix-numerics-ode/midpoint.qmd) -- the second-order explicit-midpoint step (RK2).
+- [`rk4`](nitrix-numerics-ode/rk4.qmd) -- the classic fourth-order Runge--Kutta step (the default).
+- [`local_linearization`](nitrix-numerics-ode/local_linearization.qmd) -- the exponential / local-linearisation step
+  (Ozaki; the scheme behind SPM's `spm_int`): linearise $f$ about the
+  current state and integrate the linear part *exactly* via a matrix
+  exponential.  A-stable -- the method for *stiff* systems (e.g. the
+  Balloon--Windkessel haemodynamic model) where an explicit step needs a
+  punishingly small `dt`.  Exact (to round-off) for affine-autonomous
+  $f(y) = A y + b$.  Requires a flat 1-D state (it builds the Jacobian);
+  `vmap` it for batched / multi-region integration.
+- [`odeint`](nitrix-numerics-ode/odeint.qmd) -- dispatch over `method`.
+
+One step is taken per consecutive pair of time points, so granularity is
+controlled by how densely `t` is sampled.  The vector field takes
+`f(t, y)`; extra parameters are closed over in the caller -- e.g.
+`odeint(lambda t, y: field(t, y, args), y0, t)`.  There is deliberately
+*no* `args=` keyword: the integrator's contract is a bare `f(t, y)`, and
+closed-over arrays differentiate and `jit` exactly as a kwarg would.
+
+The step arithmetic is the textbook explicit-Runge--Kutta tableau (the same
+`Euler` / explicit-`Midpoint` / classic `RK4` steps a library such as
+`diffrax` takes for those fixed-step methods), so a model whose weights
+were trained or evaluated against that arithmetic reproduces here -- the
+bring-your-own-weights parity requirement of the surface neural-ODE backend
+swap (see `docs/feature-requests/ode-integrators.md`).
+
+Roadmap: *adaptive*
+steppers (the embedded Dormand--Prince `dopri5` / `dopri8` and `tsit5`
+pairs -- a `while_loop` + step-size controller, a different control-flow
+shape from this static `scan`), *symplectic* steppers (leapfrog /
+velocity-Verlet, for Hamiltonian flows and HMC), *stochastic* steppers (the
+SDE family -- Euler--Maruyama / stochastic Heun), and the memory-efficient
+continuous-adjoint backward (a fixed-point + Krylov solve) layering on the
+same `f(t, y)` interface.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `t` | *(undocumented — add to `_dimensions.yml`)* |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-numerics-ode-symbols}
+:::

@@ -1,0 +1,20 @@
+---
+title: "BINOMIAL"
+generated: true
+description: "The binomial family: logit link, variance :math:` mu(1 -  mu)` -- logistic regression."
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+*Re-exported here; defined in `nitrix.stats._family`.*
+
+<!-- nitrix:gen sig:BINOMIAL -->
+```python
+BINOMIAL = Family(name='binomial', has_fixed_dispersion=True, link=_logit, linkinv=_expit, mu_eta=_binomial_mu_eta, variance=(lambda mu: mu * (1.0 - mu)), unit_deviance=_binomial_deviance, init_mu=(lambda y: (y + 0.5) / 2.0), loglik=_binomial_loglik)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:BINOMIAL -->
+The binomial family: logit link, variance $\mu(1 - \mu)$ -- logistic regression.
+<!-- nitrix:/gen -->
+

@@ -1,0 +1,45 @@
+---
+title: "fdr_by"
+generated: true
+description: "Benjamini-Yekutieli false-discovery-rate correction."
+---
+
+[‹ back to `nitrix.stats.inference.multiple_comparisons`](../nitrix-stats-inference-multiple_comparisons.qmd)
+
+<!-- nitrix:gen sig:fdr_by -->
+```python
+fdr_by(p_values: Float[Array, 'n'], *, alpha: float = 0.05) -> Tuple[Bool[Array, 'n'], Float[Array, 'n']]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:fdr_by -->
+Benjamini-Yekutieli false-discovery-rate correction.
+
+Valid under arbitrary dependence of the p-values. This is the
+Benjamini-Hochberg step-up applied at level $\alpha / c(m)$ with the
+harmonic number $c(m) = \sum_{k=1}^{m} 1/k$, equivalently the
+Benjamini-Hochberg q-values scaled by $c(m)$. Use it when the p-values
+may be arbitrarily (for example, negatively) dependent and the
+positive-dependence assumption of Benjamini-Hochberg is unsafe; the price is
+being a factor of about $\log(m)$ more conservative.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:fdr_by -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `p_values` | `Float` | `n` | — | Flat vector of `n` per-element p-values. |
+| `alpha` | `float` | — | `0.05` | Target false-discovery rate defining the rejection mask. Default `0.05`. |
+
+**Returns** `Tuple[Bool[Array, 'n'], Float[Array, 'n']]`. The rejection mask `p_adjusted <= alpha`. The Benjamini-Yekutieli adjusted p-values (q-values), enforced monotone non-decreasing in rank.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:fdr_by -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

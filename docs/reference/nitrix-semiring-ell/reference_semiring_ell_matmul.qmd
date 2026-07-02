@@ -1,0 +1,55 @@
+---
+title: "reference_semiring_ell_matmul"
+generated: true
+description: "Pure-JAX reference for [`semiring_ell_matmul`](../nitrix-semiring-ell/semiring_ell_matmul.qmd)."
+---
+
+[‹ back to `nitrix.semiring.ell`](../nitrix-semiring-ell.qmd)
+
+*Re-exported here; defined in `nitrix.semiring._reference`.*
+
+<!-- nitrix:gen sig:reference_semiring_ell_matmul -->
+```python
+reference_semiring_ell_matmul(values: Num[Array, 'm kmax'], indices: Num[Array, 'm kmax'], B: Num[Array, 'n_cols ncol'], *, semiring: Semiring[S], n_cols: int | None = None) -> Num[Array, 'm ncol']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:reference_semiring_ell_matmul -->
+Pure-JAX reference for [`semiring_ell_matmul`](../nitrix-semiring-ell/semiring_ell_matmul.qmd).
+
+The implicit $m \times n$ sparse left operand is held in ELL
+layout: row `i` has neighbour list `indices[i, :]` with weights
+`values[i, :]`.  Multiplying it against the dense right operand
+`B` gathers those neighbours from the rows of `B` and reduces them
+under the algebra,
+$C_{ij} = \bigoplus_p \left( \mathtt{values}_{ip} \otimes
+B_{\,\mathtt{indices}_{ip},\, j} \right)$, where $p$ runs
+over the `k_max` columns of the ELL row.  The reduction is performed
+with `jax.lax.fori_loop` over `p`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:reference_semiring_ell_matmul -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `values` | `Num` | `m` × `kmax` | — | ELL values, shape `(m, k_max)`. |
+| `indices` | `Num` | `m` × `kmax` | — | ELL column indices into `B`'s outer dimension, shape `(m, k_max)`. Padding positions must point at a valid row of `B` and carry a `values` entry equal to the semiring identity, so that `B`'s row at that index contributes a no-op. The caller is responsible for this; see [`ell_pad`](../nitrix-sparse-ell/ell_pad.qmd). |
+| `B` | `Num` | `n_cols` × `ncol` | — | Dense right operand, shape `(n_cols, ncol)`. |
+| `semiring` | `Semiring[S]` | — | — | The algebra to reduce under. |
+| `n_cols` | `int | None` | — | `None` | Outer dimension of the implicit sparse operand (`B.shape[0]`). Defaults to `B.shape[0]` and, when supplied, is asserted equal. |
+
+**Returns** `Num` — shape `m` × `ncol`. The product `C`, shape `(m, ncol)`, with the same dtype as the accumulator initialised from `B`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:reference_semiring_ell_matmul -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `m` | rows of a multi-row contrast |
+| `kmax` | *(undocumented — add to `_dimensions.yml`)* |
+| `n_cols` | *(undocumented — add to `_dimensions.yml`)* |
+| `ncol` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

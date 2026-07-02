@@ -1,0 +1,36 @@
+---
+title: "log_likelihood"
+generated: true
+description: "Per-element maximised log-likelihood."
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+<!-- nitrix:gen sig:log_likelihood -->
+```python
+log_likelihood(result: GLMResult) -> Float[Array, 'V']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:log_likelihood -->
+Per-element maximised log-likelihood.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:log_likelihood -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `result` | `GLMResult` | — | — | A fitted [`GLMResult`](../nitrix-stats-glm/GLMResult.qmd) carrying the stored maximised log-likelihood. |
+
+**Returns** `Float` — shape `V`. `(V,)` maximised log-likelihood, one per element.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:log_likelihood -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+<!-- nitrix:/gen -->

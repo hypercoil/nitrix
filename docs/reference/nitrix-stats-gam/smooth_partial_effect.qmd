@@ -1,0 +1,35 @@
+---
+title: "smooth_partial_effect"
+generated: true
+description: "Evaluate one smooth's partial effect on a covariate grid."
+---
+
+[‹ back to `nitrix.stats.gam`](../nitrix-stats-gam.qmd)
+
+<!-- nitrix:gen sig:smooth_partial_effect -->
+```python
+smooth_partial_effect(result: GAMResult, smooth_index: int, basis: Smooth, x: Union[Float[Array, ' g'], Tuple[Float[Array, ' g'], ...]]) -> Tuple[Float[Array, 'V g'], Float[Array, 'V g']]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:smooth_partial_effect -->
+Evaluate one smooth's partial effect on a covariate grid.
+
+Computes the per-element fitted smooth $B(x)\,\gamma_k$ and its
+pointwise standard error from the Bayesian covariance block (for a credible
+band).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:smooth_partial_effect -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `result` | `GAMResult` | — | — | A [`GAMResult`](../nitrix-stats-gam/GAMResult.qmd) from [`gam_fit`](../nitrix-stats-gam/gam_fit.qmd). |
+| `smooth_index` | `int` | — | — | Index of the smooth term (into `result.col_slices`) to render. |
+| `basis` | `Smooth` | — | — | The smooth basis used to build this term. For a [`TensorBasis`](../nitrix-stats-basis/TensorBasis.qmd) pass `x` as a tuple of matched per-margin grids (all length `g`) and the effect is the interaction surface along that path. For a [`REBasis`](../nitrix-stats-basis/REBasis.qmd) pass `x` as the integer level indices to read off, and the effect is the per-level random effect (the best linear unbiased predictor intercept, or the random-slope coefficient) at those levels. |
+| `x` | `Union[Float[Array, ' g'], Tuple[Float[Array, ' g'], ...]]` | — | — | `(g,)` covariate grid, or a tuple of per-margin grids for a tensor smooth, at which to evaluate the effect. |
+
+**Returns** `Tuple[Float[Array, 'V g'], Float[Array, 'V g']]`. The fitted partial effect at each grid point, per element. The pointwise standard error of the effect, per element.
+<!-- nitrix:/gen -->
+

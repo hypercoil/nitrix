@@ -1,311 +1,70 @@
 ---
 title: "nitrix.stats.basis"
 generated: true
-signature-hash: 0c324dc065f973ce
+signature-hash: 95195408f53ab53f
+description: "Penalised spline bases for additive models."
+listing:
+  id: nitrix-stats-basis-symbols
+  contents: "nitrix-stats-basis/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
-Auto-generated scaffold for `nitrix.stats.basis` (signatures only). Replace the
-skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
-`check_reference_staleness.py` flags this page if the underlying
-signatures drift from this stub.
+Auto-generated scaffold for `nitrix.stats.basis`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
 
-## `SmoothBasis` {#SmoothBasis}
-
-```python
-class SmoothBasis
-```
-
-Structural interface of a GAM smooth term (audit D8).
-
-*TODO: class overview.*
-
-
-### Methods
-
-```python
-dim(self) -> int
-```
-
-Number of basis coefficients ``k``.
-
-```python
-penalty_blocks(self) -> List[Tuple[np.ndarray, np.ndarray]]
-```
-
-Penalty blocks ``[(S_block, eig_block)]`` (host constants).
-
-```python
-eval_design(self, x: Any) -> Float[Array, 'g k']
-```
-
-Re-evaluate the design on the smooth's covariate grid ``x``.
-
-## `SplineBasis` {#SplineBasis}
-
-*decorated:* `@jax.tree_util.register_pytree_node_class`, `@dataclass(frozen=True)`
-
-```python
-class SplineBasis
-```
-
-A penalised spline smooth: design, penalty, and re-evaluation params.
-
-*TODO: class overview.*
-
-
-### Methods
-
-```python
-dim(self) -> int
-```
-
-Number of (post-constraint) basis coefficients ``k``.
-
-```python
-penalty_blocks(self) -> list
-```
-
-Penalty blocks ``[(S, eig)]`` (audit D8): the ``(k, k)`` roughness
-
-```python
-eval_design(self, x: Float[Array, ' g']) -> Float[Array, 'g k']
-```
-
-Re-evaluate the spline design on a covariate grid ``x`` (audit D8).
-
-```python
-tree_flatten(self) -> Tuple[Tuple[Any, ...], Tuple[str, int, int, int, float, float, Optional[float]]]
-```
-
-```python
-tree_unflatten(cls, aux: Tuple[str, int, int, int, float, float, Optional[float]], children: Tuple[Any, ...]) -> 'SplineBasis'
-```
-
-## `TensorBasis` {#TensorBasis}
-
-*decorated:* `@jax.tree_util.register_pytree_node_class`, `@dataclass(frozen=True)`
-
-```python
-class TensorBasis
-```
-
-An anisotropic tensor-product interaction smooth ``f(x_1, ..., x_d)``.
-
-*TODO: class overview.*
-
-
-### Methods
-
-```python
-dim(self) -> int
-```
-
-Total tensor-basis dimension ``K = prod_j k_j``.
-
-```python
-penalty_blocks(self) -> list
-```
-
-Penalty blocks ``[(S_j, eig_j)]`` (audit D8): one per margin -- the
-
-```python
-eval_design(self, x: Tuple[Float[Array, ' g'], ...]) -> Float[Array, 'g K']
-```
-
-Re-evaluate the tensor design on matched per-margin grids ``x``
-
-```python
-tree_flatten(self) -> Tuple[Tuple[Any, ...], Tuple[int, ...]]
-```
-
-```python
-tree_unflatten(cls, aux: Tuple[int, ...], children: Tuple[Any, ...]) -> 'TensorBasis'
-```
-
-## `REBasis` {#REBasis}
-
-*decorated:* `@jax.tree_util.register_pytree_node_class`, `@dataclass(frozen=True)`
-
-```python
-class REBasis
-```
-
-A random-effect smooth block (mgcv ``bs="re"``) for a GAMM.
-
-*TODO: class overview.*
-
-
-### Methods
-
-```python
-dim(self) -> int
-```
-
-Number of random-effect coefficients ``q`` (the factor levels).
-
-```python
-penalty_blocks(self) -> list
-```
-
-Penalty blocks ``[(I, 1)]`` (audit D8): the identity ridge (full rank
-
-```python
-eval_design(self, x: Float[Array, ' g']) -> Float[Array, 'g q']
-```
-
-Re-evaluate as the one-hot of the requested level indices ``x``
-
-```python
-tree_flatten(self) -> Tuple[Tuple[Array, ...], Tuple[int]]
-```
-
-```python
-tree_unflatten(cls, aux: Tuple[int], children: Tuple[Any, ...]) -> 'REBasis'
-```
-
-## `bspline_basis` {#bspline_basis}
-
-```python
-bspline_basis(x: Float[Array, ' n'], n_basis: int=10, *, degree: int=3, penalty_order: int=2, bounds: Optional[Tuple[float, float]]=None, center: bool=True) -> SplineBasis
-```
-
-Build a P-spline smooth basis for covariate ``x``.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `cyclic_cubic_basis` {#cyclic_cubic_basis}
-
-```python
-cyclic_cubic_basis(x: Float[Array, ' n'], n_basis: int=10, *, degree: int=3, penalty_order: int=2, bounds: Optional[Tuple[float, float]]=None, center: bool=True) -> SplineBasis
-```
-
-Build a cyclic cubic P-spline basis for a periodic covariate ``x``.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `thinplate_regression_basis` {#thinplate_regression_basis}
-
-```python
-thinplate_regression_basis(x: Float[Array, ' n'], n_basis: int=10, *, penalty_order: int=2, max_knots: int=100, bounds: Optional[Tuple[float, float]]=None, center: bool=True) -> SplineBasis
-```
-
-Build a thin-plate regression spline (TPRS) basis for covariate ``x``.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `cr_basis` {#cr_basis}
-
-```python
-cr_basis(x: Float[Array, ' n'], n_basis: int=10, *, bounds: Optional[Tuple[float, float]]=None, center: bool=True) -> SplineBasis
-```
-
-Build a cubic regression spline (mgcv ``bs='cr'``) for covariate ``x``.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `gp_basis` {#gp_basis}
-
-```python
-gp_basis(x: Float[Array, ' n'], n_basis: int=10, *, rho: Optional[float]=None, max_knots: int=100, bounds: Optional[Tuple[float, float]]=None, center: bool=True) -> SplineBasis
-```
-
-Build a Gaussian-process smooth (mgcv ``bs='gp'``) for covariate ``x``.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `mrf_smooth` {#mrf_smooth}
-
-```python
-mrf_smooth(labels: Int[Array, ' n'], neighbours: Float[Array, 'R R'], *, center: bool=True) -> SplineBasis
-```
-
-Build a Markov-random-field smooth (mgcv ``bs='mrf'``) over a region
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `tensor_product_basis` {#tensor_product_basis}
-
-```python
-tensor_product_basis(margins: Tuple[SplineBasis, ...], *, eig_rtol: float=1e-10) -> TensorBasis
-```
-
-Build an anisotropic tensor-product interaction smooth from marginals.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `re_smooth` {#re_smooth}
-
-```python
-re_smooth(g: Int[Array, ' n'], *, by: Optional[Float[Array, ' n']]=None, n_levels: Optional[int]=None) -> REBasis
-```
-
-Build a random-effect smooth block (mgcv ``bs="re"``).
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `by_factor_smooth` {#by_factor_smooth}
-
-```python
-by_factor_smooth(x: Float[Array, ' n'], by: Int[Array, ' n'], n_basis: int=10, *, degree: int=3, penalty_order: int=2, bounds: Optional[Tuple[float, float]]=None, center: bool=True, n_levels: Optional[int]=None) -> Tuple[SplineBasis, ...]
-```
-
-By-variable factor smooths ``s(x, by=f)`` -- one smooth of ``x`` per level.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `varying_coefficient_smooth` {#varying_coefficient_smooth}
-
-```python
-varying_coefficient_smooth(x: Float[Array, ' n'], by: Float[Array, ' n'], n_basis: int=10, *, degree: int=3, penalty_order: int=2, bounds: Optional[Tuple[float, float]]=None, center: bool=True) -> SplineBasis
-```
-
-Varying-coefficient smooth ``s(x, by=z)`` for a **continuous** ``z``.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `spline_design` {#spline_design}
-
-```python
-spline_design(basis: SplineBasis, x: Float[Array, ' m']) -> Float[Array, 'm k']
-```
-
-Re-evaluate a ``SplineBasis`` design at new covariate values ``x``.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
-## `tensor_product_design` {#tensor_product_design}
-
-```python
-tensor_product_design(basis: TensorBasis, xs: Tuple[Float[Array, ' g'], ...]) -> Float[Array, 'g K']
-```
-
-Re-evaluate a ``TensorBasis`` on a matched covariate grid.
-
-**Parameters** — *TODO: document each parameter.*
-
-**Returns** — *TODO.*
-
+<!-- nitrix:gen overview:__module__ -->
+Penalised spline bases for additive models.
+
+A GAM smooth term $s(x)$ is a spline basis expansion
+$f(x) = B(x) \beta$ with a roughness penalty
+$\beta^{\top} S \beta$; the smoothing parameter trades the penalty
+off against fit (chosen by REML in [`gam_fit`](nitrix-stats.qmd)).  This module
+builds the `(design, penalty)` pair for a covariate vector and re-evaluates
+the design at new covariate values (for plotting partial effects).
+
+We ship the **P-spline** (Eilers & Marx): a uniform cubic B-spline design with
+a discrete difference penalty -- `mgcv`'s `bs='ps'` -- because it reuses
+the uniform-B-spline machinery already validated for N4 and gives an exact
+reference to test against.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### Identifiability
+
+A smooth competes with the model intercept unless it is constrained to sum to
+zero over the data ($\sum_i f(x_i) = 0$, i.e.
+$(1^{\top} B) \beta = 0$).  We absorb that single constraint by
+reparameterising $\beta = Z \alpha$ with $Z$ an orthonormal basis
+of the constraint's null space, computed by a **single Householder reflection**
+-- no `qr` (cuSOLVER) -- so the construction runs on the broken-cuSOLVER GPU
+and stays differentiable.
+
+Everything is value -> value and cuSOLVER-free.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `g` | *(undocumented — add to `_dimensions.yml`)* |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `k` | kernel or basis components |
+| `K` | *(undocumented — add to `_dimensions.yml`)* |
+| `d` | spatial dimension (2 or 3) |
+| `q` | random-effect columns |
+| `D` | *(undocumented — add to `_dimensions.yml`)* |
+| `R` | *(undocumented — add to `_dimensions.yml`)* |
+| `m` | rows of a multi-row contrast |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-stats-basis-symbols}
+:::

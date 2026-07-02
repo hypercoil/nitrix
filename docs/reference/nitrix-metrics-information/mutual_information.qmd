@@ -1,0 +1,86 @@
+---
+title: "mutual_information"
+generated: true
+description: "Mutual information (or normalised mutual information) of two images."
+---
+
+[‹ back to `nitrix.metrics.information`](../nitrix-metrics-information.qmd)
+
+<!-- nitrix:gen sig:mutual_information -->
+```python
+mutual_information(moving: Float[Array, '...'], fixed: Float[Array, '...'], *, bins: int = 32, range_moving: Optional[tuple[float, float]] = None, range_fixed: Optional[tuple[float, float]] = None, normalized: bool = False, eps: float = 1e-10, mask: Optional[Float[Array, '...']] = None) -> Float[Array, '']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:mutual_information -->
+Mutual information (or normalised mutual information) of two images.
+
+Computes
+$\mathrm{MI} = \sum_{i,j} P(i,j) \log\!\left(P(i,j) / (P_m(i)\,P_f(j))\right)$
+over the soft joint histogram. With `normalized=True` returns
+Studholme's normalised mutual information
+$(H_m + H_f) / H_{mf}$ (in `[1, 2]`; invariant to overlap size).
+Higher is more similar; use the negation as a cost.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:mutual_information -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `moving` | `Float` | `...` | — | Images of identical shape. |
+| `fixed` | `Float` | `...` | — | Images of identical shape. |
+| `bins` | `int` | — | `32` | Number of bins per axis (default 32), forwarded to [`joint_histogram`](../nitrix-metrics-information/joint_histogram.qmd). |
+| `range_moving` | `Optional[tuple[float, float]]` | — | `None` | Optional `(lo, hi)` intensity range per image, forwarded to [`joint_histogram`](../nitrix-metrics-information/joint_histogram.qmd). `None` (default) uses the per-image data min / max. |
+| `range_fixed` | `Optional[tuple[float, float]]` | — | `None` | Optional `(lo, hi)` intensity range per image, forwarded to [`joint_histogram`](../nitrix-metrics-information/joint_histogram.qmd). `None` (default) uses the per-image data min / max. |
+| `normalized` | `bool` | — | `False` | If `True`, return Studholme's normalised mutual information $(H_m + H_f) / H_{mf}$ instead of the raw mutual information. |
+| `eps` | `float` | — | `1e-10` | Small constant guarding the logarithms and quotient (default `1e-10`). |
+| `mask` | `Optional[Float[Array, '...']]` | — | `None` | Optional non-negative per-voxel weight (same shape as the images) gating the joint-histogram scatter: an out-of-mask voxel is excluded from the distribution. |
+
+**Returns** `Float` — shape —. Scalar mutual information (or normalised mutual information).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:mutual_information -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **1.42 ms** (median, L4); up to **252.25× faster** than `sklearn.mutual_info`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_MUTUAL_INFORMATION.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| mutual_information | jax-cuda12 | shape=[128, 128, 128] | `cupy.mi` | ok | 4.77 ms / 4.82 ms | 257.04 ms | 16.78 MB (hbm) | ✓ 1.8e-05×tol | 3.53x vs nitrix-jax |
+| mutual_information | jax-cuda12 | shape=[128, 128, 128] | `nitrix-jax` | ok | 1.35 ms / 1.42 ms | 687.74 ms | 83.89 MB (hbm) | ✓ 0.00029×tol | 1.00x vs nitrix-jax |
+| mutual_information | jax-cuda12 | shape=[128, 128, 128] | `numpy.mi` | ok | 292.03 ms / 294.05 ms | 294.04 ms | 16.78 MB (hbm) | ✓ 0×tol | 216.23x vs nitrix-jax |
+| mutual_information | jax-cuda12 | shape=[128, 128, 128] | `simpleitk.MattesMI` | ok | 247.05 ms / 252.31 ms | 314.92 ms | 16.78 MB (hbm) | ≈ 1.9e+03×tol | 182.92x vs nitrix-jax |
+| mutual_information | jax-cuda12 | shape=[128, 128, 128] | `sklearn.mutual_info` | ok | 340.69 ms / 345.49 ms | 341.80 ms | 16.78 MB (hbm) | ≈ 2.3e+02×tol | 252.25x vs nitrix-jax |
+| mutual_information | jax-cuda12 | shape=[64, 64, 64] | `cupy.mi` | ok | 1.62 ms / 1.63 ms | 19.572 s | 2.10 MB (hbm) | ✓ 3.4e-05×tol | 5.84x vs nitrix-jax |
+| mutual_information | jax-cuda12 | shape=[64, 64, 64] | `nitrix-jax` | ok | 277.5 µs / 281.2 µs | 671.67 ms | 69.21 MB (hbm) | ✓ 4.8e-05×tol | 1.00x vs nitrix-jax |
+| mutual_information | jax-cuda12 | shape=[64, 64, 64] | `numpy.mi` | ok | 23.61 ms / 24.01 ms | 23.86 ms | 2.10 MB (hbm) | ✓ 0×tol | 85.08x vs nitrix-jax |
+| mutual_information | jax-cuda12 | shape=[64, 64, 64] | `simpleitk.MattesMI` | ok | 29.11 ms / 30.01 ms | 96.43 ms | 2.10 MB (hbm) | ≈ 1.9e+03×tol | 104.89x vs nitrix-jax |
+| mutual_information | jax-cuda12 | shape=[64, 64, 64] | `sklearn.mutual_info` | ok | 37.40 ms / 37.70 ms | 37.99 ms | 2.10 MB (hbm) | ≈ 1.9e+02×tol | 134.74x vs nitrix-jax |
+:::
+
+*source: bench `02d1a5d9` · nitrix `a0769766`*
+::::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:mutual_information -->
+::: {.callout-note}
+Built on the linear (order-1 B-spline) Parzen histogram, so it is
+differentiable and in the same B-spline-Parzen family as ITK
+`MattesMutualInformation` (order-3 cubic) -- distinct from the hard
+(order-0) binning of `sklearn.mutual_info_score`. At a fixed `bins`
+the three give different numbers (Parzen smoothing biases mutual
+information downward at coarse bins); all converge to the true continuous
+mutual information in the fine-bin limit. The domain tools are divergent
+references, not bit-exact oracles, here.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:mutual_information -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

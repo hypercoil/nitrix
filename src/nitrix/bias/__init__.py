@@ -3,42 +3,57 @@
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 # isort: skip_file
 """
-nitrix.bias -- intensity bias-field correction.
+Intensity bias-field correction.
 
-Two public entry points:
+Differentiable, pure-JAX estimation and removal of the slowly varying
+multiplicative intensity inhomogeneity ("bias field") that corrupts MR
+images, together with the reusable histogram and B-spline primitives the
+correction algorithms are built from.
 
-- ``n4_bias_field_correction`` -- the Tustison (2010) N4 algorithm (the
-  improved successor to N3), GPU-accelerated in pure JAX and validated to
-  ITK / ANTs parity.  This is *specifically* N4 (the Lee--Wolberg--Shin MBA
-  field fit).
-- ``bias_field_correction`` -- a dispatcher over the same N3/N4 iteration
-  with a selectable field estimator: ``method='n4'`` (parity, == above),
-  ``'least_squares'`` and ``'psplines'`` (unbiased, higher-accuracy
-  estimators for new / internal pipelines where ANTs bit-compatibility is
-  not required).
+There are two public entry points for correction:
 
-Plus three reusable substrate primitives the above are built from
-(``bspline_approximate`` / ``sharpen_histogram``) or compose with
-naturally (``histogram_match``):
+- :func:`n4_bias_field_correction` -- the N4 algorithm, the improved
+  successor to N3, GPU-accelerated in pure JAX and validated to ITK / ANTs
+  parity. This is *specifically* N4 (the Lee--Wolberg--Shin multilevel
+  B-spline field fit).
+- :func:`bias_field_correction` -- a dispatcher over the same N3/N4
+  iteration with a selectable field estimator: ``method='n4'`` (parity,
+  identical to the above), ``'least_squares'`` and ``'psplines'``
+  (unbiased, higher-accuracy estimators for new or internal pipelines where
+  bit-for-bit ANTs compatibility is not required).
 
-- ``bspline_approximate`` -- separable cubic B-spline scattered-data
-  approximation on a regular grid (MBA, least-squares, or P-spline fit),
-  a fast differentiable smoother for any "fit a smooth low-DOF surface to
-  a noisy grid" task (registration fields, surface fitting).
-- ``sharpen_histogram`` -- N3 / N4 Wiener log-histogram deconvolution
-  (single-image histogram de-blurring).
-- ``histogram_match`` -- Nyul-Udupa landmark histogram matching (Nyul &
-  Udupa 1999): remap a source image's intensities so its CDF matches a
-  reference image's, ITK-faithful to
-  ``HistogramMatchingImageFilter``.  Composes with N4 as an "N4 then
-  match to a reference template" intensity-standardise recipe.  The
-  ``histogram_match_fit`` / ``histogram_match_apply`` split exposes its
-  fit/apply seam (§6.5) -- fit a reference's ~9 standard-scale landmarks
-  once, apply to many sources -- with ``histogram_match`` the convenience
-  composition.
+Alongside these are three reusable substrate primitives that the
+correction algorithms are built from (:func:`bspline_approximate`,
+:func:`sharpen_histogram`) or compose with naturally
+(:func:`histogram_match`):
 
-See ``docs/design/bias-field.md`` for the derivation, the parity-vs-
-correctness discussion, and the "no Pallas needed" rationale.
+- :func:`bspline_approximate` -- separable cubic B-spline scattered-data
+  approximation on a regular grid (multilevel B-spline, least-squares, or
+  P-spline fit); a fast differentiable smoother for any "fit a smooth
+  low-degree-of-freedom surface to a noisy grid" task, such as registration
+  fields or surface fitting.
+- :func:`sharpen_histogram` -- the N3 / N4 Wiener log-histogram
+  deconvolution (single-image histogram de-blurring).
+- :func:`histogram_match` -- Nyul--Udupa landmark histogram matching: remap
+  a source image's intensities so that its cumulative distribution matches
+  a reference image's, faithful to ITK's
+  ``HistogramMatchingImageFilter``. It composes with N4 as an "N4 then
+  match to a reference template" intensity-standardisation recipe. The
+  :func:`histogram_match_fit` / :func:`histogram_match_apply` split exposes
+  the fit/apply seam -- fit a reference's standard-scale landmarks once and
+  apply them to many sources -- with :func:`histogram_match` the
+  single-call convenience composition.
+
+References
+----------
+Tustison, N. J., Avants, B. B., Cook, P. A., Zheng, Y., Egan, A.,
+Yushkevich, P. A., & Gee, J. C. (2010). N4ITK: improved N3 bias
+correction. *IEEE Transactions on Medical Imaging*, 29(6), 1310--1320.
+:doi:`10.1109/TMI.2010.2046908`
+
+Nyul, L. G., & Udupa, J. K. (1999). On standardizing the MR image
+intensity scale. *Magnetic Resonance in Medicine*, 42(6), 1072--1081.
+:doi:`10.1002/(SICI)1522-2594(199912)42:6<1072::AID-MRM11>3.0.CO;2-M`
 """
 
 from ._bspline import bspline_approximate

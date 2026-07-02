@@ -1,0 +1,90 @@
+---
+title: "glmm_fit"
+generated: true
+description: "Mass-univariate random-intercept GLMM via PQL, dispatched on level count."
+---
+
+[‹ back to `nitrix.stats.glmm`](../nitrix-stats-glmm.qmd)
+
+<!-- nitrix:gen sig:glmm_fit -->
+```python
+glmm_fit(Y: Float[Array, 'V N'], X: Float[Array, 'N p'], *, group: Int[Array, 'N'], n_groups: Optional[int] = None, z: Optional[Float[Array, 'N r']] = None, structure: GLMMStructure = 'unstructured', family: Union[str, Family] = GAUSSIAN, method: GLMMMethod = 'pql', few_level_max: int = 64, n_outer: int = 20, n_inner: int = 10, n_mode: int = 20, n_quad: int = 5, ridge: float = 1e-08, lam_floor: float = 1e-06, lam_ceil: float = 100000000.0, damping: float = 1e-06, block: Optional[int] = None) -> GLMMResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:glmm_fit -->
+Mass-univariate random-intercept GLMM via PQL, dispatched on level count.
+
+Fits, per element, $g(E[y \mid b]) = X \beta + b_{\text{group}}$ with
+$b_j \sim N(0, \sigma_b^2)$ under the GLM `family`, by penalised
+quasi-likelihood (working response -> one variance-component step -> repeat).
+The fixed design `X` is used as given (include your own intercept column);
+`group` is the `(N,)` integer grouping factor (levels
+$0 \ldots q-1$).
+
+Dispatch selects the linear algebra by the level count $q$, without
+changing the fitted answer:
+
+- `q <= few_level_max` -- **few-level**: the dense GAMM path
+  ([`gam_fit`](../nitrix-stats-gam/gam_fit.qmd) + [`re_smooth`](../nitrix-stats-basis/re_smooth.qmd)).
+  Optimal here; the per-voxel cost $O((p + q)^3)$ is tiny.
+- `q > few_level_max` -- **many-level**: a structured Schur-complement PQL
+  costing $O(N p^2 + q)$ per voxel (the block-Woodbury structure,
+  weighted and wrapped in the IRLS loop), avoiding the dense
+  $(p + q)$-wide solve.
+
+Both paths run the identical PQL iteration, so they agree to the iterative
+tolerance -- the dispatch changes only the linear-algebra cost.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:glmm_fit -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `Y` | `Float` | `V` × `N` | — | `(V, N)` responses (one row per element, one column per observation). |
+| `X` | `Float` | `N` × `p` | — | `(N, p)` fixed-effect design (shared across elements; carries its own intercept). |
+| `group` | `Int` | `N` | — | `(N,)` integer grouping factor (random intercept per level). |
+| `n_groups` | `Optional[int]` | — | `None` | Optional **static** level count $q$ (levels are $0 \ldots q-1$). When `None` (default) it is derived eagerly as `int(max(group)) + 1`, which concretises `group` and so makes [`glmm_fit`](../nitrix-stats-glmm/glmm_fit.qmd) untraceable under `jax.jit`. Pass the count explicitly (a Python `int`) to trace the whole fit under `jit` -- e.g. to fuse it into a larger program -- for every family / structure / method. |
+| `z` | `Optional[Float[Array, 'N r']]` | — | `None` | Optional `(N, r)` random-effect design for a random **slope** (e.g. `[1, x]` -> random intercept + random slope of `x`). `None` (default) is the scalar random intercept `(1 \| g)`. Mirrors the `z=` argument of [`lme_fit`](../nitrix-stats-lme.qmd); the Gaussian-family slope GLMM is the same REML fit as `lme_fit(z=, structure=)` (to optimiser tolerance). |
+| `structure` | `GLMMStructure` | — | `'unstructured'` | Random-effect covariance for a slope (`z` given): `'unstructured'` (full $r \times r$ $G$, the correlated `(1 + x \| g)`) or `'diagonal'` (independent variance components, the uncorrelated `(x \|\| g)`). Ignored when `z is None`. |
+| `family` | `Union[str, Family]` | — | `GAUSSIAN` | GLM family (`'binomial'` / `'poisson'` / `'gamma'` / `'negbinomial'` / `'gaussian'` or a [`Family`](../nitrix-stats-glm/Family.qmd)). Gaussian is accepted (it reduces to the LME) but [`lme_fit`](../nitrix-stats-lme.qmd) / [`reml_fit`](../nitrix-stats-lme.qmd) are the direct route for a Gaussian mixed model. |
+| `method` | `GLMMMethod` | — | `'pql'` | `'pql'` (default) -- penalised quasi-likelihood (cheap; documented small-cluster attenuation for binary / low-count responses). `'laplace'` -- the Laplace-approximate marginal likelihood (per-group conditional-mode integral + curvature correction): more accurate for binary / low-count GLMMs (it corrects the PQL bias), at the cost of an inner mode-finding loop. Fits a scalar random intercept, or a random **slope** when `z` is given (the $r$-dimensional mode + $r \times r$ determinant correction, `structure` selecting a full / diagonal $G$); the `tier` is `'laplace'`. `'agq'` -- adaptive Gauss-Hermite quadrature (**random slope only**, `z` required): the marginal random-effect integral by `n_quad`-point tensor Gauss-Hermite, centred / scaled at each group's mode and curvature. `n_quad = 1` is exactly Laplace; more nodes integrate the density directly, converging to the exact marginal (the `lme4` `nAGQ` accuracy tier, the gold standard for small / low-count clusters). `tier` is `'agq'`. |
+| `few_level_max` | `int` | — | `64` | Dispatch threshold on the number of levels $q$ (default `64` -- the regime where the dense solve stops being trivially cheap). `'pql'` only. |
+| `n_outer` | `int` | — | `20` | PQL outer (Fellner-Schall) iteration budget. |
+| `n_inner` | `int` | — | `10` | PQL inner (IRLS) iteration budget. |
+| `n_mode` | `int` | — | `20` | Per-group conditional-mode Newton budget for `method='laplace'` / `'agq'`. |
+| `n_quad` | `int` | — | `5` | Gauss-Hermite nodes **per dimension** for `method='agq'` (default `5`; the integral uses $\text{n\_quad}^{r}$ tensor nodes). |
+| `ridge` | `float` | — | `1e-08` | Normal-equation ridge stabiliser added to the fixed-effect system. |
+| `lam_floor` | `float` | — | `1e-06` | Lower clamp on the smoothing (precision) parameter $\lambda = \phi / \sigma_b^2$. |
+| `lam_ceil` | `float` | — | `100000000.0` | Upper clamp on the smoothing (precision) parameter. |
+| `damping` | `float` | — | `1e-06` | Levenberg-style damping factor for the outer Newton optimiser over the variance components, keeping the variance-parameter step stable. |
+| `block` | `Optional[int]` | — | `None` | Optional element-block size bounding peak memory (elements are processed in blocks of this many rows of `Y`). `None` processes all elements at once. |
+
+**Returns** `GLMMResult`. A [`GLMMResult`](../nitrix-stats-glmm/GLMMResult.qmd) carrying `beta_hat`, per-level `blups`, `re_var` ($\sigma_b^2$, or the $r$-vector / $r \times r$ $G$ for a slope), `dispersion`, `deviance`, `edf_total`, and the `tier` that ran (`'few'` / `'many'` / `'slope'` / `'laplace'` / `'agq'`).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:glmm_fit -->
+::: {.callout-note}
+PQL carries the documented small-cluster bias for binary / low-count
+responses (it under-estimates the variance component; the bias vanishes as
+the per-group information grows).  Random *slopes* (`z` + `structure`) are
+fit by PQL -- diagonal via [`gam_fit`](../nitrix-stats-gam/gam_fit.qmd) blocks,
+correlated via the joint-Schur + REML-EM solver (`tier='slope'`) -- by
+Laplace (`method='laplace'`), or by adaptive Gauss-Hermite quadrature
+(`method='agq'`, `tier='agq'`), the accuracy ladder for the slope-variance
+attenuation: AGQ with `n_quad` nodes converges to the exact marginal
+(`n_quad = 1` is Laplace).
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:glmm_fit -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `N` | observations — time points, subjects, or sampled points |
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

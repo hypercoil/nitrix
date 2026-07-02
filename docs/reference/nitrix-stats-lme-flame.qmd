@@ -1,37 +1,97 @@
 ---
 title: "nitrix.stats.lme.flame"
 generated: true
-signature-hash: 6d0429e1e60d02b2
+signature-hash: 4683f6c6d81f2026
+description: "FLAME-style two-level mixed-effects model for fMRI group analysis."
+listing:
+  id: nitrix-stats-lme-flame-symbols
+  contents: "nitrix-stats-lme-flame/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
-Auto-generated scaffold for `nitrix.stats.lme.flame` (signatures only). Replace the
-skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
-`check_reference_staleness.py` flags this page if the underlying
-signatures drift from this stub.
+Auto-generated scaffold for `nitrix.stats.lme.flame`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
 
-## `FLAMEResult` {#FLAMEResult}
+<!-- nitrix:gen overview:__module__ -->
+FLAME-style two-level mixed-effects model for fMRI group analysis.
+<!-- nitrix:/gen -->
 
-*decorated:* `@register_result(children=('sigma_b_sq', 'gamma_hat', 'log_lik', 'weights'))`, `@dataclass(frozen=True)`
+<!-- nitrix:gen sections:__module__ -->
+### The model
 
-```python
-class FLAMEResult
-```
+At level 1, each subject's BOLD time series has been fit by a
+GLM, yielding a per-voxel estimate $\beta_i$ of the per-subject
+effect (e.g., the activation magnitude on a task contrast) plus
+its within-subject standard error squared $s_i^2$ (typically
+the OLS residual variance from the level-1 fit).  These are the
+inputs.
 
-Per-voxel FLAME fit output.
+At level 2, the per-voxel group model is
 
-*TODO: class overview.*
+$$
+\begin{aligned}
+\beta_i &= X_{\mathrm{group}}\, \gamma + b_i + \epsilon_i \\
+b_i &\sim \mathcal{N}(0, \sigma_b^2)
+    \quad \text{(between-subject variance, unknown)} \\
+\epsilon_i &\sim \mathcal{N}(0, s_i^2)
+    \quad \text{(within-subject variance, known)}
+\end{aligned}
+$$
 
-## `flame_two_level` {#flame_two_level}
+So the total per-subject variance is $\sigma_b^2 + s_i^2$ --
+heteroscedastic by subject.  $\gamma$ is the group-level
+fixed-effect vector.
 
-```python
-flame_two_level(beta_subject: Float[Array, 'V N'], var_within: Float[Array, 'V N'], X_group: Float[Array, 'N p'], *, log_sigma_b_sq_init: Optional[Float[Array, 'V']]=None, n_iter: int=30, damping: float=1e-06, block: Optional[int]=None, robust: bool=False, n_deweight: int=5, robust_c: float=1.345) -> FLAMEResult
-```
+This is the **FSL FLAME** model (Beckmann, Jenkinson, Smith
+2003).  Only $\sigma_b^2$ is estimated; $\gamma$ is profiled
+out analytically; $s_i^2$ is known.  The implementation is a
+**single-parameter REML**: Newton iteration on a scalar log-
+variance.  It avoids the identifiability problem of the generic
+two-parameter REML (where $\sigma_b^2$ and a free scaling on
+the within-variance trade off).
 
-Voxelwise FLAME-style two-level fixed-effect group model.
+### Computational structure
 
-**Parameters** — *TODO: document each parameter.*
+Per voxel, the covariance
+$V_v = \sigma_b^2 I + \operatorname{diag}(s_v^2)$ is
+naturally diagonal, so FLAME is the shared diagonalised-REML fit
+with a single free component (an all-ones basis) and a
+fixed per-coordinate offset equal to the known within-variance.  The
+fit makes **no per-voxel cuSOLVER call**:
+the fixed-effect algebra is closed-form for the dominant $p \in
+\{1, 2\}$ designs (the intercept $p = 1$ is a scalar) and the REML
+score / curvature are analytic (no second-order autodiff through a
+Cholesky).  That is what unblocks [`flame_two_level`](nitrix-stats-lme-flame/flame_two_level.qmd) on the
+broken-cuSOLVER GPU and flattens its compile time, which would otherwise
+grow linearly in the voxel count.
 
-**Returns** — *TODO.*
+Memory: the effect estimates and within-variances are each `(V, N)`,
+plus per-voxel parameters.  There is no `(V, N, N)` intermediate.
 
+### Reference
+
+Beckmann, C. F., Jenkinson, M., & Smith, S. M. (2003).  General
+multilevel linear modeling for group analysis in fMRI.
+NeuroImage 20, 1052-1063.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `N` | observations — time points, subjects, or sampled points |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-stats-lme-flame-symbols}
+:::

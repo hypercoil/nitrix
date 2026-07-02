@@ -4,21 +4,21 @@
 """
 SUSAN-style edge-preserving smoothing.
 
-Per SPEC §4.4, ``susan_emulator`` is the convenience wrapper
-that composes ``bilateral_gaussian`` (the brightness-similarity
-weighting half of FSL SUSAN) with ``morphology.median_filter`` (the
-impulse-noise fallback half).  The user passes a raw n-D image
-and the wrapper does the feature-construction internally.
+:func:`susan_emulator` is the convenience wrapper that composes
+:func:`bilateral_gaussian` (the brightness-similarity weighting half
+of FSL SUSAN) with :func:`median_filter` (the impulse-noise fallback
+half).  The user passes a raw n-D image and the wrapper does the
+feature-construction internally.
 
 Documented behavioural deltas from FSL SUSAN:
 
 - The brightness-similarity weighting that FSL SUSAN does explicitly
   is recovered by including intensity in the bilateral feature space.
 - The impulse-noise median fallback is exposed via ``use_median=True``
-  (default), which applies ``median_filter`` *before* the bilateral
-  pass.  (FSL SUSAN does this internally as part of a single op; we
-  expose it as a chained step because the diffprog way is to compose
-  small primitives.)
+  (default), which applies :func:`median_filter` *before* the
+  bilateral pass.  (FSL SUSAN does this internally as part of a single
+  operation; here it is exposed as a chained step, in keeping with the
+  practice of composing small primitives.)
 - The "auto-flat-kernel at small spatial extents" behaviour of FSL
   SUSAN is *not* replicated.  ``sigma_space`` controls the spatial
   weighting directly.
@@ -26,7 +26,7 @@ Documented behavioural deltas from FSL SUSAN:
 The ``bthresh`` parameter exists for API compatibility with FSL
 SUSAN's bilateral threshold but is currently advisory: setting it
 clips the per-edge weight at the threshold rather than acting as a
-hard cutoff.  (Hard-cutoff variants are easy to add if the
+hard cutoff.  (Hard-cutoff variants are straightforward to add if the
 diagnostic value materialises.)
 """
 
@@ -64,9 +64,9 @@ def spatial_cube_neighbourhood(
     the optional validity mask so a bilateral reduction does not
     double-count the clamped edge voxel.
 
-    Returned as NumPy arrays so that ``bilateral_gaussian`` can take
-    the adjacency as a static neighbourhood without re-tracing per
-    call.
+    Returned as NumPy arrays so that :func:`bilateral_gaussian` can
+    take the adjacency as a static neighbourhood without re-tracing
+    per call.
 
     Parameters
     ----------
@@ -78,8 +78,9 @@ def spatial_cube_neighbourhood(
     return_validity
         If ``True``, also return a boolean validity mask ``(n_voxels,
         k_max)`` that is ``False`` at the out-of-bounds (clamped) taps.
-        Pass it to ``bilateral_gaussian(..., mask=...)`` so boundary
-        voxels average only over their in-bounds neighbours.
+        Pass it to :func:`bilateral_gaussian` as its ``mask`` argument
+        so boundary voxels average only over their in-bounds
+        neighbours.
 
     Returns
     -------
@@ -146,7 +147,7 @@ def susan_emulator(
         large to ignore intensity (recovers a pure spatial
         Gaussian); set small to aggressively preserve edges.
     use_median
-        If ``True`` (default), apply a ``3``-cube ``median_filter``
+        If ``True`` (default), apply a ``3``-cube :func:`median_filter`
         pre-pass before the bilateral.  Suppresses impulse noise
         that the bilateral's Gaussian weighting cannot handle
         cleanly.

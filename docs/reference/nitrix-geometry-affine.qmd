@@ -1,0 +1,87 @@
+---
+title: "nitrix.geometry.affine"
+generated: true
+signature-hash: bc549a6dee62f227
+description: "Geometric-parameter affine algebra (batched, differentiable)."
+listing:
+  id: nitrix-geometry-affine-symbols
+  contents: "nitrix-geometry-affine/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.geometry.affine`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Geometric-parameter affine algebra (batched, differentiable).
+
+The complement to the Lie-group chart in [`nitrix.geometry.transform`](nitrix-geometry-transform.qmd)
+([`rigid_exp`](nitrix-geometry-transform/rigid_exp.qmd) / [`affine_exp`](nitrix-geometry-transform/affine_exp.qmd)): here an affine is parametrised by
+its geometric factors -- translation, Euler rotation, anisotropic scale,
+and shear -- and composed as $T\,R\,S\,E$.  This is the
+parametrisation used when those factors are individually meaningful (for
+example, reading off the scales of a fitted transform, or constraining a
+fit to be rigid by dropping scale and shear), as opposed to the exponential
+chart, which is the natural one for unconstrained gradient-based
+optimisation.
+
+Also here: [`fit_affine`](nitrix-geometry-affine/fit_affine.qmd), the closed-form (weighted) least-squares
+affine between two corresponding point sets.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+::: {.callout-note}
+Conventions:
+
+- Matrices are $(\ldots, N, N + 1)$ (the implied last row is
+  $(0, \ldots, 0, 1)$) unless made square; everything is batched over
+  leading dimensions and differentiable.  A transform maps coordinates as
+  $y = \mathtt{mat}[\ldots, :, :-1]\,x + \mathtt{mat}[\ldots, :, -1]$.
+- Rotations: 2-D is a single planar angle; 3-D is right-handed
+  *intrinsic* $R = X\,Y\,Z$ (rotate about x, then y, then z); angles
+  in degrees by default.  The left-to-right axis order reads the same as the
+  matrix product because intrinsic rotations post-multiply: $X\,Y\,Z$
+  is equivalently the *extrinsic* sequence z-then-y-then-x (rightmost factor
+  applied first), the same rightmost-applied-first convention as the
+  $T\,R\,S\,E$ factor composition above.  (Intrinsic rotations are
+  about the object axes, which move with the object; extrinsic rotations are
+  about the fixed world axes.)
+- The rotation / parameter chart supports `ndim` in `{2, 3}` (the Euler
+  convention is dimension-specific, but both are covered);
+  [`params_to_affine_matrix`](nitrix-geometry-affine/params_to_affine_matrix.qmd) takes an explicit `ndim` because a
+  6-vector is ambiguous (rigid 3-D vs full 2-D), while
+  [`affine_matrix_to_params`](nitrix-geometry-affine/affine_matrix_to_params.qmd) infers it from the matrix shape.  The
+  shape helpers and [`fit_affine`](nitrix-geometry-affine/fit_affine.qmd) are N-D.
+
+On GPU, the factorisations (inverse / Cholesky / determinant) are routed
+through the library's safe solver wrappers (or computed analytically for
+the 3x3 / diagonal cases) so they work on the cuSolver-affected GPU stacks,
+where the dense-solver handle pool is broken.
+:::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `np1` | *(undocumented — add to `_dimensions.yml`)* |
+| `m` | rows of a multi-row contrast |
+| `a` | *(undocumented — add to `_dimensions.yml`)* |
+| `d` | spatial dimension (2 or 3) |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `d1` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-geometry-affine-symbols}
+:::

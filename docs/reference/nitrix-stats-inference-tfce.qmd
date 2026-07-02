@@ -1,25 +1,75 @@
 ---
 title: "nitrix.stats.inference.tfce"
 generated: true
-signature-hash: 89cfd30180329f04
+signature-hash: cbff6a622e477ad7
+description: "Threshold-free cluster enhancement."
+listing:
+  id: nitrix-stats-inference-tfce-symbols
+  contents: "nitrix-stats-inference-tfce/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
-Auto-generated scaffold for `nitrix.stats.inference.tfce` (signatures only). Replace the
-skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
-`check_reference_staleness.py` flags this page if the underlying
-signatures drift from this stub.
+Auto-generated scaffold for `nitrix.stats.inference.tfce`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
 
-## `tfce` {#tfce}
+<!-- nitrix:gen overview:__module__ -->
+Threshold-free cluster enhancement.
 
-```python
-tfce(stat: Float[Array, '*spatial'], *, E: float=0.5, H: float=2.0, n_steps: int=100, connectivity: int=1, two_sided: bool=True, mask: Optional[Bool[Array, '*spatial']]=None) -> Float[Array, '*spatial']
-```
+Threshold-free cluster enhancement (TFCE) replaces an arbitrary cluster-forming
+threshold with an integral over all thresholds, weighting each voxel by its
+supra-threshold cluster extent:
 
-Threshold-free cluster enhancement of a statistic image.
+$$
+\operatorname{TFCE}(v)
+    = \int_{h=0}^{\operatorname{stat}(v)}
+      \operatorname{extent}(v, h)^{E}\, h^{H}\, \mathrm{d}h
+$$
 
-**Parameters** — *TODO: document each parameter.*
+where $\operatorname{extent}(v, h)$ is the size of the connected
+component containing voxel $v$ when the image is thresholded at height
+$h$. The defaults $E = 0.5$, $H = 2.0$ are the 3-D volume
+settings; surface and 1-D maps use different exponents and `connectivity`.
 
-**Returns** — *TODO.*
+The integral is a fixed `n_steps` Riemann sum over $h \in (0, \max]$,
+so the step adapts to each map's range (as in FSL) while the *shape* stays
+fixed, making the kernel friendly to `jax.vmap` / `jax.lax.scan`
+across permutations. Each step is a single
+`connected_components` call (jit-able, fixed-shape).
+Two-sided enhancement adds the TFCE of the negative part on its disjoint
+support, giving a non-negative magnitude map suitable for two-sided
+max-statistic family-wise error control.
 
+Built on `connected_components` and
+[`cluster_size_map`](nitrix-stats-inference-cluster/cluster_size_map.qmd). It is *not*
+differentiable through the discrete cluster forming; like
+`connected_components` itself it is an inference
+kernel rather than a smooth score.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### References
+
+Smith, S. M., & Nichols, T. E. (2009). Threshold-free cluster enhancement:
+addressing problems of smoothing, threshold dependence and localisation in
+cluster inference. *NeuroImage*, 44(1), 83-98.
+https://doi.org/10.1016/j.neuroimage.2008.03.061
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-stats-inference-tfce-symbols}
+:::

@@ -1,0 +1,98 @@
+---
+title: "nitrix.graph.connectopy"
+generated: true
+signature-hash: 0db7e47ac3e7668a
+description: "Low-dimensional embeddings of graph nodes from spectral decompositions of (modified) Laplacians."
+listing:
+  id: nitrix-graph-connectopy-symbols
+  contents: "nitrix-graph-connectopy/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.graph.connectopy`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Low-dimensional embeddings of graph nodes from spectral decompositions
+of (modified) Laplacians.
+
+This module provides two node embeddings built on the spectrum of a
+normalised graph affinity operator.  Both map each node to a point in a
+low-dimensional Euclidean space whose coordinates are the leading
+non-trivial eigenvectors of that operator, so that proximity in the
+embedding reflects connectivity on the graph.
+
+- [`laplacian_eigenmap`](nitrix-graph-connectopy/laplacian_eigenmap.qmd) -- the Laplacian eigenmap of Belkin and
+  Niyogi.  Embeds nodes in the bottom-`k` non-trivial eigenspace of
+  the symmetric normalised Laplacian.
+- [`diffusion_embedding`](nitrix-graph-connectopy/diffusion_embedding.qmd) -- the diffusion map of Coifman and Lafon.
+  Embeds nodes in the top-`k` non-trivial eigenspace of the
+  density-normalised diffusion operator, scaled by $\lambda^{t}$.
+
+Both build the symmetric affinity operator $M$ (dense,
+[`ELL`](nitrix-sparse.qmd), or [`SectionedELL`](nitrix-sparse.qmd)) and
+hand the extremal top-`k` eigendecomposition to the dedicated
+dispatcher `eigsolve_top_k`.  The
+embedding-specific spectral conventions -- skipping the trivial constant
+eigenvector, mapping $\lambda_L = 1 - \lambda_M$ for the
+Laplacian, recovering the random-walk right eigenvectors, and scaling by
+$\lambda^{t}$ for the diffusion map -- are applied here,
+uniformly, on the dispatcher's largest-first return; the solver choice
+does not change that post-processing.
+
+The solver knobs (`solver` / `preconditioner`) map onto the
+dispatcher's `SolverSpec`:
+
+- `"eigh"` -- dense full spectrum, sliced to the top-`k`.  Required
+  for dense input; not available for
+  [`ELL`](nitrix-sparse.qmd) / [`SectionedELL`](nitrix-sparse.qmd).
+- `"lobpcg"` -- iterative top-`k`; the default for sparse input,
+  scaling to `n ~ 1M+`.
+- `"shift_invert"` -- matrix-free shift-invert (far fewer outer
+  iterations on clustered low-Laplacian spectra; dense,
+  [`ELL`](nitrix-sparse.qmd), or [`SectionedELL`](nitrix-sparse.qmd)).
+- `preconditioner="polynomial"` -- the matvec-only shifted-power
+  spectral filter (dense,
+  [`ELL`](nitrix-sparse.qmd), or [`SectionedELL`](nitrix-sparse.qmd)).
+- `"auto"` (default) -- `eigh` for dense, `lobpcg` for sparse.
+  (Shift-invert and polynomial on sparse input are served only on
+  explicit request, not auto-selected.)
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### Differentiability
+
+- `"eigh"`: differentiable via the registered VJP of `jnp.linalg.eigh`.
+- `"lobpcg"` / `"shift_invert"` / `"polynomial"` with dense,
+  [`ELL`](nitrix-sparse.qmd), or [`SectionedELL`](nitrix-sparse.qmd)
+  input: differentiable via the implicit VJP of the eigensolver (a
+  Hellmann-Feynman eigenvalue gradient plus the F-matrix subspace
+  projector for the eigenvector gradient; exact for in-subspace losses,
+  biased for losses on the orthogonal complement of the returned
+  top-`k` subspace; near-degenerate denominators are clamped).  For
+  [`ELL`](nitrix-sparse.qmd) the gradient is projected onto the sparsity
+  pattern; for [`SectionedELL`](nitrix-sparse.qmd) onto each section's
+  `values`.
+
+Every required step is expressible in plain JAX.
+
+### References
+
+.. [1] Belkin M, Niyogi P (2003). Laplacian eigenmaps for dimensionality
+       reduction and data representation. Neural Computation 15(6),
+       1373-1396. https://doi.org/10.1162/089976603321780317
+.. [2] Coifman RR, Lafon S (2006). Diffusion maps. Applied and
+       Computational Harmonic Analysis 21(1), 5-30.
+       https://doi.org/10.1016/j.acha.2006.04.006
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-graph-connectopy-symbols}
+:::

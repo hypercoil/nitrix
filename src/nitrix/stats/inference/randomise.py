@@ -2,39 +2,46 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Permutation inference for the GLM -- the on-device ``randomise`` engine.
+Permutation inference for the general linear model.
 
-``permutation_test`` is the kernel ``niffi`` needs in place of FSL
-``randomise``: a non-parametric, family-wise-error-controlling test of a GLM
-contrast over a statistic image, built from the parts in this subpackage.
+:func:`permutation_test` is a non-parametric, family-wise-error-controlling
+test of a general linear model (GLM) contrast over a statistic image, built
+from the parts in this subpackage.  It is an on-device analogue of the FSL
+``randomise`` tool.
 
 The procedure
 -------------
 
-For data ``Y`` (one response per observation per voxel), design ``X``, and a
-contrast -- a ``(p,)`` t-contrast ``c`` or a ``(m, p)`` F-contrast ``C``:
+For data :math:`Y` (one response per observation per voxel), design :math:`X`,
+and a contrast -- a ``(p,)`` t-contrast :math:`c` or a ``(m, p)`` F-contrast
+:math:`C`:
 
-1. Fit OLS and form the observed statistic image (t / F, or a variance-smoothed
-   pseudo-t, FSL ``-v``), then **enhance** it (TFCE / cluster / raw voxel).
+1. Fit ordinary least squares and form the observed statistic image (t / F, or
+   a variance-smoothed pseudo-t), then **enhance** it (TFCE / cluster / raw
+   voxel).
 2. For each of ``n_perm`` relabellings (sign flips or permutations, honouring
    exchangeability blocks), refit and re-enhance.  Nuisance regressors are
    handled by **Freedman-Lane**: permute the residuals of the reduced
    (nuisance-only) model and add the nuisance fit back, so only the tested
    effect is exchanged.
 3. Accumulate, without storing every permutation: the **uncorrected** p-map
-   (fraction of permutations whose voxel statistic >= the observed) and the
-   **FWE** p-map (fraction whose *spatial maximum* enhanced statistic >= the
-   observed enhanced value).  The first permutation is the identity, so the
-   observed is included and ``p >= 1 / n_perm``.  Optionally (``pvalue_method=
-   'gpd'``) the FWE p-value is read instead from a generalized-Pareto fit to the
-   null-max tail (Winkler et al. 2016), resolving below the ``1 / n_perm`` floor
-   at fewer permutations (see ``gpd_pvalue``).
+   (fraction of permutations whose voxel statistic :math:`\\geq` the observed)
+   and the **FWE** p-map (fraction whose *spatial maximum* enhanced statistic
+   :math:`\\geq` the observed enhanced value).  The first permutation is the
+   identity, so the observed is included and :math:`p \\geq 1 / n_{perm}`.
+   Optionally (``pvalue_method='gpd'``) the FWE p-value is read instead from a
+   generalised-Pareto fit to the null-max tail, resolving below the
+   :math:`1 / n_{perm}` floor at fewer permutations (see :func:`gpd_pvalue`).
 
-Everything is cuSOLVER-free (the only solve is a shared ``(p, p)`` inverse via
-``linalg._smalllinalg``) and runs on the broken-cuSOLVER GPU.  The enhancement
-is a non-differentiable inference kernel (it forms discrete clusters); the
-returned maps are arrays -- the CLI / containers / design parsing stay in the
-consumer.
+The only linear solve is a shared ``(p, p)`` inverse, so no dense factorisation
+library is required.  The enhancement is a non-differentiable inference kernel
+(it forms discrete clusters); the returned maps are plain arrays.
+
+References
+----------
+.. [1] Winkler AM, Ridgway GR, Douaud G, Nichols TE, Smith SM (2016). Faster
+   permutation inference in brain imaging. *NeuroImage*, 141, 502-516.
+   :doi:`10.1016/j.neuroimage.2016.05.068`
 """
 
 from __future__ import annotations
@@ -98,8 +105,27 @@ class PermResult:
 def _ols_pre(
     X: Float[Array, 'N p'],
 ) -> Tuple[Float[Array, 'p N'], Float[Array, '']]:
-    """Shared OLS pieces: hat pre-multiplier ``M = (X^T X)^{-1} X^T`` and the
-    contrast-independent variance factor is computed by the caller."""
+    """Shared ordinary-least-squares pieces of the design.
+
+    Computes the coefficient pre-multiplier
+    :math:`M = (X^{\\top} X)^{-1} X^{\\top}` (so that the fitted coefficients
+    for a response :math:`y` are :math:`M y`) together with the inverse Gram
+    matrix :math:`(X^{\\top} X)^{-1}`, which the caller combines with the
+    contrast to form the contrast-independent variance factor.
+
+    Parameters
+    ----------
+    X : Float[Array, 'N p']
+        The ``(N, p)`` design matrix (``N`` observations, ``p`` regressors).
+
+    Returns
+    -------
+    Float[Array, 'p N']
+        The ``(p, N)`` coefficient pre-multiplier
+        :math:`(X^{\\top} X)^{-1} X^{\\top}`.
+    Float[Array, '']
+        The ``(p, p)`` inverse Gram matrix :math:`(X^{\\top} X)^{-1}`.
+    """
     p = X.shape[-1]
     xtx_inv, _ = small_inv_logdet(X.T @ X, p)
     return xtx_inv @ X.T, xtx_inv
@@ -110,9 +136,35 @@ def _residual_former(
 ) -> Tuple[Float[Array, 'N N'], Float[Array, 'N N']]:
     """Reduced-model fit and residual-forming matrices for Freedman-Lane.
 
-    Returns ``(fit_z, res_z)`` with ``fit_z = Z (Z^T Z)^{-1} Z^T`` and
-    ``res_z = I - fit_z``.  ``Z = None`` -> ``fit_z = 0``, ``res_z = I`` (the
-    no-nuisance case: permute the data directly)."""
+    Builds the two projection matrices used to strip the nuisance space out of
+    the data before permuting.  The nuisance fit (hat) matrix is
+    :math:`\\mathrm{fit}_z = Z (Z^{\\top} Z)^{-1} Z^{\\top}` and the
+    residual-forming matrix is its complement
+    :math:`\\mathrm{res}_z = I - \\mathrm{fit}_z`.  When ``Z`` is ``None`` there
+    are no nuisance regressors, so :math:`\\mathrm{fit}_z = 0` and
+    :math:`\\mathrm{res}_z = I` -- the data are permuted directly.
+
+    Parameters
+    ----------
+    Z : Float[Array, 'N q'] or None
+        The ``(N, q)`` nuisance design matrix, or ``None`` for the
+        no-nuisance case.
+    n : int
+        The number of observations :math:`N`, fixing the ``(N, N)`` matrix size.
+    dtype
+        The floating dtype of the returned matrices.
+
+    Returns
+    -------
+    Float[Array, 'N N']
+        The ``(N, N)`` nuisance fit matrix
+        :math:`\\mathrm{fit}_z = Z (Z^{\\top} Z)^{-1} Z^{\\top}` (all-zero when
+        ``Z`` is ``None``).
+    Float[Array, 'N N']
+        The ``(N, N)`` residual-forming matrix
+        :math:`\\mathrm{res}_z = I - \\mathrm{fit}_z` (the identity when ``Z``
+        is ``None``).
+    """
     eye = jnp.eye(n, dtype=dtype)
     if Z is None:
         return jnp.zeros((n, n), dtype=dtype), eye
@@ -180,30 +232,37 @@ def permutation_test(
     two_sided
         Two-sided test (default ``True``).  Ignored for an F-contrast.
     var_smooth
-        Optional Gaussian sigma for variance smoothing (pseudo-t, FSL ``-v``).
+        Optional Gaussian sigma for variance smoothing (pseudo-t).
+    connectivity
+        Spatial connectivity order used when forming clusters (for TFCE and the
+        cluster-based enhancements).  Default ``1``.
     cluster_thresh
         Cluster-forming statistic threshold; **required** for
-        ``enhancement='cluster_extent'`` / ``'cluster_mass'`` (the classic FSL
-        cluster-extent / cluster-mass FWE -- one threshold, ~100x cheaper per
+        ``enhancement='cluster_extent'`` / ``'cluster_mass'`` (the classic
+        cluster-extent / cluster-mass FWE -- one threshold, far cheaper per
         permutation than TFCE).
+    tfce_E, tfce_H, tfce_steps
+        Threshold-free cluster enhancement parameters: the extent exponent
+        :math:`E` (default ``0.5``), the height exponent :math:`H`
+        (default ``2.0``), and the number of integration steps (default
+        ``100``).  Only used when ``enhancement='tfce'``.
     pvalue_method
         ``'empirical'`` (default) -- the FWE p-map is the discrete fraction of
-        permutations whose null max ``>=`` the observed (floored at
-        ``1/n_perm``).  ``'gpd'`` -- fit a generalized Pareto distribution to
-        the upper tail of the null-max distribution (Winkler et al. 2016) so
-        FWE p-values resolve **below** the ``1/n_perm`` floor, letting
+        permutations whose null max :math:`\\geq` the observed (floored at
+        :math:`1 / n_{perm}`).  ``'gpd'`` -- fit a generalised Pareto
+        distribution to the upper tail of the null-max distribution so FWE
+        p-values resolve **below** the :math:`1 / n_{perm}` floor, letting
         ``n_perm`` drop.  Only the FWE map is GPD-smoothed; the uncorrected map
         stays empirical.
     gpd_n_exceedances
         Number of upper-tail null-max exceedances used for the GPD fit when
         ``pvalue_method='gpd'`` (default ``250``; clamped to ``n_perm - 1``).
-    connectivity, tfce_E, tfce_H, tfce_steps
-        Cluster / TFCE parameters.
 
     Returns
     -------
-    ``PermResult`` with the observed statistic and enhanced maps, the FWE and
-    uncorrected p-maps, and the null max distribution.
+    PermResult
+        A :class:`PermResult` holding the observed statistic and enhanced maps,
+        the FWE and uncorrected p-maps, and the null-max distribution.
     """
     spatial = data.shape[:-1]
     n = data.shape[-1]
@@ -403,24 +462,50 @@ def gpd_pvalue(
     *,
     n_exceedances: int = 250,
 ) -> Float[Array, '...']:
-    """Tail-accelerated exceedance p-value via a generalized Pareto fit.
+    """Tail-accelerated exceedance p-value via a generalised Pareto fit.
 
-    The permutation FWE p-value of an observed statistic ``T`` is the survival
-    fraction ``P(max_null >= T)``.  Estimated empirically it is discrete and
-    floored at ``1 / n`` -- so resolving a small p-value needs a large ``n``.
-    Following Winkler et al. (2016, *Faster permutation inference*), the upper
-    tail of ``null_dist`` above a threshold ``u`` (the ``(k+1)``-th largest of
-    ``n``, ``k = n_exceedances``) is modelled by a **generalized Pareto
-    distribution** fitted by the method of moments, giving a smooth p-value that
-    can fall below ``1 / n`` at a fraction of the permutations::
+    The permutation FWE p-value of an observed statistic :math:`T` is the
+    survival fraction :math:`P(\\max_{\\mathrm{null}} \\geq T)`.  Estimated
+    empirically it is discrete and floored at :math:`1 / n` -- so resolving a
+    small p-value needs a large :math:`n`.  Following Winkler et al. (2016;
+    see the module references), the upper tail of ``null_dist`` above a
+    threshold :math:`u` (the :math:`(k+1)`-th largest of :math:`n`, with
+    :math:`k =` ``n_exceedances``) is modelled by a **generalised Pareto
+    distribution** fitted by the method of moments, giving a smooth p-value
+    that can fall below :math:`1 / n` at a fraction of the permutations:
 
-        P(T) = (k / n) * S_GPD(T - u),   T > u   (tail, GPD survival)
-        P(T) = #{null >= T} / n,         T <= u  (body, empirical)
+    .. list-table::
+       :widths: auto
 
-    With GPD shape ``xi`` and scale ``sigma`` from the exceedance mean / variance
-    (``xi = (1 - mean^2 / var) / 2``, ``sigma = mean (1 - xi)``).  ``stat`` is a
-    scalar or an array of observed statistics (e.g. an enhanced FWE map); the
-    return has the same shape.  Pure / differentiable / cuSOLVER-free.
+       * - :math:`P(T) = (k / n)\\, S_{\\mathrm{GPD}}(T - u)`
+         - :math:`T > u` (tail, GPD survival)
+       * - :math:`P(T) = \\#\\{\\mathrm{null} \\geq T\\} / n`
+         - :math:`T \\leq u` (body, empirical)
+
+    The GPD shape :math:`\\xi` and scale :math:`\\sigma` are recovered from the
+    exceedance mean and variance,
+    :math:`\\xi = (1 - \\mathrm{mean}^2 / \\mathrm{var}) / 2` and
+    :math:`\\sigma = \\mathrm{mean}\\,(1 - \\xi)`.  The routine is pure and
+    differentiable, and requires no dense factorisation library.
+
+    Parameters
+    ----------
+    stat : Float[Array, '...']
+        The observed statistic(s) whose FWE p-value(s) are wanted.  A scalar or
+        an array of arbitrary shape (e.g. an enhanced FWE statistic map).
+    null_dist : Float[Array, 'n']
+        The ``(n,)`` null distribution of the spatial-maximum statistic (one
+        value per permutation).
+    n_exceedances : int, optional
+        The number of upper-tail exceedances :math:`k` used to fit the GPD
+        (default ``250``).  Clamped to at most ``n - 1``.
+
+    Returns
+    -------
+    Float[Array, '...']
+        The FWE p-value(s), the same shape as ``stat``: the GPD-based tail
+        estimate where ``stat`` exceeds the threshold :math:`u`, and the
+        empirical fraction otherwise.
     """
     s = jnp.asarray(stat)
     null = jnp.asarray(null_dist)

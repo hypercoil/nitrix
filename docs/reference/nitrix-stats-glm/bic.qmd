@@ -1,0 +1,39 @@
+---
+title: "bic"
+generated: true
+description: "Per-element Bayesian information criterion $-2 ell + k  log N$."
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+<!-- nitrix:gen sig:bic -->
+```python
+bic(result: GLMResult) -> Float[Array, 'V']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:bic -->
+Per-element Bayesian information criterion $-2\ell + k \log N$.
+
+Here $\ell$ is the maximised log-likelihood, $k$ the number of
+estimated parameters, and $N$ the number of observations.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:bic -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `result` | `GLMResult` | — | — | A fitted [`GLMResult`](../nitrix-stats-glm/GLMResult.qmd) supplying the log-likelihood, parameter count, and observation count. |
+
+**Returns** `Float` — shape `V`. `(V,)` Bayesian information criterion, one per element.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:bic -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+<!-- nitrix:/gen -->

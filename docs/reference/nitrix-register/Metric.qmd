@@ -1,0 +1,52 @@
+---
+title: "Metric"
+generated: true
+description: "Image-pair similarity objective for a registration recipe."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._metric`.*
+
+<!-- nitrix:gen sig:Metric -->
+```python
+class Metric(Protocol)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:Metric -->
+Image-pair similarity objective for a registration recipe.
+
+A metric bundles the scalar minimisation cost with an optional
+least-squares residual and the two class flags a coarse-to-fine driver
+keys its dispatch on.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:Metric.cost -->
+```python
+cost(warped: Float[Array, '*spatial'], fixed: Float[Array, '*spatial'], *, mask: Optional[Float[Array, '*spatial']] = None) -> Float[Array, '']
+```
+<!-- nitrix:/gen -->
+
+Scalar minimisation cost (lower is a better match).
+
+<!-- nitrix:gen sig:Metric.residual -->
+```python
+residual(warped: Float[Array, '*spatial'], fixed: Float[Array, '*spatial'], *, mask: Optional[Float[Array, '*spatial']] = None) -> Float[Array, ' m']
+```
+<!-- nitrix:/gen -->
+
+Least-squares residual vector (`is_least_squares` metrics only).
+
+Non-least-squares metrics raise `NotImplementedError`.
+
+
+<!-- nitrix:gen dims:Metric -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

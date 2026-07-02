@@ -1,0 +1,54 @@
+---
+title: "matern_spectral_density"
+generated: true
+description: "Matern spectral density in `dim` dimensions for `nu` in `{0.5, 1.5, 2.5}`."
+---
+
+[‹ back to `nitrix.linalg.kernel`](../nitrix-linalg-kernel.qmd)
+
+<!-- nitrix:gen sig:matern_spectral_density -->
+```python
+matern_spectral_density(omega: Float[Array, '...'], *, rho: Union[float, Float[Array, '']], nu: float, amplitude: float = 1.0, dim: int = 1) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:matern_spectral_density -->
+Matern spectral density in `dim` dimensions for `nu` in `{0.5, 1.5, 2.5}`.
+
+Evaluates the power spectral density
+$S(w) = a^2 C (\lambda^2 + \|w\|^2)^{-(\nu + D/2)}$ with the
+Matern rate $\lambda = \sqrt{2\nu} / \rho$, normaliser
+$C = 2^{D} \pi^{D/2} \Gamma(\nu + D/2) (2\nu)^{\nu} /
+(\Gamma(\nu) \rho^{2\nu})$, amplitude $a$, and input
+dimension $D$ -- the $D$-dimensional Fourier transform
+of scikit-learn's `Matern(length_scale=rho, nu=nu)` scaled by
+$a^2$.  At `dim=1` this reduces to the closed forms
+$2\lambda / (\lambda^2 + w^2)$,
+$4\lambda^3 / (\lambda^2 + w^2)^2$, and
+$\tfrac{16}{3}\lambda^5 / (\lambda^2 + w^2)^3$ for
+$\nu = 1/2, 3/2, 5/2$ respectively, evaluated directly to
+keep the well-tested one-dimensional path byte-identical.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:matern_spectral_density -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `omega` | `Float` | `...` | — | Frequency magnitude $\\|w\\|$, of arbitrary shape. Integer inputs are promoted to the default float dtype before the density is formed (an integer `omega` would otherwise truncate `rho` and yield `NaN`). |
+| `rho` | `Union[float, Float[Array, '']]` | — | — | Length scale $\rho$ (scalar or scalar array). |
+| `nu` | `float` | — | — | Matern smoothness $\nu$; must be `0.5`, `1.5`, or `2.5` (raises `ValueError` otherwise). |
+| `amplitude` | `float` | — | `1.0` | Kernel amplitude $a$; the density scales as $a^2$. |
+| `dim` | `int` | — | `1` | Input dimension $D$ (`1` for the one-dimensional case). |
+
+**Returns** `Float` — shape `...`. Spectral density evaluated elementwise at `omega`, matching its (float-promoted) shape and dtype.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:matern_spectral_density -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

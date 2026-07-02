@@ -1,0 +1,34 @@
+---
+title: "iid"
+generated: true
+description: "The trivial (identity) residual structure with no correlation."
+---
+
+[‹ back to `nitrix.stats.lme`](../nitrix-stats-lme.qmd)
+
+*Re-exported here; defined in `nitrix.stats.lme._corr`.*
+
+<!-- nitrix:gen sig:iid -->
+```python
+iid() -> CorrSpec
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:iid -->
+The trivial (identity) residual structure with no correlation.
+
+The correlation matrix is $R = I$, carrying no parameters.  This is
+useful as the correlation slot when only a **variance function** is wanted (a
+pure heteroscedastic GLS, `nlme::gls(weights=…)` with no `correlation`).
+The whitener is the identity (padded positions zeroed) and
+$\log|R_i| = 0$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:iid -->
+**Parameters**
+
+*No parameters.*
+
+**Returns** `CorrSpec`. A parameter-free correlation structure whose whitener returns the input unchanged (up to zeroing padding) with a zero log-determinant.
+<!-- nitrix:/gen -->
+

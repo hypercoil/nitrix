@@ -14,6 +14,7 @@ the shared framing + history and indexes its atomised items:
 | Consumer training-substrate | [`ilex-training-substrate.md`](ilex-training-substrate.md) | Augmentation / loss / model numerics ilex grew after 2026-06-02 (2026-06-08 audit) |
 | Consumer forward-block kernels | [`nn-forward-block-kernels.md`](nn-forward-block-kernels.md) | The transformer / state-space forward blocks (attention, selective-scan) — the first NN-kernel tier (2026-06-23) |
 | Statistical modelling suite | [`stats-modelling-suite.md`](stats-modelling-suite.md) | Mass-univariate GLM/GAM/GAMM, LME size-dispatch, TFCE `randomise` — perf-bench + ModelArray + niffi |
+| `hypercoil-examples` migration | [`hypercoil-examples-migration.md`](hypercoil-examples-migration.md) | Theory-faithful kernels salvaged from the deprecated examples repo (functional alignment, vMF directional stats, whitening, DCBC, synthetic generators) — clean-room from the literature, **not** ports |
 | Internal engineering backlog | [`internal-backlog.md`](internal-backlog.md) | Parked perf / Pallas / API-refinement items, each gated on a **Trigger** |
 | Doc-drift / correctness fixes | [`perf-bench-feedback.md`](perf-bench-feedback.md) | Mechanical docstring fixes (file:line-pinned), *not* primitive proposals |
 | docs/feature-requests catalogue §12 brainstorm catalogue | `docs/feature-requests catalogue §12` (origin) | Substrate-compatible *candidate* primitives; promotion gated by `§13` |
@@ -190,7 +191,11 @@ demons 0/0 ([`register-demons-force-divide-by-zero`](register-demons-force-divid
 metric conventions ([`metrics-convention-vs-domain-tools`](metrics-convention-vs-domain-tools.md)),
 Pallas ESM force ([`pallas-demons-esm-force`](pallas-demons-esm-force.md)),
 Mosaic GPU kernels ([`mosaic-hopper-registration-kernels`](mosaic-hopper-registration-kernels.md)),
-field regularisers ([`field-regularisers`](field-regularisers.md)).
+field regularisers ([`field-regularisers`](field-regularisers.md)),
+**functional alignment / ProMises** ([`register-functional-alignment`](register-functional-alignment.md);
+new capability — alignment in representation space; from the
+[`hypercoil-examples` migration](hypercoil-examples-migration.md); its solver is
+the linalg dependency [`linalg-orthogonal-procrustes`](linalg-orthogonal-procrustes.md)).
 
 ## Dynamical-systems / DE suite (`nitrix.numerics`)
 
@@ -292,6 +297,13 @@ S) — analytic shrinkage covariance; sibling of 12.14 glasso and nilearn's
 *default* connectome estimator. Surfaced by perf-bench (nilearn defaults to
 Ledoit-Wolf; nitrix has no shrinkage estimator). **Planned in
 [stats v2](stats-modelling-suite-v2.md) §4.1** (a quick-win, consumer waiting).
+
+[linalg-orthogonal-procrustes](linalg-orthogonal-procrustes.md) (`linalg`,
+effort S) — orthogonal Procrustes (**shipped**) + subspace (canonical) angles +
+ranked range basis; the SVD-of-cross-product subspace-geometry family. Lead item
+`orthogonal_procrustes` is the solver under
+[`register-functional-alignment`](register-functional-alignment.md); from the
+[`hypercoil-examples` migration](hypercoil-examples-migration.md).
 
 ### Dependency edges (within the §12 catalogue)
 

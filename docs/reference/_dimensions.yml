@@ -1,0 +1,22 @@
+# Tensor-dimension glossary for nitrix API-reference pages.
+# Read by hypercoil/doc/build/gen_reference_stubs.py — a flat `dim: meaning`
+# mapping (# comments allowed). Variadic dims (e.g. *spatial) are keyed by their
+# bare name (spatial); `...` is glossed automatically as anonymous batch axes.
+# Unlisted dims render with an "add to _dimensions.yml" TODO.
+
+V: elements of a mass-univariate map — voxels, vertices, or fixels
+N: observations — time points, subjects, or sampled points
+p: fixed-effect coefficients / design-matrix columns
+q: random-effect columns
+m: rows of a multi-row contrast
+k: kernel or basis components
+d: spatial dimension (2 or 3)
+ndim: number of spatial dimensions
+spatial: the spatial axes of a grid (variadic)
+batch: leading batch axes (variadic)
+c: feature channels (channels-last)
+leading: leading batch axes preceding the spatial grid (variadic)
+n: query points, each an `ndim`-vector coordinate (variadic)
+target: the target grid's spatial axes (variadic)
+out_spatial: the output grid's spatial axes (variadic)
+s: flattened spatial sample positions

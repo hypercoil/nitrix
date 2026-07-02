@@ -1,0 +1,49 @@
+---
+title: "eta_squared"
+generated: true
+description: "Eta-squared similarity between two profiles (Cohen et al., 2008)."
+---
+
+[‹ back to `nitrix.graph.parcellation`](../nitrix-graph-parcellation.qmd)
+
+<!-- nitrix:gen sig:eta_squared -->
+```python
+eta_squared(x: Float[Array, '... d'], y: Float[Array, '... d']) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:eta_squared -->
+Eta-squared similarity between two profiles (Cohen et al., 2008).
+
+Computes $\eta^2 = 1 - \mathrm{SS}_{\mathrm{within}} /
+\mathrm{SS}_{\mathrm{total}}$ where, over the profile axis,
+$\mathrm{SS}_{\mathrm{within}} = \sum_i (x_i - m_i)^2 + (y_i -
+m_i)^2$ with $m_i = (x_i + y_i) / 2$ the per-element pair mean, and
+$\mathrm{SS}_{\mathrm{total}} = \sum_i (x_i - M)^2 + (y_i - M)^2$
+with $M$ the grand mean of both profiles.  The result ranges over
+$[0, 1]$ (attaining $1$ iff `x == y`); it is the canonical
+functional-connectivity profile-similarity measure, more robust than the
+Pearson correlation to a global offset or scale between profiles, and is
+differentiable.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:eta_squared -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Float` | `...` × `d` | — | Profiles with the comparison along the last axis; leading axes broadcast. |
+| `y` | `Float` | `...` × `d` | — | Profiles with the comparison along the last axis; leading axes broadcast. |
+
+**Returns** `Float` — shape `...`. Eta-squared similarity, with the broadcast leading shape of `x` and `y` (the comparison axis reduced away).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:eta_squared -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->

@@ -1,0 +1,56 @@
+---
+title: "max_unpool_nd"
+generated: true
+description: "Scatter pooled values back into a higher-resolution grid."
+---
+
+[‹ back to `nitrix.morphology.pooling`](../nitrix-morphology-pooling.qmd)
+
+<!-- nitrix:gen sig:max_unpool_nd -->
+```python
+max_unpool_nd(x: Num[Array, '*batch C *pooled'], indices: Int[Array, '*batch C *pooled'], *, output_shape: Sequence[int], spatial_rank: int) -> Num[Array, '*batch C *spatial']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:max_unpool_nd -->
+Scatter pooled values back into a higher-resolution grid.
+
+For each `(batch, channel, output_position)`, write
+`x[batch, channel, output_position]` into the source grid
+at the flat index `indices[batch, channel, output_position]`;
+all other positions get zero.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:max_unpool_nd -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Num` | `*batch` × `C` × `*pooled` | — | Pooled values, `(..., C, *pooled_spatial)`. |
+| `indices` | `Int` | `*batch` × `C` × `*pooled` | — | Flat indices (per-channel, in C-order over the unbatched spatial grid) as produced by [`max_pool_with_indices_nd`](../nitrix-morphology-pooling/max_pool_with_indices_nd.qmd). Same shape as `x`. |
+| `output_shape` | `Sequence[int]` | — | — | Target spatial shape (length `spatial_rank`). Determines the resolution we're unpooling into. |
+| `spatial_rank` | `int` | — | — | Number of trailing spatial axes. |
+
+**Returns** `Num` — shape `*batch` × `C` × `*spatial`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:max_unpool_nd -->
+::: {.callout-note}
+Implementation: build a flat `(batch, C, prod(output_shape))`
+target buffer via `.at[..., indices].set(x)`, then reshape.
+Differentiable via the standard scatter VJP; gradient flows
+back to `x` but not `indices` (a discrete index map).
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:max_unpool_nd -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*batch` | leading batch axes (variadic) |
+| `C` | *(undocumented — add to `_dimensions.yml`)* |
+| `*pooled` | a variadic group of axes (`pooled`) |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

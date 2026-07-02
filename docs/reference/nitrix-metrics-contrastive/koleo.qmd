@@ -1,0 +1,51 @@
+---
+title: "koleo"
+generated: true
+description: "Kozachenko--Leonenko entropy (feature-spread) regulariser."
+---
+
+[‹ back to `nitrix.metrics.contrastive`](../nitrix-metrics-contrastive.qmd)
+
+<!-- nitrix:gen sig:koleo -->
+```python
+koleo(z: Float[Array, 'n d'], *, eps: float = 1e-08, reduction: Reduction = 'mean') -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:koleo -->
+Kozachenko--Leonenko entropy (feature-spread) regulariser.
+
+Penalises features clumping together: for each (L2-normalised) point it
+finds the nearest neighbour via the maximum cosine similarity (self
+excluded by a `-2` diagonal, below the `[-1, 1]` range), converts to
+the Euclidean distance $\sqrt{2 - 2\cos}$, and returns
+$-\log(\text{distance} + \text{eps})$ -- large when points collapse
+together, small when they are well spread.
+
+The dense self-excluded cosine nearest-neighbour is exact and right at
+embedding-batch sizes; the EUCLIDEAN-semiring ELL k-NN is the at-scale
+path if this is ever applied to a large point set.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:koleo -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `z` | `Float` | `n` × `d` | — | `(n, d)` embeddings. |
+| `eps` | `float` | — | `1e-08` | Guards `log` of a zero nearest-neighbour distance. |
+| `reduction` | `Reduction` | — | `'mean'` | `"mean"` (default), `"sum"`, or `"none"` (per-point value). |
+
+**Returns** `Float` — shape `...`. The Kozachenko--Leonenko regulariser. With `reduction="none"` this is the per-point value of shape `(n,)`; with `"mean"` or `"sum"` it is a scalar reducing over the `n` points.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:koleo -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d` | spatial dimension (2 or 3) |
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

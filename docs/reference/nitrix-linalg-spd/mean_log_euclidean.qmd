@@ -1,0 +1,53 @@
+---
+title: "mean_log_euclidean"
+generated: true
+description: "Log-Euclidean Fréchet mean, $ exp( operatorname{mean}_i  log X_i)$."
+---
+
+[‹ back to `nitrix.linalg.spd`](../nitrix-linalg-spd.qmd)
+
+<!-- nitrix:gen sig:mean_log_euclidean -->
+```python
+mean_log_euclidean(input: Float[Array, '... batch d d'], *, axis: Union[int, Sequence[int]] = 0, psi: float = 0.0, key: Optional[jax.Array] = None, eigvalue_clip: EigvalueClip = 'auto') -> Float[Array, '... d d']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:mean_log_euclidean -->
+Log-Euclidean Fréchet mean, $\exp(\operatorname{mean}_i \log X_i)$.
+
+Closed-form geodesic mean on the SPD manifold under the log-Euclidean
+metric: each matrix is mapped through [`symlog`](../nitrix-linalg-spd/symlog.qmd), the results are
+averaged, and the mean is mapped back with [`symexp`](../nitrix-linalg-spd/symexp.qmd).  This is cheap
+(one logarithm per matrix in the batch plus one final exponential),
+unlike the affine-invariant Fréchet mean, which requires an iterative
+fixed-point computation.
+
+For practical fMRI / dMRI use the log-Euclidean mean is a near-perfect
+proxy for the affine-invariant mean when the spread of the input batch is
+moderate.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:mean_log_euclidean -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `input` | `Float` | `...` × `batch` × `d` × `d` | — | Batch of symmetric (assumed SPD) matrices, with each `d` by `d` matrix on the two trailing axes and one or more batch axes to average over. |
+| `axis` | `Union[int, Sequence[int]]` | — | `0` | Axis or axes over which to average the matrix logarithms (default `0`). |
+| `psi` | `float` | — | `0.0` | Reconditioning strength forwarded to [`symlog`](../nitrix-linalg-spd/symlog.qmd) and [`symexp`](../nitrix-linalg-spd/symexp.qmd). |
+| `key` | `Optional[jax.Array]` | — | `None` | PRNG key, required when `psi > 0`. |
+| `eigvalue_clip` | `EigvalueClip` | — | `'auto'` | Eigenvalue clipping policy forwarded to [`symlog`](../nitrix-linalg-spd/symlog.qmd). |
+
+**Returns** `Float` — shape `...` × `d` × `d`. The log-Euclidean mean matrix, with the averaged axes removed.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:mean_log_euclidean -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `batch` | leading batch axes (variadic) |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->

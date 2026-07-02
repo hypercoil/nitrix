@@ -4,11 +4,11 @@
 """
 Built-in algebras shipped with ``nitrix.semiring``.
 
-Each algebra is exported as a module-level ``Semiring`` (relaxed) or
-``StrictSemiring`` instance per SPEC §4.1:
+Each algebra is exported as a module-level :class:`Semiring` (relaxed) or
+:class:`StrictSemiring` instance:
 
 ================== ===================== ============== ========================
-Algebra            Type                  Identity       Backward (Phase 2.A.5)
+Algebra            Type                  Identity       Backward
 ================== ===================== ============== ========================
 REAL               StrictSemiring        ``0``          transpose-matmul
 LOG                StrictSemiring        ``-inf``       softmax-weighted
@@ -18,14 +18,15 @@ BOOLEAN            StrictSemiring        ``False``      n/a (raises)
 EUCLIDEAN          Semiring (relaxed)    ``0``          normalised-diff w/ guard
 ================== ===================== ============== ========================
 
-The pre-built instances are intended for module-level use:
+The pre-built instances are intended for module-level use::
 
     from nitrix.semiring import REAL, LOG, TROPICAL_MAX_PLUS
     semiring_matmul(A, B, semiring=LOG)
 
-A user can compose their own ``Semiring`` by combining a ``Monoid`` with
-a ``Semigroup``; the kernel substrate does not care whether the algebra
-is built-in or user-defined as long as the Protocol shape is honoured.
+A user can compose their own :class:`Semiring` by combining a
+:class:`Monoid` with a :class:`Semigroup`; the kernel substrate does not
+care whether the algebra is built-in or user-defined as long as the
+protocol shape is honoured.
 """
 
 from __future__ import annotations
@@ -59,7 +60,7 @@ from ._types import Semiring, StrictSemiring
 
 @dataclass(frozen=True)
 class _SumMonoid:
-    """``(R, +, 0)`` monoid; ``finalize`` is identity."""
+    """The :math:`(\\mathbb{R}, +, 0)` monoid; :meth:`finalize` is identity."""
 
     def init(
         self, shape: tuple[int, ...], dtype: jnp.dtype[Any]
@@ -82,7 +83,7 @@ class _SumMonoid:
 
 @dataclass(frozen=True)
 class _MaxMonoid:
-    """``(R ∪ {-inf}, max, -inf)`` monoid."""
+    """The :math:`(\\mathbb{R} \\cup \\{-\\infty\\}, \\max, -\\infty)` monoid."""
 
     def init(
         self, shape: tuple[int, ...], dtype: jnp.dtype[Any]
@@ -105,7 +106,7 @@ class _MaxMonoid:
 
 @dataclass(frozen=True)
 class _MinMonoid:
-    """``(R ∪ {+inf}, min, +inf)`` monoid."""
+    """The :math:`(\\mathbb{R} \\cup \\{+\\infty\\}, \\min, +\\infty)` monoid."""
 
     def init(
         self, shape: tuple[int, ...], dtype: jnp.dtype[Any]
@@ -151,11 +152,12 @@ class _OrMonoid:
 
 @dataclass(frozen=True)
 class _SumThenSqrtMonoid:
-    """Sum monoid with ``finalize = sqrt`` for L2-style aggregations.
+    """Sum monoid whose :meth:`finalize` step is a square root, for
+    L2-style aggregations.
 
     The finalize step is a non-monoidal projection applied once at the
-    end of the contraction; this is why ``EUCLIDEAN`` is a relaxed
-    ``Semiring`` rather than a ``StrictSemiring``.
+    end of the contraction; this is why :attr:`EUCLIDEAN` is a relaxed
+    :class:`Semiring` rather than a :class:`StrictSemiring`.
     """
 
     def init(
@@ -194,14 +196,30 @@ class LogSumExpAcc(NamedTuple):
 def _safe_exp_diff(
     x: Float[Array, '*shape'], m: Float[Array, '*shape']
 ) -> Float[Array, '*shape']:
-    """Compute ``exp(x - m)`` defined to be 0 wherever ``x == -inf``.
+    """Compute :math:`\\exp(x - m)`, defined to be 0 wherever ``x`` is
+    :math:`-\\infty`.
 
     Uses the "double-where with sentinel" trick to keep both forward
-    and reverse-mode AD NaN-free.  When ``x`` is ``-inf`` (and possibly
-    ``m`` is ``-inf`` too, which would make the naive subtraction
-    produce ``NaN``), the inner computation is short-circuited via a
-    sentinel zero so no ``NaN`` enters either the forward value or the
-    gradient.
+    and reverse-mode AD NaN-free.  When ``x`` is :math:`-\\infty` (and
+    possibly ``m`` is :math:`-\\infty` too, which would make the naive
+    subtraction produce ``NaN``), the inner computation is
+    short-circuited via a sentinel zero so no ``NaN`` enters either the
+    forward value or the gradient.
+
+    Parameters
+    ----------
+    x : Float[Array, '*shape']
+        Values whose exponentiated difference is required. Entries equal
+        to :math:`-\\infty` map to 0 in the output.
+    m : Float[Array, '*shape']
+        Reference to subtract from ``x`` before exponentiating (typically
+        a running maximum). Broadcast against ``x``.
+
+    Returns
+    -------
+    Float[Array, '*shape']
+        The elementwise value :math:`\\exp(x - m)`, with every position
+        where ``x`` is :math:`-\\infty` set to 0.
     """
     finite = jnp.isfinite(x)
     safe_diff = jnp.where(finite, x - m, jnp.zeros_like(x))
@@ -210,14 +228,16 @@ def _safe_exp_diff(
 
 @dataclass(frozen=True)
 class _LogSumExpMonoid:
-    """``(R ∪ {-inf}, logsumexp, -inf)`` with online ``(m, s)`` state.
+    """The logsumexp monoid :math:`(\\mathbb{R} \\cup \\{-\\infty\\},
+    \\operatorname{logsumexp}, -\\infty)` with online :math:`(m, s)` state.
 
-    The auxiliary ``(max, sum_exp)`` representation keeps the running
-    normalised sum bounded in ``[0, K]`` -- exactly the trick used in
-    online softmax / flash attention.  ``finalize`` re-materialises
-    ``m + log(s)``.
+    The auxiliary :math:`(\\text{max}, \\text{sum\\_exp})` representation
+    keeps the running normalised sum bounded in :math:`[0, K]` -- exactly
+    the trick used in online softmax / flash attention. :meth:`finalize`
+    re-materialises :math:`m + \\log(s)`.
 
-    All operations are NaN-safe even when both operands are ``-inf``.
+    All operations are NaN-safe even when both operands are
+    :math:`-\\infty`.
     """
 
     def init(
@@ -303,6 +323,12 @@ REAL: StrictSemiring[Any] = StrictSemiring(
     matmul_vjp=real_matmul_vjp,
     ell_matmul_vjp=real_ell_matmul_vjp,
 )
+"""The ordinary real algebra :math:`(\\mathbb{R}, +, \\times)`.
+
+Sum-of-products contraction: the monoid is addition with identity 0 and
+the binary operation is multiplication, with 0 as annihilator so a zero
+entry masks its product. Recovers standard matrix multiplication.
+"""
 
 LOG: StrictSemiring[Any] = StrictSemiring(
     monoid=_LogSumExpMonoid(),
@@ -313,6 +339,14 @@ LOG: StrictSemiring[Any] = StrictSemiring(
     matmul_vjp=log_matmul_vjp,
     ell_matmul_vjp=log_ell_matmul_vjp,
 )
+"""The log-space algebra: logsumexp combined with addition.
+
+Products of ordinary reals become sums in the log domain, and sums
+become numerically-stable logsumexp reductions. The identity and
+annihilator are :math:`-\\infty` (the log of 0), so the contraction
+computes probabilities and partition functions in log space without
+underflow.
+"""
 
 TROPICAL_MAX_PLUS: StrictSemiring[Any] = StrictSemiring(
     monoid=_MaxMonoid(),
@@ -323,6 +357,13 @@ TROPICAL_MAX_PLUS: StrictSemiring[Any] = StrictSemiring(
     matmul_vjp=tropical_max_plus_matmul_vjp,
     ell_matmul_vjp=tropical_max_plus_ell_matmul_vjp,
 )
+"""The max-plus tropical algebra :math:`(\\max, +)`.
+
+The monoid is maximisation and the binary operation is addition, with
+identity and annihilator :math:`-\\infty`. Contractions compute
+longest-path / best-score quantities; the backward pass gathers the
+subgradient at the maximising index.
+"""
 
 TROPICAL_MIN_PLUS: StrictSemiring[Any] = StrictSemiring(
     monoid=_MinMonoid(),
@@ -333,6 +374,13 @@ TROPICAL_MIN_PLUS: StrictSemiring[Any] = StrictSemiring(
     matmul_vjp=tropical_min_plus_matmul_vjp,
     ell_matmul_vjp=tropical_min_plus_ell_matmul_vjp,
 )
+"""The min-plus tropical algebra :math:`(\\min, +)`.
+
+The monoid is minimisation and the binary operation is addition, with
+identity and annihilator :math:`+\\infty`. Contractions compute
+shortest-path / least-cost quantities; the backward pass gathers the
+subgradient at the minimising index.
+"""
 
 BOOLEAN: StrictSemiring[Any] = StrictSemiring(
     monoid=_OrMonoid(),
@@ -343,6 +391,13 @@ BOOLEAN: StrictSemiring[Any] = StrictSemiring(
     matmul_vjp=boolean_matmul_vjp,
     ell_matmul_vjp=boolean_ell_matmul_vjp,
 )
+"""The Boolean algebra: logical OR combined with logical AND.
+
+The monoid is OR (identity and annihilator ``False``) and the binary
+operation is AND, giving reachability / transitive-closure contractions.
+Being non-differentiable, this algebra raises rather than providing a
+backward pass.
+"""
 
 # EUCLIDEAN is the relaxed-Semiring test case: its `binary_op` is non-
 # associative (squared difference does not satisfy
@@ -359,6 +414,16 @@ EUCLIDEAN: Semiring[Any] = Semiring(
     matmul_vjp=euclidean_matmul_vjp,
     ell_matmul_vjp=euclidean_ell_matmul_vjp,
 )
+"""The Euclidean-distance algebra: sum-of-squared-differences with a
+final square root.
+
+The binary operation is the squared difference :math:`(a - b)^2`, the
+monoid sums those contributions (identity 0), and :meth:`finalize`
+applies a guarded square root. The squared-difference operation has no
+annihilator, so entries cannot be value-masked, and the trailing square
+root is a non-monoidal projection; this makes ``EUCLIDEAN`` a relaxed
+:class:`Semiring` rather than a :class:`StrictSemiring`.
+"""
 
 
 __all__ = [

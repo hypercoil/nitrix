@@ -1,0 +1,55 @@
+---
+title: "sandwich_cov"
+generated: true
+description: "Robust (sandwich) coefficient covariance for a fitted GLM."
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+<!-- nitrix:gen sig:sandwich_cov -->
+```python
+sandwich_cov(result: GLMResult, Y: Float[Array, 'V N'], X: Float[Array, 'N p'], *, kind: HCKind = 'HC3', groups: Optional[Int[Array, 'N']] = None, n_groups: Optional[int] = None, weights: Optional[Float[Array, 'N']] = None) -> Float[Array, 'V p p']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:sandwich_cov -->
+Robust (sandwich) coefficient covariance for a fitted GLM.
+
+Returns the per-element `(V, p, p)` covariance $A^{-1} B A^{-1}$
+with bread $A^{-1} = (X^{\top} W X)^{-1}$ (the fit's `cov_unscaled`)
+and a robust meat $B$ built from the per-observation score
+contributions $u_i = x_i g_i$, where $g_i = (y_i - \mu_i)
+(\mathrm{d}\mu_i / \mathrm{d}\eta_i) / V(\mu_i)$ (for OLS, $g_i$ is
+the raw residual $y_i - \mu_i$ -- the classic Huber-White form).  The
+computation avoids cuSOLVER and maps over elements; the sandwich weights are
+treated as data-dependent constants and are not differentiated through.
+
+Pass the result as `cov=` to [`t_contrast`](../nitrix-stats-glm/t_contrast.qmd) / [`f_contrast`](../nitrix-stats-glm/f_contrast.qmd).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:sandwich_cov -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `result` | `GLMResult` | — | — | The fitted [`GLMResult`](../nitrix-stats-glm/GLMResult.qmd) and the data it was fit on (`X` the shared `(N, p)` design, `Y` the `(V, N)` responses). |
+| `Y` | `Float` | `V` × `N` | — | The fitted [`GLMResult`](../nitrix-stats-glm/GLMResult.qmd) and the data it was fit on (`X` the shared `(N, p)` design, `Y` the `(V, N)` responses). |
+| `X` | `Float` | `N` × `p` | — | The fitted [`GLMResult`](../nitrix-stats-glm/GLMResult.qmd) and the data it was fit on (`X` the shared `(N, p)` design, `Y` the `(V, N)` responses). |
+| `kind` | `HCKind` | — | `'HC3'` | Heteroscedasticity-consistent variant when `groups` is `None`: `'HC0'` (raw), `'HC1'` ($n/(n-p)$ correction), `'HC2'` ($/(1 - h_i)$), `'HC3'` ($/(1 - h_i)^2$); $h_i$ the GLM hat diagonal. Ignored when `groups` is given. |
+| `groups` | `Optional[Int[Array, 'N']]` | — | `None` | `(N,)` cluster labels for a **cluster-robust** covariance (one-way): $B = \sum_g s_g s_g^{\top}$, $s_g = \sum_{i \in g} x_i g_i$, with the $G/(G-1) \cdot (N-1)/(N-p)$ small-sample factor. This is **one-way** clustering -- the analogue of FSL `randomise`'s `-e` exchangeability blocks. It is **not** a variance-group model (FSL `-g` / PALM `-vg`): a separate residual *variance* per group (heteroscedastic two-sample / FLAME-style grouped variance) is a different estimator and is not provided here -- the cluster-robust meat assumes a common model, only correlating scores *within* a cluster. The cluster path is **eager-only** by default: the distinct-cluster count is found with `jnp.unique` (a data-dependent shape). To trace the whole estimator under `jax.jit`, pre-densify `groups` to contiguous `0..n_groups-1` labels and pass `n_groups`. |
+| `n_groups` | `Optional[int]` | — | `None` | Optional distinct-cluster count. `None` (default) densifies `groups` host-side; supplying it (with contiguous labels) keeps `sandwich_cov` jit-traceable. Ignored when `groups` is `None`. |
+| `weights` | `Optional[Float[Array, 'N']]` | — | `None` | Optional `(N,)` prior weights matching the fit's `weights=`. |
+
+**Returns** `Float` — shape `V` × `p` × `p`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:sandwich_cov -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `N` | observations — time points, subjects, or sampled points |
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

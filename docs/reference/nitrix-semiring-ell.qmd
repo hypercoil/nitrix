@@ -1,0 +1,57 @@
+---
+title: "nitrix.semiring.ell"
+generated: true
+signature-hash: 96a6dfac471c0017
+description: "Semiring-generalised ELL-sparse matrix multiplication."
+listing:
+  id: nitrix-semiring-ell-symbols
+  contents: "nitrix-semiring-ell/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.semiring.ell`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Semiring-generalised ELL-sparse matrix multiplication.
+
+This module provides [`semiring_ell_matmul`](nitrix-semiring-ell/semiring_ell_matmul.qmd), which contracts a sparse
+left operand held in ELL (ELLPACK) layout against a dense right operand
+under an arbitrary semiring, together with its transpose companion
+[`semiring_ell_rmatvec`](nitrix-semiring-ell/semiring_ell_rmatvec.qmd).  The forward [`semiring_ell_matmul`](nitrix-semiring-ell/semiring_ell_matmul.qmd)
+dispatches across a three-level backend selection (auto, Pallas-CUDA, or
+pure JAX); [`semiring_ell_rmatvec`](nitrix-semiring-ell/semiring_ell_rmatvec.qmd) is pure JAX.
+
+The pad positions of each ELL row are expected to be filled with the
+algebra's identity (for example `0` for the real semiring, or
+$-\infty$ for the log semiring), so that padded entries contribute
+nothing to the reduction.  See [`nitrix.sparse.ell.ell_pad`](nitrix-sparse-ell/ell_pad.qmd) for the
+helper that produces such padding.
+
+This is the central operator for brain-geometry workloads and the
+load-bearing sparse kernel of the library.  The pure-JAX path is always
+available; the Pallas-CUDA path is opt-in on supported hardware.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `m` | rows of a multi-row contrast |
+| `kmax` | *(undocumented — add to `_dimensions.yml`)* |
+| `n_cols` | *(undocumented — add to `_dimensions.yml`)* |
+| `ncol` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-semiring-ell-symbols}
+:::

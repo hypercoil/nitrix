@@ -1,0 +1,63 @@
+---
+title: "lme_t_contrast"
+generated: true
+description: "Per-voxel t-test of a fixed-effect contrast $c^{ top}  beta = 0$."
+---
+
+[‹ back to `nitrix.stats.lme.reml`](../nitrix-stats-lme-reml.qmd)
+
+<!-- nitrix:gen sig:lme_t_contrast -->
+```python
+lme_t_contrast(result: 'Union[REMLResult, LMEResult]', contrast: Float[Array, 'p'], *, dof: ContrastDof = 'satterthwaite', X: Optional[Float[Array, 'N p']] = None, Z: Optional[Float[Array, 'N q']] = None) -> LMEContrast
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:lme_t_contrast -->
+Per-voxel t-test of a fixed-effect contrast $c^{\top} \beta = 0$.
+
+The standard error is
+$\sqrt{c^{\top} (X^{\top} V^{-1} X)^{-1} c}$ from the fitted
+`result.fixed_cov`; the denominator degrees of freedom are
+**Satterthwaite** (the default, `dof='satterthwaite'`):
+
+$$
+\mathrm{df} = \frac{2 (c^{\top} C c)^2}
+    {g^{\top} \operatorname{Cov}(\hat{\theta})\, g}, \qquad
+g_k = \frac{\partial (c^{\top} C c)}{\partial \theta_k}
+    = w^{\top} M_k w, \quad w = C c
+$$
+
+using the per-voxel `theta_cov` / `grad_m` the fit already formed.
+cuSOLVER-free and differentiable.
+
+`dof='kr'` instead applies the **Kenward-Roger** small-sample correction:
+the adjusted covariance $\Phi_A$ (inflated for variance-component
+uncertainty) and the scaled-$F$ denominator df, with
+$t = \operatorname{sign}(\mathrm{effect}) \sqrt{F_{\mathrm{KR}}}$
+on $\mathrm{df} = m$.  The Kenward-Roger path rebuilds the rotated
+basis, so the original design must be re-passed as `X=` / `Z=` (the
+compressed [`REMLResult`](../nitrix-stats-lme-reml/REMLResult.qmd) does not retain it).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:lme_t_contrast -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `result` | `'Union[REMLResult, LMEResult]'` | — | — | A [`REMLResult`](../nitrix-stats-lme-reml/REMLResult.qmd) ([`reml_fit`](../nitrix-stats-lme-reml/reml_fit.qmd), the scalar-intercept tier) **or** an [`LMEResult`](../nitrix-stats-lme-reml/LMEResult.qmd) ([`lme_fit`](../nitrix-stats-lme-reml/lme_fit.qmd) with a random slope) -- both carry the `fixed_cov` / `theta_cov` / `grad_m` inference fields the Satterthwaite df consumes. `dof='kr'` accepts only a [`REMLResult`](../nitrix-stats-lme-reml/REMLResult.qmd). |
+| `contrast` | `Float` | `p` | — | `(p,)` contrast vector $c$ over the fixed effects. |
+| `dof` | `ContrastDof` | — | `'satterthwaite'` | `'satterthwaite'` (default) or `'kr'` (Kenward-Roger, accepts only a [`REMLResult`](../nitrix-stats-lme-reml/REMLResult.qmd); pass `X` / `Z`). |
+| `X` | `Optional[Float[Array, 'N p']]` | — | `None` | The original fixed `(N, p)` / random `(N, q)` design -- required for `dof='kr'`. |
+| `Z` | `Optional[Float[Array, 'N q']]` | — | `None` | The original fixed `(N, p)` / random `(N, q)` design -- required for `dof='kr'`. |
+
+**Returns** `LMEContrast`. The per-voxel contrast record [`LMEContrast`](../nitrix-stats-lme-reml/LMEContrast.qmd) `(effect, se, t, df, p_value)`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:lme_t_contrast -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

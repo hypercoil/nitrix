@@ -1,0 +1,44 @@
+---
+title: "rician_noise"
+generated: true
+description: "Add Rician noise -- the magnitude-image noise model."
+---
+
+[‹ back to `nitrix.augment.intensity`](../nitrix-augment-intensity.qmd)
+
+<!-- nitrix:gen sig:rician_noise -->
+```python
+rician_noise(x: Float[Array, '...'], key: Array, *, sigma: Float[Array, '...']) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:rician_noise -->
+Add Rician noise -- the magnitude-image noise model.
+
+Returns $\sqrt{(x + n_r)^2 + n_i^2}$ with independent noise
+terms $n_r, n_i \sim \mathcal{N}(0, \sigma^2)$.  Reduces to
+$|x|$ at $\sigma = 0$.  This is the noise distribution of
+the magnitude of a complex signal whose real and imaginary parts carry
+independent Gaussian perturbations.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:rician_noise -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Float` | `...` | — | Intensity tensor, interpreted as the true magnitude signal. |
+| `key` | `Array` | — | — | PRNG key. It is split into two independent streams for the real and imaginary noise components. |
+| `sigma` | `Float` | `...` | — | Standard deviation of the Gaussian perturbation on each of the real and imaginary parts (scalar or broadcastable to `x`). Drawing it randomly is the caller's concern. |
+
+**Returns** `Float` — shape `...`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:rician_noise -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

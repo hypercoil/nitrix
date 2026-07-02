@@ -1,0 +1,38 @@
+---
+title: "invgamma_prior"
+generated: true
+description: "Build an inverse-gamma lengthscale prior that penalises small `rho`."
+---
+
+[‹ back to `nitrix.stats.priors`](../nitrix-stats-priors.qmd)
+
+<!-- nitrix:gen sig:invgamma_prior -->
+```python
+invgamma_prior(a: float, b: float) -> PriorFn
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:invgamma_prior -->
+Build an inverse-gamma lengthscale prior that penalises small `rho`.
+
+The prior density is
+$p(\rho) \propto \rho^{-a-1} \exp(-b / \rho)$ on $\rho > 0$,
+so the returned penalty is
+$-\log p(\rho) = (a + 1) \log \rho + b / \rho$ (up to an additive
+constant).  The $b / \rho$ term diverges as $\rho \to 0$, so
+this pulls the estimate up, away from a lengthscale that collapses into
+noise-fitting -- the usual penalised-complexity-style regulariser for a
+weakly-identified $\rho$ (e.g. sparse or short series).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:invgamma_prior -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `a` | `float` | — | — | Shape parameter $a$ (must be positive). |
+| `b` | `float` | — | — | Scale parameter $b$ (must be positive). Together with `a` it sets the prior mode $b / (a + 1)$; pick `a` and `b` so that is a plausibly-small lengthscale. |
+
+**Returns** `PriorFn`. A callable mapping a scalar lengthscale $\rho$ (shape `()`) to the scalar negative log-density $-\log p(\rho)$ (shape `()`), suitable for the `map_rho=` argument of [`nitrix.stats.gp_fit`](../nitrix-stats.qmd) and [`nitrix.stats.hgp_fit`](../nitrix-stats.qmd).
+<!-- nitrix:/gen -->
+

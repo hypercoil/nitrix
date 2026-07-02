@@ -1,0 +1,43 @@
+---
+title: "affine_grid"
+generated: true
+description: "Absolute sample coordinates of a homogeneous transform on a grid."
+---
+
+[‹ back to `nitrix.geometry.transform`](../nitrix-geometry-transform.qmd)
+
+<!-- nitrix:gen sig:affine_grid -->
+```python
+affine_grid(matrix: Float[Array, 'd1 d1'], spatial_shape: Sequence[int], *, center: Optional[Float[Array, 'd']] = None) -> Float[Array, '*spatial d']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:affine_grid -->
+Absolute sample coordinates of a homogeneous transform on a grid.
+
+Maps each output voxel $i$ to $M (i - c) + t + c$ -- the
+coordinate [`spatial_transform`](../nitrix-geometry-grid/spatial_transform.qmd) samples the moving image at.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:affine_grid -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `matrix` | `Float` | `d1` × `d1` | — | Homogeneous transform, `(ndim + 1, ndim + 1)`. |
+| `spatial_shape` | `Sequence[int]` | — | — | Output grid shape (length `ndim`). |
+| `center` | `Optional[Float[Array, 'd']]` | — | `None` | Rotation/scaling centre. `None` (default) uses the grid centre `(shape - 1) / 2` -- the registration convention (rotate about the image centre, not the voxel origin). |
+
+**Returns** `Float` — shape `*spatial` × `d`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:affine_grid -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `d1` | *(undocumented — add to `_dimensions.yml`)* |
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->

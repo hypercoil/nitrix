@@ -1,0 +1,12 @@
+---
+title: "cmass_reference_displacement_grid"
+generated: true
+description: "Alias for displacement_from_reference_grid."
+---
+
+[‹ back to `nitrix.geometry.coords`](../nitrix-geometry-coords.qmd)
+
+<!-- nitrix:gen sig:cmass_reference_displacement_grid -->
+`cmass_reference_displacement_grid` is an alias for [`displacement_from_reference_grid`](displacement_from_reference_grid.qmd).
+<!-- nitrix:/gen -->
+

@@ -1,0 +1,57 @@
+---
+title: "info_nce"
+generated: true
+description: "InfoNCE / NT-Xent loss between two aligned view batches."
+---
+
+[‹ back to `nitrix.metrics.contrastive`](../nitrix-metrics-contrastive.qmd)
+
+<!-- nitrix:gen sig:info_nce -->
+```python
+info_nce(za: Float[Array, 'n d'], zb: Float[Array, 'n d'], *, temperature: float = 0.5, reduction: Reduction = 'mean') -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:info_nce -->
+InfoNCE / NT-Xent loss between two aligned view batches.
+
+`za[i]` and `zb[i]` are the two views of sample `i` (the positive
+pair); all other samples are negatives.  Both batches are L2-normalised,
+and the scaled cross-view cosine similarity
+$z_a z_b^{\top} / \tau$ provides the logits:
+row `i` is classified against the `n` keys in `zb` with the true
+class `i` (and symmetrically for `zb` against `za`).  The loss is
+the average of the two directional cross-entropies.
+
+This is the **layout-agnostic** core: the caller supplies the two view
+batches, so there is no baked pair-index convention.  Because the
+similarity is *cross-view*, a sample is never compared with itself --
+there are no self-pairs to mask, so the loss has no self-similarity bias
+(unlike a single stacked `2N` matrix).  A SimCLR-style stacked layout,
+or one with within-view negatives, is recovered by the caller arranging
+the views.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:info_nce -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `za` | `Float` | `n` × `d` | — | `(n, d)` embeddings; `za[i]`/`zb[i]` are a positive pair. |
+| `zb` | `Float` | `n` × `d` | — | `(n, d)` embeddings; `za[i]`/`zb[i]` are a positive pair. |
+| `temperature` | `float` | — | `0.5` | Softmax temperature $\tau$. |
+| `reduction` | `Reduction` | — | `'mean'` | `"mean"` (default), `"sum"`, or `"none"` (per-sample loss). |
+
+**Returns** `Float` — shape `...`. The InfoNCE loss. With `reduction="none"` this is the per-sample loss of shape `(n,)`; with `"mean"` or `"sum"` it is a scalar reducing over the `n` samples.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:info_nce -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d` | spatial dimension (2 or 3) |
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

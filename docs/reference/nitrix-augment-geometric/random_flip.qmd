@@ -1,0 +1,39 @@
+---
+title: "random_flip"
+generated: true
+description: "Independently reflect along each eligible axis with probability `p`."
+---
+
+[‹ back to `nitrix.augment.geometric`](../nitrix-augment-geometric.qmd)
+
+<!-- nitrix:gen sig:random_flip -->
+```python
+random_flip(x: Float[Array, '...'], key: Array, *, axes: Optional[Sequence[int]] = None, p: float = 0.5) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:random_flip -->
+Independently reflect along each eligible axis with probability `p`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:random_flip -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Float` | `...` | — | Input tensor. |
+| `key` | `Array` | — | — | PRNG key. |
+| `axes` | `Optional[Sequence[int]]` | — | `None` | Axes eligible for flipping. `None` (default) makes every axis eligible; for a channels-last volume pass the spatial axes so the channel axis is never reflected. |
+| `p` | `float` | — | `0.5` | Per-axis reflection probability. |
+
+**Returns** `Float` — shape `...`. A tensor with the same shape and dtype as `x`, reflected along each eligible axis for which the per-axis coin came up heads.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:random_flip -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

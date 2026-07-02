@@ -1,0 +1,87 @@
+---
+title: "lncc"
+generated: true
+description: "Local (windowed) normalised cross-correlation -- the ANTs form."
+---
+
+[‹ back to `nitrix.metrics.intensity`](../nitrix-metrics-intensity.qmd)
+
+<!-- nitrix:gen sig:lncc -->
+```python
+lncc(moving: Float[Array, '... *spatial'], fixed: Float[Array, '... *spatial'], *, radius: Union[int, Sequence[int]] = 4, spatial_rank: Optional[int] = None, mode: BoundaryMode = 'reflect', eps: float = 1e-05, reduction: Reduction = 'mean', mask: Optional[Float[Array, '... *spatial']] = None) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:lncc -->
+Local (windowed) normalised cross-correlation -- the ANTs form.
+
+Over a box window of radius $r$ (size $2r + 1$ per axis)
+the per-voxel local correlation is
+$cc = (\sum \tilde{m}\,\tilde{f})^2 / (\sum \tilde{m}^2 \cdot \sum \tilde{f}^2)$,
+with $\tilde{m}$ / $\tilde{f}$ the window-mean-subtracted
+intensities, computed from windowed sums (separable box filter).
+Values lie in $[0, 1]$; $1$ is a locally-perfect
+(affine) intensity match.  Robust to smooth intensity
+inhomogeneity, which is why it is the default for the diffeomorphic
+recipe.  Use `1 - lncc` as a cost.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:lncc -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `moving` | `Float` | `...` × `*spatial` | — | Images of identical shape, `(..., *spatial)`. Leading axes are treated as batch (folded into the box-filter batch). |
+| `fixed` | `Float` | `...` × `*spatial` | — | Images of identical shape, `(..., *spatial)`. Leading axes are treated as batch (folded into the box-filter batch). |
+| `radius` | `Union[int, Sequence[int]]` | — | `4` | Window half-width $r$, giving a box of size $2r + 1$ per axis. An `int` gives an isotropic window; a sequence gives one radius per spatial axis. |
+| `spatial_rank` | `Optional[int]` | — | `None` | Number of trailing axes to treat as spatial. `None` (default) infers from `radius` (if a sequence) else assumes all of `moving.ndim`. |
+| `mode` | `BoundaryMode` | — | `'reflect'` | Boundary mode for the windowed sums. Default `"reflect"` -- which keeps the window count uniform, so the per-window normalisation is exact at the boundary. |
+| `eps` | `float` | — | `1e-05` | Denominator guard for flat (zero-variance) windows. |
+| `reduction` | `Reduction` | — | `'mean'` | `"mean"` (default), `"sum"`, or `"none"` (the per-voxel local-CC map). |
+| `mask` | `Optional[Float[Array, '... *spatial']]` | — | `None` | Optional non-negative per-voxel weight (image shape) restricting / weighting the **reduction** of the local-CC map -- an out-of-mask voxel does not count toward the mean. Note this masks at reduction time only: the windowed sums at an in-mask voxel still draw on out-of-mask neighbours within its box (a deliberate, documented approximation -- full window-gated sums would be a separate, costlier kernel). |
+
+**Returns** `Float` — shape `...`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:lncc -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **1.65 ms** (median, L4); up to **2529.57× faster** than `simpleitk.ANTSNeighborhoodCorrelation`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_LNCC.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| lncc | jax-cuda12 | shape=[128, 128, 128] | `cupy.lncc` | ok | 5.64 ms / 5.82 ms | 268.83 ms | 16.78 MB (hbm) | ✓ 1e-13×tol | 3.49x vs nitrix-jax |
+| lncc | jax-cuda12 | shape=[128, 128, 128] | `nitrix-jax` | ok | 1.61 ms / 1.65 ms | 1.538 s | 8758.24 MB (hbm) | ✓ 4.3e-05×tol | 1.00x vs nitrix-jax |
+| lncc | jax-cuda12 | shape=[128, 128, 128] | `numpy.lncc` | ok | 315.69 ms / 319.77 ms | 320.23 ms | 16.78 MB (hbm) | ✓ 0×tol | 195.63x vs nitrix-jax |
+| lncc | jax-cuda12 | shape=[128, 128, 128] | `simpleitk.ANTSNeighborhoodCorrelation` | ok | 4.082 s / 4.112 s | 4.597 s | 16.78 MB (hbm) | ≈ 1.8e+03×tol | 2529.57x vs nitrix-jax |
+| lncc | jax-cuda12 | shape=[64, 64, 64] | `cupy.lncc` | ok | 892.9 µs / 905.6 µs | 12.062 s | 2.10 MB (hbm) | ✓ 0×tol | 2.77x vs nitrix-jax |
+| lncc | jax-cuda12 | shape=[64, 64, 64] | `nitrix-jax` | ok | 322.8 µs / 332.0 µs | 5.614 s | 616.70 MB (hbm) | ✓ 7e-06×tol | 1.00x vs nitrix-jax |
+| lncc | jax-cuda12 | shape=[64, 64, 64] | `numpy.lncc` | ok | 32.04 ms / 32.63 ms | 32.36 ms | 2.10 MB (hbm) | ✓ 0×tol | 99.25x vs nitrix-jax |
+| lncc | jax-cuda12 | shape=[64, 64, 64] | `simpleitk.ANTSNeighborhoodCorrelation` | ok | 501.89 ms / 506.00 ms | 572.38 ms | 2.10 MB (hbm) | ≈ 1.8e+03×tol | 1554.62x vs nitrix-jax |
+:::
+
+*source: bench `02d1a5d9` · nitrix `a0769766`*
+::::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:lncc -->
+::: {.callout-note}
+The per-voxel value is interior-identical (fp64) to the ANTs
+`ANTSNeighborhoodCorrelation` local CC (the squared local
+correlation with window-local means).  ANTs returns it as a cost
+(the negated voxel mean); this returns the similarity, so its
+registration cost is `1 - lncc`.  Only the boundary differs: the
+box sums use `mode` (default `"reflect"`, a uniform window
+count) rather than ANTs' valid-neighbourhood trim.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:lncc -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

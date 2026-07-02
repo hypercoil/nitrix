@@ -1,0 +1,35 @@
+---
+title: "grid_identity"
+generated: true
+description: "The identity operator on a regular grid."
+---
+
+[‹ back to `nitrix.sparse.grid`](../nitrix-sparse-grid.qmd)
+
+<!-- nitrix:gen sig:grid_identity -->
+```python
+grid_identity(grid_shape: Sequence[int], *, n_cols: Optional[int] = None) -> ELL
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:grid_identity -->
+The identity operator on a regular grid.
+
+Returned as an [`ELL`](../nitrix-sparse.qmd) with a single tap per row (the
+centre offset, with unit weight). This is composable with
+[`grid_laplacian`](../nitrix-sparse-grid/grid_laplacian.qmd) and other stencil operators to form "shifted
+Laplacian" preconditioners and "implicit smoothing" operators of the form
+$I - \alpha L$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:grid_identity -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `grid_shape` | `Sequence[int]` | — | — | Spatial grid dimensions, with voxels linearised in C order. |
+| `n_cols` | `Optional[int]` | — | `None` | Optional override for the number of columns of the returned operator. Defaults to `prod(grid_shape)` (the square self-coupling case). Set explicitly when the operator maps the grid into a different-sized domain. |
+
+**Returns** `ELL`. An [`ELL`](../nitrix-sparse.qmd) operator of shape `(prod(grid_shape), n_cols)` with one tap per row (weight `1.0` on the centre voxel).
+<!-- nitrix:/gen -->
+

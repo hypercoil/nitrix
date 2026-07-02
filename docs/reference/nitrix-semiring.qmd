@@ -1,0 +1,60 @@
+---
+title: "nitrix.semiring"
+generated: true
+signature-hash: ff43e1690954413d
+description: "KeOps-style streaming reductions over arbitrary algebras."
+listing:
+  id: nitrix-semiring-symbols
+  contents: "nitrix-semiring/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.semiring`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+KeOps-style streaming reductions over arbitrary algebras.
+
+This subpackage provides matrix and graph reductions that run over a
+user-selected algebraic structure rather than the fixed
+(add, multiply) ring of ordinary linear algebra. The same streaming
+kernels back the max-plus, min-plus, log-sum-exp, boolean and Euclidean
+reductions used throughout the wider library, so that morphology,
+smoothing and mesh aggregation can all be expressed as reductions over a
+chosen semiring.
+
+The public surface is organised as follows.
+
+- [`Semiring`](nitrix-semiring/Semiring.qmd) (relaxed) and [`StrictSemiring`](nitrix-semiring/StrictSemiring.qmd)
+  (which asserts associativity) describe the algebraic structure supplied
+  to a reduction, built on the [`Semigroup`](nitrix-semiring/Semigroup.qmd) and [`Monoid`](nitrix-semiring/Monoid.qmd)
+  protocols.
+- The built-in algebras [`REAL`](nitrix-semiring-algebras/REAL.qmd), [`LOG`](nitrix-semiring-algebras/LOG.qmd),
+  [`TROPICAL_MAX_PLUS`](nitrix-semiring-algebras/TROPICAL_MAX_PLUS.qmd), [`TROPICAL_MIN_PLUS`](nitrix-semiring-algebras/TROPICAL_MIN_PLUS.qmd), [`BOOLEAN`](nitrix-semiring-algebras/BOOLEAN.qmd)
+  and [`EUCLIDEAN`](nitrix-semiring-algebras/EUCLIDEAN.qmd) cover the common cases.
+- [`semiring_matmul`](nitrix-semiring-matmul/semiring_matmul.qmd) and [`semiring_ell_matmul`](nitrix-semiring-ell/semiring_ell_matmul.qmd) perform dense
+  and ELL-sparse matrix products over a chosen semiring.
+- [`semiring_ell_edge_aggregate`](nitrix-semiring-ell_edge/semiring_ell_edge_aggregate.qmd) performs edge-functional
+  aggregation over an ELL adjacency structure, with optional per-edge
+  `edge_attr`, and [`ell_row_softmax`](nitrix-semiring-ell_edge/ell_row_softmax.qmd) provides the row-normalising
+  attention pre-pass used by graph-attention aggregation.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*shape` | a variadic group of axes (`shape`) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-semiring-symbols}
+:::

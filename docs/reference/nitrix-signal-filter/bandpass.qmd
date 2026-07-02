@@ -1,0 +1,45 @@
+---
+title: "bandpass"
+generated: true
+description: "Zero-phase frequency-domain band-pass: keep the `(lo, hi)` band."
+---
+
+[‹ back to `nitrix.signal.filter`](../nitrix-signal-filter.qmd)
+
+<!-- nitrix:gen sig:bandpass -->
+```python
+bandpass(X: Num[Array, '... obs'], *, fs: float = 1.0, lo: float, hi: float, ftype: _FilterType = 'maxflat', order: int = 2, transition: Optional[float] = None, axis: int = -1, padding: int = 0) -> Num[Array, '... obs']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:bandpass -->
+Zero-phase frequency-domain band-pass: keep the `(lo, hi)` band.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:bandpass -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X` | `Num` | `...` × `obs` | — | Signal; the filtered axis is last by default (`axis`). |
+| `fs` | `float` | — | `1.0` | Sampling frequency in Hz. Pass `fs = 1 / TR` for fMRI. |
+| `lo` | `float` | — | — | Pass-band edges in Hz (`0 < lo < hi < fs / 2`). |
+| `hi` | `float` | — | — | Pass-band edges in Hz (`0 < lo < hi < fs / 2`). |
+| `ftype` | `_FilterType` | — | `'maxflat'` | Magnitude-window design: `'maxflat'` (default; the Butterworth magnitude *shape*, applied zero-phase -- a frequency-sampled FIR, not a recursive IIR Butterworth -- see [`iir_filter`](../nitrix-signal-filter/iir_filter.qmd) for that), `'ideal'` (brick wall), or `'cosine'` (raised-cosine edges). |
+| `order` | `int` | — | `2` | Steepness of the `'maxflat'` roll-off (the exponent of the Butterworth magnitude shape). Ignored for the other designs. Default `2`. |
+| `transition` | `Optional[float]` | — | `None` | Raised-cosine transition width in Hz (`'cosine'` only); defaults to 10 % of Nyquist. |
+| `axis` | `int` | — | `-1` | Axis to filter. Default `-1` (trailing time/observation axis). |
+| `padding` | `int` | — | `0` | Reflect-pad this many samples on each end before filtering, then crop -- reduces the circular-convolution wrap-around at the edges. Default `0` (pure FFT). |
+
+**Returns** `Num` — shape `...` × `obs`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:bandpass -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

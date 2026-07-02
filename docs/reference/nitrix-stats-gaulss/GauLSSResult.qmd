@@ -1,0 +1,40 @@
+---
+title: "GauLSSResult"
+generated: true
+description: "Per-element Gaussian location-scale fit output."
+---
+
+[‹ back to `nitrix.stats.gaulss`](../nitrix-stats-gaulss.qmd)
+
+<!-- nitrix:gen sig:GauLSSResult -->
+```python
+class GauLSSResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:GauLSSResult -->
+Per-element Gaussian location-scale fit output.
+
+A frozen container holding the fitted coefficients, their asymptotic
+covariances, and the maximised log-likelihood for every element of a
+mass-univariate Gaussian location-scale regression.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:GauLSSResult.__init__ -->
+```python
+__init__(coef_mu: Float[Array, 'V p'], coef_scale: Float[Array, 'V q'], cov_mu: Float[Array, 'V p p'], cov_scale: Float[Array, 'V q q'], log_lik: Float[Array, 'V'], n_obs: int) -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:GauLSSResult -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `q` | random-effect columns |
+<!-- nitrix:/gen -->

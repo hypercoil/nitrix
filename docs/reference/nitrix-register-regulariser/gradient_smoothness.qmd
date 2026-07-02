@@ -1,0 +1,45 @@
+---
+title: "gradient_smoothness"
+generated: true
+description: "Diffusion (first-order) smoothness penalty $ | nabla u |^2$."
+---
+
+[‹ back to `nitrix.register.regulariser`](../nitrix-register-regulariser.qmd)
+
+<!-- nitrix:gen sig:gradient_smoothness -->
+```python
+gradient_smoothness(field: Float[Array, '*spatial ndim'], *, reduction: Reduction = 'mean') -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:gradient_smoothness -->
+Diffusion (first-order) smoothness penalty $\|\nabla u\|^2$.
+
+The squared Frobenius norm of the displacement Jacobian
+$\nabla u$ (recovered as $J - I$ from
+[`geometry.jacobian_displacement`](../nitrix-geometry-grid/jacobian_displacement.qmd)), summed over the
+$\mathrm{ndim} \times \mathrm{ndim}$ derivative entries at
+each voxel. Penalises sharp or incoherent flow.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:gradient_smoothness -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `field` | `Float` | `*spatial` × `ndim` | — | Channels-last displacement field `(*spatial, ndim)`, with the trailing axis holding the `ndim` displacement components. |
+| `reduction` | `Reduction` | — | `'mean'` | How the per-voxel energy is reduced: `"mean"` (default) or `"sum"` collapse the spatial axes to a scalar, while `"none"` returns the unreduced per-voxel energy map. |
+
+**Returns** `Float` — shape `...`. The scalar total (for `"mean"` / `"sum"`) or the per-voxel energy map of shape `(*spatial,)` (for `"none"`).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:gradient_smoothness -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `ndim` | number of spatial dimensions |
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

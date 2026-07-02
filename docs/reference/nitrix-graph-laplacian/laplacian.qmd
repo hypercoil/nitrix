@@ -1,0 +1,75 @@
+---
+title: "laplacian"
+generated: true
+description: "Graph Laplacian in one of three standard normalisations."
+---
+
+[‹ back to `nitrix.graph.laplacian`](../nitrix-graph-laplacian.qmd)
+
+<!-- nitrix:gen sig:laplacian -->
+```python
+laplacian(A: Num[Array, '... n n'], *, normalisation: _Normalisation = 'combinatorial', eps: float = 1e-12) -> Num[Array, '... n n']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:laplacian -->
+Graph Laplacian in one of three standard normalisations.
+
+*Dense only*: the symmetric Laplacian has a non-zero diagonal
+that does not fit the sparse pattern of the input `A`.  For
+sparse inputs use [`laplacian_matvec`](../nitrix-graph-laplacian/laplacian_matvec.qmd) to apply the Laplacian
+to a vector without materialising the matrix.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:laplacian -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `A` | `Num` | `...` × `n` × `n` | — | Adjacency matrix block, `(..., n, n)`. Non-negative; self-loops in `A` flow through (they are not subtracted). |
+| `normalisation` | `_Normalisation` | — | `'combinatorial'` | Which Laplacian variant to build: `"combinatorial"` ($D - A$), `"symmetric"` ($I - D^{-1/2} A D^{-1/2}$), or `"random_walk"` ($I - D^{-1} A$). |
+| `eps` | `float` | — | `1e-12` | Floor on degree before division (avoids `0/0` for isolated nodes; those end up with a zero row in the normalised variants). |
+
+**Returns** `Num` — shape `...` × `n` × `n`. The dense Laplacian in the requested normalisation, shape `(..., n, n)`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:laplacian -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **100.6 µs** (median, L4).  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_LAPLACIAN.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| laplacian | jax-cpu | n=128 | `cupy.laplacian` | skipped | — | — | — | — | — |
+| laplacian | jax-cpu | n=128 | `nitrix-jax` | ok | 17.5 µs / 33.2 µs | 119.96 ms | 704 MB (rss) | ✓ 0.00011×tol | 1.00x vs nitrix-jax |
+| laplacian | jax-cpu | n=128 | `scipy.csgraph.laplacian` | ok | 14.0 µs / 15.2 µs | 45.0 µs | 704 MB (rss) | ✓ 0.00022×tol | 0.80x vs nitrix-jax |
+| laplacian | jax-cuda12 | n=128 | `cupy.laplacian` | ok | 75.7 µs / 78.8 µs | 389.49 ms | 0.07 MB (hbm) | ✓ 0.00012×tol | 0.76x vs nitrix-jax |
+| laplacian | jax-cuda12 | n=128 | `nitrix-jax` | ok | 99.0 µs / 100.6 µs | 155.33 ms | 0.20 MB (hbm) | ✓ 0.00022×tol | 1.00x vs nitrix-jax |
+| laplacian | jax-cuda12 | n=128 | `scipy.csgraph.laplacian` | ok | 19.5 µs / 20.7 µs | 58.2 µs | 0.07 MB (hbm) | ✓ 0.00022×tol | 0.20x vs nitrix-jax |
+| laplacian | jax-cpu | n=256 | `cupy.laplacian` | skipped | — | — | — | — | — |
+| laplacian | jax-cpu | n=256 | `nitrix-jax` | ok | 64.9 µs / 70.7 µs | 100.41 ms | 704 MB (rss) | ✓ 0.00011×tol | 1.00x vs nitrix-jax |
+| laplacian | jax-cpu | n=256 | `scipy.csgraph.laplacian` | ok | 52.6 µs / 55.3 µs | 81.3 µs | 704 MB (rss) | ✓ 0.00026×tol | 0.81x vs nitrix-jax |
+| laplacian | jax-cuda12 | n=256 | `cupy.laplacian` | ok | 73.8 µs / 78.4 µs | 61.00 ms | 0.26 MB (hbm) | ✓ 0.00013×tol | 0.74x vs nitrix-jax |
+| laplacian | jax-cuda12 | n=256 | `nitrix-jax` | ok | 99.3 µs / 100.7 µs | 221.39 ms | 33.82 MB (hbm) | ✓ 0.00013×tol | 1.00x vs nitrix-jax |
+| laplacian | jax-cuda12 | n=256 | `scipy.csgraph.laplacian` | ok | 35.5 µs / 37.2 µs | 64.9 µs | 0.26 MB (hbm) | ✓ 0.00026×tol | 0.36x vs nitrix-jax |
+| laplacian | jax-cpu | n=512 | `cupy.laplacian` | skipped | — | — | — | — | — |
+| laplacian | jax-cpu | n=512 | `nitrix-jax` | ok | 149.8 µs / 174.2 µs | 115.60 ms | 704 MB (rss) | ✓ 0.00012×tol | 1.00x vs nitrix-jax |
+| laplacian | jax-cpu | n=512 | `scipy.csgraph.laplacian` | ok | 98.4 µs / 106.1 µs | 129.5 µs | 704 MB (rss) | ✓ 0.00054×tol | 0.66x vs nitrix-jax |
+| laplacian | jax-cuda12 | n=512 | `cupy.laplacian` | ok | 72.4 µs / 77.8 µs | 60.23 ms | 1.05 MB (hbm) | ✓ 0.00014×tol | 0.58x vs nitrix-jax |
+| laplacian | jax-cuda12 | n=512 | `nitrix-jax` | ok | 123.9 µs / 130.0 µs | 164.42 ms | 3.15 MB (hbm) | ✓ 0.00054×tol | 1.00x vs nitrix-jax |
+| laplacian | jax-cuda12 | n=512 | `scipy.csgraph.laplacian` | ok | 99.0 µs / 120.5 µs | 132.8 µs | 1.05 MB (hbm) | ✓ 0.00054×tol | 0.80x vs nitrix-jax |
+:::
+
+*source: bench `698e0cc7` · nitrix `88a23053`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:laplacian -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

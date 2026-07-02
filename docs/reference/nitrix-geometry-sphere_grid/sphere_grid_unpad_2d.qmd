@@ -1,0 +1,81 @@
+---
+title: "sphere_grid_unpad_2d"
+generated: true
+description: "Strip the padding added by [`sphere_grid_pad_2d`](../nitrix-geometry-sphere_grid/sphere_grid_pad_2d.qmd)."
+---
+
+[‹ back to `nitrix.geometry.sphere_grid`](../nitrix-geometry-sphere_grid.qmd)
+
+<!-- nitrix:gen sig:sphere_grid_unpad_2d -->
+```python
+sphere_grid_unpad_2d(image: Num[Array, '... H_padded W_padded ...'], pad: PadSpec, *, height_axis: int = -2, width_axis: int = -1) -> Num[Array, '... H W ...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:sphere_grid_unpad_2d -->
+Strip the padding added by [`sphere_grid_pad_2d`](../nitrix-geometry-sphere_grid/sphere_grid_pad_2d.qmd).
+
+The inverse operation is a plain slice along the height and width
+axes; it is provided as a companion so the composition pattern
+reads cleanly:
+    padded = sphere_grid_pad_2d(image, pad=k)
+    out_padded = some_valid_padded_kernel(padded)
+    out = sphere_grid_unpad_2d(out_padded, pad=k)
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:sphere_grid_unpad_2d -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `image` | `Num` | `...` × `H_padded` × `W_padded` × `...` | — | Padded image, `(..., H_padded, W_padded, ...)`, as produced by [`sphere_grid_pad_2d`](../nitrix-geometry-sphere_grid/sphere_grid_pad_2d.qmd). |
+| `pad` | `PadSpec` | — | — | Pad amount that was applied. `int` -> symmetric `h_pad = w_pad = pad`; `(h_pad, w_pad)` -> per-axis. Must match the value passed to [`sphere_grid_pad_2d`](../nitrix-geometry-sphere_grid/sphere_grid_pad_2d.qmd). |
+| `height_axis` | `int` | — | `-2` | Axis index of the latitudinal (height) axis. Default `-2`. Must match the value passed to [`sphere_grid_pad_2d`](../nitrix-geometry-sphere_grid/sphere_grid_pad_2d.qmd). |
+| `width_axis` | `int` | — | `-1` | Axis index of the longitudinal (width) axis. Default `-1`. Must match the value passed to [`sphere_grid_pad_2d`](../nitrix-geometry-sphere_grid/sphere_grid_pad_2d.qmd). |
+
+**Returns** `Num` — shape `...` × `H` × `W` × `...`. The un-padded image, with `H = H_padded - 2 * h_pad` along `height_axis` and `W = W_padded - 2 * w_pad` along `width_axis`; all other axes unchanged.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:sphere_grid_unpad_2d -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **105.6 µs** (median, L4).  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_SPHERE_GRID_UNPAD_2D.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| sphere_grid_unpad_2d | jax-cpu | h=128 | `cupy.sphere_grid_unpad_2d` | skipped | — | — | — | — | — |
+| sphere_grid_unpad_2d | jax-cpu | h=128 | `nitrix-jax` | ok | 13.3 µs / 13.9 µs | 58.89 ms | 699 MB (rss) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| sphere_grid_unpad_2d | jax-cpu | h=128 | `numpy.sphere_grid_unpad` | ok | 0.7 µs / 0.9 µs | 5.1 µs | 699 MB (rss) | ✓ 0×tol | 0.05x vs nitrix-jax |
+| sphere_grid_unpad_2d | jax-cuda12 | h=128 | `cupy.sphere_grid_unpad_2d` | ok | 3.4 µs / 3.9 µs | 27.1 µs | 0.13 MB (hbm) | ✓ 0×tol | 0.04x vs nitrix-jax |
+| sphere_grid_unpad_2d | jax-cuda12 | h=128 | `nitrix-jax` | ok | 89.6 µs / 105.6 µs | 108.64 ms | 0.37 MB (hbm) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| sphere_grid_unpad_2d | jax-cuda12 | h=128 | `numpy.sphere_grid_unpad` | ok | 0.6 µs / 0.7 µs | 5.0 µs | 0.13 MB (hbm) | ✓ 0×tol | 0.01x vs nitrix-jax |
+| sphere_grid_unpad_2d | jax-cpu | h=256 | `cupy.sphere_grid_unpad_2d` | skipped | — | — | — | — | — |
+| sphere_grid_unpad_2d | jax-cpu | h=256 | `nitrix-jax` | ok | 28.8 µs / 39.9 µs | 61.20 ms | 699 MB (rss) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| sphere_grid_unpad_2d | jax-cpu | h=256 | `numpy.sphere_grid_unpad` | ok | 0.5 µs / 0.6 µs | 4.7 µs | 699 MB (rss) | ✓ 0×tol | 0.02x vs nitrix-jax |
+| sphere_grid_unpad_2d | jax-cuda12 | h=256 | `cupy.sphere_grid_unpad_2d` | ok | 3.4 µs / 3.7 µs | 29.1 µs | 0.52 MB (hbm) | ✓ 0×tol | 0.04x vs nitrix-jax |
+| sphere_grid_unpad_2d | jax-cuda12 | h=256 | `nitrix-jax` | ok | 95.3 µs / 99.5 µs | 102.76 ms | 1.52 MB (hbm) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| sphere_grid_unpad_2d | jax-cuda12 | h=256 | `numpy.sphere_grid_unpad` | ok | 0.5 µs / 0.6 µs | 3.8 µs | 0.52 MB (hbm) | ✓ 0×tol | 0.01x vs nitrix-jax |
+| sphere_grid_unpad_2d | jax-cpu | h=64 | `cupy.sphere_grid_unpad_2d` | skipped | — | — | — | — | — |
+| sphere_grid_unpad_2d | jax-cpu | h=64 | `nitrix-jax` | ok | 8.9 µs / 9.3 µs | 49.11 ms | 699 MB (rss) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| sphere_grid_unpad_2d | jax-cpu | h=64 | `numpy.sphere_grid_unpad` | ok | 0.4 µs / 0.5 µs | 4.5 µs | 699 MB (rss) | ✓ 0×tol | 0.05x vs nitrix-jax |
+| sphere_grid_unpad_2d | jax-cuda12 | h=64 | `cupy.sphere_grid_unpad_2d` | ok | 3.3 µs / 3.8 µs | 26.4 µs | 0.03 MB (hbm) | ✓ 0×tol | 0.03x vs nitrix-jax |
+| sphere_grid_unpad_2d | jax-cuda12 | h=64 | `nitrix-jax` | ok | 95.3 µs / 117.8 µs | 99.92 ms | 0.09 MB (hbm) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| sphere_grid_unpad_2d | jax-cuda12 | h=64 | `numpy.sphere_grid_unpad` | ok | 0.4 µs / 0.5 µs | 5.1 µs | 0.03 MB (hbm) | ✓ 0×tol | 0.00x vs nitrix-jax |
+:::
+
+*source: bench `da5314ba` · nitrix `f42e7ff8`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:sphere_grid_unpad_2d -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `H_padded` | *(undocumented — add to `_dimensions.yml`)* |
+| `W_padded` | *(undocumented — add to `_dimensions.yml`)* |
+| `H` | *(undocumented — add to `_dimensions.yml`)* |
+| `W` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

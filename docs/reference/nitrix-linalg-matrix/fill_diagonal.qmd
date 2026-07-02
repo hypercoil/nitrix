@@ -1,0 +1,40 @@
+---
+title: "fill_diagonal"
+generated: true
+description: "Set the named diagonal of `A` to `fill`."
+---
+
+[‹ back to `nitrix.linalg.matrix`](../nitrix-linalg-matrix.qmd)
+
+<!-- nitrix:gen sig:fill_diagonal -->
+```python
+fill_diagonal(A: Num[Array, '... i j'], *, fill: float = 0.0, offset: int = 0) -> Num[Array, '... i j']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:fill_diagonal -->
+Set the named diagonal of `A` to `fill`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:fill_diagonal -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `A` | `Num` | `...` × `i` × `j` | — | Matrix block (need not be square). |
+| `fill` | `float` | — | `0.0` | Value to write into the diagonal cells. |
+| `offset` | `int` | — | `0` | Diagonal offset. `0` is the main diagonal, positive is above, negative is below. |
+
+**Returns** `Num` — shape `...` × `i` × `j`. A copy of `A` with the cells on the named diagonal replaced by `fill` and all other entries unchanged. Diagonal cells that fall outside the matrix are ignored.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:fill_diagonal -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `i` | *(undocumented — add to `_dimensions.yml`)* |
+| `j` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

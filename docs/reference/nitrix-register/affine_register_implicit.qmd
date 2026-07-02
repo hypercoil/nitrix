@@ -1,0 +1,51 @@
+---
+title: "affine_register_implicit"
+generated: true
+description: "Coarse-to-fine affine registration, each level solved implicitly."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._implicit`.*
+
+<!-- nitrix:gen sig:affine_register_implicit -->
+```python
+affine_register_implicit(moving: Float[Array, '*mspatial'], fixed: Float[Array, '*fspatial'], *, spec: RegistrationSpec = RegistrationSpec(), space: CoordinateSpace = IndexSpace(), init_params: Optional[Float[Array, ' p']] = None) -> RegistrationResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:affine_register_implicit -->
+Coarse-to-fine affine registration, each level solved implicitly.
+
+The 12-DOF (3-D) / 6-DOF (2-D) affine sibling of
+[`rigid_register_implicit`](../nitrix-register/rigid_register_implicit.qmd) (model fixed to
+[`Affine`](../nitrix-register/Affine.qmd)). As with the forward
+[`affine_register`](../nitrix-register.qmd), the affine basin is narrow --
+seed `init_params` (e.g. from a rigid stage or an amortised prediction),
+or use enough levels for the coarse stages to find the basin (the gradient
+comes from the finest level regardless).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:affine_register_implicit -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `moving` | `Float` | `*mspatial` | — | Single-channel images (2-D or 3-D), as in [`register_implicit`](../nitrix-register/register_implicit.qmd). |
+| `fixed` | `Float` | `*fspatial` | — | Single-channel images (2-D or 3-D), as in [`register_implicit`](../nitrix-register/register_implicit.qmd). |
+| `spec` | `RegistrationSpec` | — | `RegistrationSpec()` | Multi-resolution schedule ([`RegistrationSpec`](../nitrix-register/RegistrationSpec.qmd)): pyramid levels, per-level iterations, and the similarity metric. `spec.mode` is overridden to `'fixed'`. |
+| `space` | `CoordinateSpace` | — | `IndexSpace()` | Coordinate space ([`IndexSpace`](../nitrix-register/IndexSpace.qmd) by default, or [`WorldSpace`](../nitrix-register/WorldSpace.qmd)). |
+| `init_params` | `Optional[Float[Array, ' p']]` | — | `None` | Starting about-origin Lie parameters in the [`Affine`](../nitrix-register/Affine.qmd) layout, of shape `(p,)`; `None` uses zeros. |
+
+**Returns** `RegistrationResult`. The registration record, with the model fixed to [`Affine`](../nitrix-register/Affine.qmd). Here `cost_history` is the per-level `[initial, final]` implicit-solve costs, concatenated.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:affine_register_implicit -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*mspatial` | a variadic group of axes (`mspatial`) |
+| `*fspatial` | a variadic group of axes (`fspatial`) |
+<!-- nitrix:/gen -->

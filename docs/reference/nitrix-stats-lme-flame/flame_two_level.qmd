@@ -1,0 +1,118 @@
+---
+title: "flame_two_level"
+generated: true
+description: "Voxelwise FLAME-style two-level fixed-effect group model."
+---
+
+[‹ back to `nitrix.stats.lme.flame`](../nitrix-stats-lme-flame.qmd)
+
+<!-- nitrix:gen sig:flame_two_level -->
+```python
+flame_two_level(beta_subject: Float[Array, 'V N'], var_within: Float[Array, 'V N'], X_group: Float[Array, 'N p'], *, log_sigma_b_sq_init: Optional[Float[Array, 'V']] = None, n_iter: int = 30, damping: float = 1e-06, block: Optional[int] = None, robust: bool = False, n_deweight: int = 5, robust_c: float = 1.345) -> FLAMEResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:flame_two_level -->
+Voxelwise FLAME-style two-level fixed-effect group model.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:flame_two_level -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `beta_subject` | `Float` | `V` × `N` | — | Per-voxel, per-subject level-1 effect estimates. Shape `(V, N)`. |
+| `var_within` | `Float` | `V` × `N` | — | Per-voxel, per-subject within-subject variance (the squared standard error from the level-1 GLM). Shape `(V, N)`. All entries must be positive. |
+| `X_group` | `Float` | `N` × `p` | — | Group-level fixed-effect design, `(N, p)`. Shared across voxels. |
+| `log_sigma_b_sq_init` | `Optional[Float[Array, 'V']]` | — | `None` | Per-voxel initial value of $\log(\sigma_b^2)$, shape `(V,)`. Default heuristic: method-of-moments residual variance minus mean within-variance. |
+| `n_iter` | `int` | — | `30` | Number of Newton iterations. Default `30`. |
+| `damping` | `float` | — | `1e-06` | Levenberg guard added to the (scalar) average-information curvature. |
+| `block` | `Optional[int]` | — | `None` | Optional voxel-block size bounding peak memory on brain-scale `V` (see [`reml_fit`](../nitrix-stats-lme-reml/reml_fit.qmd)). `None` (default) maps over all voxels in a single pass. |
+| `robust` | `bool` | — | `False` | `True` enables outlier deweighting (the FLAMEO-style robust group analysis, FSL's FLAME1 followed by FLAME-outlier): a subject whose level-1 estimate is an outlier relative to the group model has its within-variance inflated by $s_i^2 / w_i$, down-weighting it in the precision-weighted group fit. This is a deterministic Huber-IRLS deweighting (not the full Bayesian outlier-mixture inference of Woolrich 2008); the converged per-subject weights are returned in `FLAMEResult.weights`. |
+| `n_deweight` | `int` | — | `5` | Number of deweighting (IRLS reweight) steps when `robust=True`. |
+| `robust_c` | `float` | — | `1.345` | Huber tuning constant on the studentized residual (default `1.345`, giving 95% efficiency under normality); smaller is more aggressive at down-weighting. |
+
+**Returns** `FLAMEResult`. A [`FLAMEResult`](../nitrix-stats-lme-flame/FLAMEResult.qmd) carrying the per-voxel between-subject variance `sigma_b_sq` (shape `(V,)`), the group fixed-effect estimates `gamma_hat` (shape `(V, p)`), the per-voxel restricted log-likelihood `log_lik` (shape `(V,)`), and the per-subject `weights` (shape `(V, N)`; all `1` unless `robust=True`).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:flame_two_level -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+see the measurements below.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_FLAME_TWO_LEVEL.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| flame_two_level | jax-cpu | V=1024,N=60 | `fsl.flameo` | ok | 732.81 ms / 756.19 ms | 991.81 ms | 1298 MB (rss) | ✓ 0.23×tol | — |
+| flame_two_level | jax-cpu | V=1024,N=60 | `fsl.iofloor` | ok | 234.63 ms / 243.75 ms | 489.18 ms | 1298 MB (rss) | ≈ 1.7e+02×tol | — |
+| flame_two_level | jax-cpu | V=1024,N=60 | `nitrix-jax` | ok | 104.77 ms / 108.13 ms | 1.278 s | 1299 MB (rss) | ✓ 0.029×tol | 1.00x vs nitrix-jax |
+| flame_two_level | jax-cpu | V=1024,N=60 | `statsmodels.meta_analysis` | ok | 308.02 ms / 309.45 ms | 2.579 s | 1299 MB (rss) | ✓ 2.4e-05×tol | 2.94x vs nitrix-jax |
+| flame_two_level | jax-cuda12 | V=1024,N=60 | `fsl.flameo` | skipped | — | — | — | — | — |
+| flame_two_level | jax-cuda12 | V=1024,N=60 | `fsl.iofloor` | skipped | — | — | — | — | — |
+| flame_two_level | jax-cuda12 | V=1024,N=60 | `nitrix-jax` | skipped | — | — | — | — | — |
+| flame_two_level | jax-cuda12 | V=1024,N=60 | `statsmodels.meta_analysis` | skipped | — | — | — | — | — |
+| flame_two_level | jax-cpu | V=131072,N=60 | `fsl.flameo` | ok | 31.329 s / 38.101 s | 36.744 s | 1298 MB (rss) | ≈ 2.2×tol | — |
+| flame_two_level | jax-cpu | V=131072,N=60 | `fsl.iofloor` | ok | 3.651 s / 3.815 s | 4.401 s | 1298 MB (rss) | ≈ 1.7e+02×tol | — |
+| flame_two_level | jax-cpu | V=131072,N=60 | `nitrix-jax` | ok | 20.267 s / 20.602 s | 22.225 s | 1299 MB (rss) | ✓ 0.035×tol | 1.00x vs nitrix-jax |
+| flame_two_level | jax-cpu | V=131072,N=60 | `statsmodels.meta_analysis` | ok | 39.238 s / 39.710 s | 42.341 s | 1299 MB (rss) | ✓ 2.4e-05×tol | 1.94x vs nitrix-jax |
+| flame_two_level | jax-cuda12 | V=131072,N=60 | `fsl.flameo` | skipped | — | — | — | — | — |
+| flame_two_level | jax-cuda12 | V=131072,N=60 | `fsl.iofloor` | skipped | — | — | — | — | — |
+| flame_two_level | jax-cuda12 | V=131072,N=60 | `nitrix-jax` | skipped | — | — | — | — | — |
+| flame_two_level | jax-cuda12 | V=131072,N=60 | `statsmodels.meta_analysis` | skipped | — | — | — | — | — |
+| flame_two_level | jax-cpu | V=262144,N=60 | `fsl.flameo` | ok | 63.134 s / 66.176 s | 66.883 s | 1298 MB (rss) | ≈ 2.2×tol | — |
+| flame_two_level | jax-cpu | V=262144,N=60 | `fsl.iofloor` | ok | 6.455 s / 6.602 s | 7.167 s | 1298 MB (rss) | ≈ 1.7e+02×tol | — |
+| flame_two_level | jax-cpu | V=262144,N=60 | `nitrix-jax` | timeout | — | — | — | — | — |
+| flame_two_level | jax-cpu | V=262144,N=60 | `statsmodels.meta_analysis` | ok | 80.246 s / 80.406 s | 82.399 s | 1299 MB (rss) | ✓ 2.4e-05×tol | — |
+| flame_two_level | jax-cuda12 | V=262144,N=60 | `fsl.flameo` | skipped | — | — | — | — | — |
+| flame_two_level | jax-cuda12 | V=262144,N=60 | `fsl.iofloor` | skipped | — | — | — | — | — |
+| flame_two_level | jax-cuda12 | V=262144,N=60 | `nitrix-jax` | skipped | — | — | — | — | — |
+| flame_two_level | jax-cuda12 | V=262144,N=60 | `statsmodels.meta_analysis` | skipped | — | — | — | — | — |
+| flame_two_level | jax-cpu | V=65536,N=60 | `fsl.flameo` | ok | 15.434 s / 15.632 s | 15.832 s | 1298 MB (rss) | ✓ 0.51×tol | — |
+| flame_two_level | jax-cpu | V=65536,N=60 | `fsl.iofloor` | ok | 1.764 s / 1.818 s | 1.965 s | 1298 MB (rss) | ≈ 1.7e+02×tol | — |
+| flame_two_level | jax-cpu | V=65536,N=60 | `nitrix-jax` | ok | 9.610 s / 9.659 s | 11.154 s | 1299 MB (rss) | ✓ 0.025×tol | 1.00x vs nitrix-jax |
+| flame_two_level | jax-cpu | V=65536,N=60 | `statsmodels.meta_analysis` | ok | 19.466 s / 19.725 s | 21.798 s | 1299 MB (rss) | ✓ 2.4e-05×tol | 2.03x vs nitrix-jax |
+| flame_two_level | jax-cuda12 | V=65536,N=60 | `fsl.flameo` | skipped | — | — | — | — | — |
+| flame_two_level | jax-cuda12 | V=65536,N=60 | `fsl.iofloor` | skipped | — | — | — | — | — |
+| flame_two_level | jax-cuda12 | V=65536,N=60 | `nitrix-jax` | skipped | — | — | — | — | — |
+| flame_two_level | jax-cuda12 | V=65536,N=60 | `statsmodels.meta_analysis` | skipped | — | — | — | — | — |
+| flame_two_level | jax-cpu | V=8192,N=60 | `fsl.flameo` | ok | 2.353 s / 2.387 s | 2.548 s | 1298 MB (rss) | ✓ 0.51×tol | — |
+| flame_two_level | jax-cpu | V=8192,N=60 | `fsl.iofloor` | ok | 414.14 ms / 421.48 ms | 547.45 ms | 1298 MB (rss) | ≈ 1.7e+02×tol | — |
+| flame_two_level | jax-cpu | V=8192,N=60 | `nitrix-jax` | ok | 1.017 s / 1.033 s | 2.596 s | 1299 MB (rss) | ✓ 0.019×tol | 1.00x vs nitrix-jax |
+| flame_two_level | jax-cpu | V=8192,N=60 | `statsmodels.meta_analysis` | ok | 2.372 s / 2.396 s | 4.300 s | 1299 MB (rss) | ✓ 2.4e-05×tol | 2.33x vs nitrix-jax |
+| flame_two_level | jax-cuda12 | V=8192,N=60 | `fsl.flameo` | skipped | — | — | — | — | — |
+| flame_two_level | jax-cuda12 | V=8192,N=60 | `fsl.iofloor` | skipped | — | — | — | — | — |
+| flame_two_level | jax-cuda12 | V=8192,N=60 | `nitrix-jax` | skipped | — | — | — | — | — |
+| flame_two_level | jax-cuda12 | V=8192,N=60 | `statsmodels.meta_analysis` | skipped | — | — | — | — | — |
+:::
+
+*source: bench `4f11ef0e` · nitrix `9d1cdef3`*
+::::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:flame_two_level -->
+::: {.callout-note}
+Single-parameter REML: only $\sigma_b^2$ is estimated;
+`var_within` is fixed at the user-supplied values.  This
+avoids the identifiability problem of the two-parameter
+relaxation (where the model can absorb a free scaling of
+`var_within` into $\sigma_b^2$).  It is implemented as the shared
+diagonalised-REML fit with one free (all-ones) component and a fixed
+per-voxel offset equal to `var_within` -- no per-voxel cuSOLVER call,
+so it runs on the broken-cuSOLVER GPU.
+:::
+
+### References
+
+Woolrich, M. (2008).  Robust group analysis using outlier inference.
+NeuroImage 41, 286-301.  `10.1016/j.neuroimage.2008.02.042`
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:flame_two_level -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `N` | observations — time points, subjects, or sampled points |
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

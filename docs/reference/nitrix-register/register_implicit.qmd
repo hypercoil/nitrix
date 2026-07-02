@@ -1,0 +1,63 @@
+---
+title: "register_implicit"
+generated: true
+description: "Single-level registration differentiable with respect to the images."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._implicit`.*
+
+<!-- nitrix:gen sig:register_implicit -->
+```python
+register_implicit(moving: Float[Array, '*mspatial'], fixed: Float[Array, '*fspatial'], *, model: TransformModel = Affine(), metric: Metric = SSD(), space: CoordinateSpace = IndexSpace(), n_iters: int = 50, init_params: Optional[Float[Array, ' p']] = None) -> RegistrationResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:register_implicit -->
+Single-level registration differentiable with respect to the images.
+
+Solve one transform optimisation at full resolution and differentiate it
+*at the optimum* (the implicit-function theorem), so `jax.grad` through
+the returned [`matrix`](../nitrix-register/RegistrationResult.qmd) /
+[`warped`](../nitrix-register/RegistrationResult.qmd) flows to `moving` /
+`fixed` with $O(1)$ memory in the iteration count -- the
+differentiable-layer alternative to unrolling a recipe. The result is the
+same self-contained [`RegistrationResult`](../nitrix-register/RegistrationResult.qmd) the
+forward recipes return: the centre is baked into the transform matrix by
+the shared coordinate-space machinery, so
+[`apply_transform`](../nitrix-register.qmd) reproduces the warp and two
+results compose.
+
+With no coarse-to-fine basin search this is the refinement primitive: seed
+`init_params` from a prior estimate (e.g. an amortised prediction) and
+differentiate the converged correction. For a multi-resolution capture
+range, use [`rigid_register_implicit`](../nitrix-register/rigid_register_implicit.qmd) /
+[`affine_register_implicit`](../nitrix-register/affine_register_implicit.qmd).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:register_implicit -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `moving` | `Float` | `*mspatial` | — | Single-channel images (2-D or 3-D), sharing a grid for the default [`IndexSpace`](../nitrix-register/IndexSpace.qmd). A [`WorldSpace`](../nitrix-register/WorldSpace.qmd) handles anisotropy and differing grids; both bake the centre into the transform matrix identically. |
+| `fixed` | `Float` | `*fspatial` | — | Single-channel images (2-D or 3-D), sharing a grid for the default [`IndexSpace`](../nitrix-register/IndexSpace.qmd). A [`WorldSpace`](../nitrix-register/WorldSpace.qmd) handles anisotropy and differing grids; both bake the centre into the transform matrix identically. |
+| `model` | `TransformModel` | — | `Affine()` | Transform chart ([`Affine`](../nitrix-register/Affine.qmd) by default, or [`Rigid`](../nitrix-register/Rigid.qmd)). |
+| `metric` | `Metric` | — | `SSD()` | Similarity metric. [`SSD`](../nitrix-register/SSD.qmd) (default) routes to the Gauss-Newton `implicit_least_squares`; [`LNCC`](../nitrix-register/LNCC.qmd) / [`MI`](../nitrix-register/MI.qmd) / [`CorrelationRatio`](../nitrix-register/CorrelationRatio.qmd) route to the general-metric `implicit_minimize` (a differentiable LNCC / MI layer). MI differentiates only through its soft-histogram cost. |
+| `space` | `CoordinateSpace` | — | `IndexSpace()` | Coordinate space ([`IndexSpace`](../nitrix-register/IndexSpace.qmd) by default, or [`WorldSpace`](../nitrix-register/WorldSpace.qmd)). |
+| `n_iters` | `int` | — | `50` | Number of forward solve iterations (Levenberg-Marquardt for [`SSD`](../nitrix-register/SSD.qmd); BFGS otherwise). Run to convergence -- the implicit gradient is exact only at a stationary point. |
+| `init_params` | `Optional[Float[Array, ' p']]` | — | `None` | Starting about-origin Lie parameters in the `model`'s layout, of shape `(p,)`; `None` uses zeros. The optimum, not the starting point, carries the gradient ($\mathrm{d}\theta^{*}/\mathrm{d}\theta_{\mathrm{init}} = 0$). |
+
+**Returns** `RegistrationResult`. The registration record, carrying the transform matrix, the estimated parameters, the warped moving image, and the cost history. Here `cost_history` holds the `[initial, final]` cost of the implicit solve.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:register_implicit -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*mspatial` | a variadic group of axes (`mspatial`) |
+| `*fspatial` | a variadic group of axes (`fspatial`) |
+<!-- nitrix:/gen -->

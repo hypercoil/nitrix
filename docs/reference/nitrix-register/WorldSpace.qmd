@@ -1,0 +1,55 @@
+---
+title: "WorldSpace"
+generated: true
+description: "Register in physical/world space (anisotropy- and grid-correct)."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._space`.*
+
+<!-- nitrix:gen sig:WorldSpace -->
+```python
+class WorldSpace
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:WorldSpace -->
+Register in physical/world space (anisotropy- and grid-correct).
+
+Each image carries a voxel->world affine (`(ndim+1, ndim+1)`
+homogeneous, e.g. a NIfTI `sform`); `None` defaults to the
+identity (voxel == world).  The parameter transform is the world->world
+map, and the per-voxel sampling matrix is the composition
+$A_{moving}^{-1} \cdot T_{world} \cdot A_{fixed}$ (with
+$T_{world}$ centred at the fixed image's world centre), built per
+pyramid level from the align-corners level scale.
+
+This is the correct path when voxels are anisotropic (a rotation in
+index space shears in physical space) or when the two images live on
+different grids.  The result is the `fixed-world -> moving-world`
+homogeneous transform (mm).  One numerically safe inverse of the moving
+affine is taken per registration (a 4x4, once -- not in the hot loop).
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:WorldSpace.sampler -->
+```python
+sampler(*, ndim: int, full_fixed_shape: tuple[int, ...], full_moving_shape: tuple[int, ...], dtype: jnp.dtype) -> _WorldSampler
+```
+<!-- nitrix:/gen -->
+
+Bind the world space to one registration's full-resolution shapes.
+
+Resolves the fixed and moving voxel->world affines (defaulting each
+to the identity when unset), inverts the moving affine once, and
+precomputes the translation matrices that centre the world transform
+at the fixed image's full-resolution world centre.
+
+<!-- nitrix:gen sig:WorldSpace.__init__ -->
+```python
+__init__(fixed_affine: Optional[Float[Array, ' d1 d1']] = None, moving_affine: Optional[Float[Array, ' d1 d1']] = None) -> None
+```
+<!-- nitrix:/gen -->
+

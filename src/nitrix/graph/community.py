@@ -7,24 +7,25 @@ Community-detection primitives.
 Houses the modularity-related operators (the *null model*, the
 *modularity matrix*, and *coaffiliation*) plus the relaxed-modularity
 quality score.  These all share an algebraic shape with graph
-Laplacians, but their *role* is community-specific: ``modularity_matrix``
-is the operator whose eigendecomposition gives Newman-style
-community structure, and ``coaffiliation`` is the symmetric outer
-product of a community-assignment matrix.  We split them out from
-``laplacian.py`` so that module can be pure "graph Laplacians";
-the SPEC §4.9 grouping is loosened on this basis.
+Laplacians, but their *role* is community-specific: :func:`modularity_matrix`
+is the operator whose eigendecomposition gives Newman-style community
+structure, and :func:`coaffiliation` is the symmetric outer product of a
+community-assignment matrix.  They are kept separate from the graph
+Laplacian operators so that those may remain purely about Laplacians.
 
 The relaxed-modularity score has both *dense* and *sparse* call
-paths.  The sparse path uses the factorisation::
+paths.  The sparse path uses the factorisation
 
-    Q = sum_{i,j} (A_ij - gamma * k_i k_j / 2m) * (CC^T)_{ij}
-      = trace(A · CC^T) - (gamma / 2m) * (C^T k)^T (C^T k)
-      = sum_e A_ij (C_i · C_j) - (gamma / 2m) * |C^T k|²
+.. math::
 
-so an ELL or SectionedELL adjacency never materialises the
-``n × n`` modularity matrix.  This is the difference between
+    Q = \\sum_{i,j} (A_{ij} - \\gamma\\, k_i k_j / 2m)\\,(CC^{\\top})_{ij}
+      = \\operatorname{tr}(A\\,CC^{\\top}) - \\frac{\\gamma}{2m}\\,\\lVert C^{\\top} k\\rVert^2
+
+so that an :class:`~nitrix.sparse.ELL` or
+:class:`~nitrix.sparse.SectionedELL` adjacency never materialises the
+:math:`n \\times n` modularity matrix.  This is the difference between
 "runs on small toy graphs" and "runs on a 100k-node mesh" for the
-modularity loss.
+modularity score.
 """
 
 from __future__ import annotations
@@ -59,17 +60,36 @@ _NullModel = Callable[[Num[Array, '... n n']], Num[Array, '... n n']]
 def girvan_newman_null(
     A: Num[Array, '... n n'],
 ) -> Num[Array, '... n n']:
-    """Rank-1 Girvan-Newman null model: ``k_in k_out^T / (2 m)``.
+    """Rank-1 Girvan-Newman null model :math:`k_{\\mathrm{in}} k_{\\mathrm{out}}^{\\top} / (2m)`.
 
-    For an undirected graph (symmetric ``A``) this reduces to
-    ``k k^T / 2m`` with ``k = A.sum(-1)``.  This is the standard
-    null model from Newman 2006.
+    The expected weight between two nodes under a random rewiring that
+    preserves the (weighted) degree sequence.  For an undirected graph
+    (symmetric ``A``) this reduces to :math:`k k^{\\top} / 2m`, with the
+    degree vector :math:`k = A\\mathbf{1}` (the row sums of ``A``) and
+    :math:`2m` the total edge weight.  This is the standard modularity
+    null model of Newman.
 
-    Note this returns an ``(n, n)`` dense matrix even from a sparse
-    input, because the null model is rank-1 and the *outer product*
-    is dense.  For modularity-style use we never materialise this:
-    ``relaxed_modularity`` factorises around the rank-1 structure
-    so the dense matrix isn't needed.
+    Note that the result is a dense :math:`n \\times n` matrix even from a
+    sparse input, because the null model is rank-1 and its outer product
+    is dense.  For modularity-style use it is never materialised:
+    :func:`relaxed_modularity` factorises around the rank-1 structure so
+    the dense matrix is not needed.
+
+    Parameters
+    ----------
+    A : Num[Array, '... n n']
+        Dense (weighted) adjacency matrix, batched over leading axes.
+
+    Returns
+    -------
+    Num[Array, '... n n']
+        Dense rank-1 null-model matrix :math:`k_{\\mathrm{in}}
+        k_{\\mathrm{out}}^{\\top} / (2m)`, one per batch element.
+
+    References
+    ----------
+    Newman MEJ (2006). Modularity and community structure in networks.
+    *PNAS* 103(23), 8577-8582. https://doi.org/10.1073/pnas.0601602103
     """
     k_in = A.sum(axis=-1, keepdims=True)
     k_out = A.sum(axis=-2, keepdims=True)
@@ -90,27 +110,41 @@ def modularity_matrix(
     normalise: bool = True,
     sign: Optional[Literal['+', '-']] = '+',
 ) -> Num[Array, '... n n']:
-    """Modularity matrix ``B = A - gamma * null(A)``, optionally normalised.
+    """Modularity matrix :math:`B = A - \\gamma\\,\\mathrm{null}(A)`, optionally normalised.
 
-    Dense ``(n, n)`` output.  For large sparse graphs prefer
-    ``relaxed_modularity`` directly (which doesn't materialise this
-    intermediate) or build a matvec via
-    ``modularity_matrix_matvec``.
+    The operator whose leading eigenvectors reveal Newman-style community
+    structure: the observed adjacency minus a resolution-scaled null model
+    of the expected adjacency.
+
+    The output is a dense :math:`n \\times n` matrix.  For large sparse
+    graphs prefer :func:`relaxed_modularity` directly (which does not
+    materialise this intermediate) or build a matrix-vector product via
+    :func:`modularity_matrix_matvec`.
 
     Parameters
     ----------
-    A
-        Dense adjacency, ``(..., n, n)``.
-    gamma
-        Resolution parameter.  Larger -> smaller communities.
-    null
-        Null-model callable.  Default ``girvan_newman_null``.
-    normalise
-        Divide ``B`` by ``2m``.  Gives modularity in ``[-1/2, 1]``.
-    sign
-        ``'+'`` clips negative weights; ``'-'`` clips positive
-        weights (computes the anti-modularity on the negative
-        subgraph); ``None`` uses the raw input.
+    A : Num[Array, '... n n']
+        Dense (weighted) adjacency matrix, batched over leading axes.
+    gamma : float, optional
+        Resolution parameter.  Larger values favour smaller communities.
+        Default ``1.0``.
+    null : callable, optional
+        Null-model factory mapping a dense adjacency to a dense expected
+        adjacency.  Default :func:`girvan_newman_null`.
+    normalise : bool, optional
+        If ``True`` (default), divide :math:`B` by the total edge weight
+        :math:`2m`, placing the resulting modularity in :math:`[-1/2, 1]`.
+    sign : {'+', '-', None}, optional
+        Weight handling before forming the matrix.  ``'+'`` (default)
+        clips negative weights to zero; ``'-'`` clips positive weights to
+        zero and negates, computing the anti-modularity on the negative
+        subgraph; ``None`` uses the raw input.
+
+    Returns
+    -------
+    Num[Array, '... n n']
+        The (optionally normalised) modularity matrix :math:`B`, one per
+        batch element.
     """
     if sign == '+':
         A = jnp.maximum(A, 0.0)
@@ -135,12 +169,37 @@ def modularity_matrix_matvec(
 ) -> Num[Array, '... n k']:
     """Apply the modularity matrix to a stack of vectors.
 
-    Computes ``B x = (A - gamma * k k^T / 2m) x = A x - (gamma / 2m) *
-    k * (k^T x)`` *without* materialising the rank-1 outer product.
-    Works for dense, ELL, and SectionedELL adjacencies.  This is the
-    operator the spectral community-detection algorithm
-    eigendecomposes; passing this directly to ``lobpcg`` enables
+    Computes the matrix-vector product
+
+    .. math::
+
+        B x = (A - \\gamma\\, k k^{\\top} / 2m)\\, x
+            = A x - \\frac{\\gamma}{2m}\\, k\\,(k^{\\top} x)
+
+    *without* materialising the rank-1 outer product :math:`k k^{\\top}`.
+    Works for dense, :class:`~nitrix.sparse.ELL`, and
+    :class:`~nitrix.sparse.SectionedELL` adjacencies.  This is the
+    operator that spectral community detection eigendecomposes; passing
+    it directly to a matrix-free eigensolver (such as ``lobpcg``) enables
     spectral community detection on million-node graphs.
+
+    Parameters
+    ----------
+    A : Num[Array, '... n n'] or ELL or SectionedELL
+        (Weighted) adjacency, dense or sparse, batched over leading axes.
+    x : Num[Array, '... n k']
+        Stack of ``k`` column vectors to which :math:`B` is applied.
+    gamma : float, optional
+        Resolution parameter scaling the rank-1 null-model correction.
+        Default ``1.0``.
+    normalise : bool, optional
+        If ``True`` (default), divide the result by the total edge weight
+        :math:`2m`.
+
+    Returns
+    -------
+    Num[Array, '... n k']
+        The product :math:`B x`, one column per input column of ``x``.
     """
     if isinstance(A, (ELL, SectionedELL)):
         deg = degree_vector(A)
@@ -209,9 +268,17 @@ def coaffiliation(
         is trivially co-affiliated with itself and including that
         contribution biases modularity-like scores.
     normalise
-        Normalise ``C`` and ``C_other`` by their max value before
+        Normalise ``C`` and ``C_other`` by their maximum value before
         the outer product.  Useful when assignments are unnormalised
         logits.
+
+    Returns
+    -------
+    Num[Array, '... n n']
+        The coaffiliation matrix :math:`C\\,C_{\\mathrm{other}}^{\\top}`
+        (or :math:`C\\,\\mathrm{bridge}\\,C_{\\mathrm{other}}^{\\top}` when
+        ``bridge`` is given), with the diagonal zeroed when
+        ``exclude_diag`` is ``True``.
     """
     if C_other is None:
         C_other = C
@@ -248,22 +315,70 @@ def relaxed_modularity(
 ) -> Num[Array, '...']:
     """Relaxed (differentiable) modularity for a (soft) community assignment.
 
-    Computes ``Q = sum_{i,j} B_{ij} (CC^T)_{ij}`` where ``B`` is the
-    modularity matrix.  For a one-hot ``C`` this reduces to the
-    standard Newman modularity.
+    Computes :math:`Q = \\sum_{i,j} B_{ij}\\,(CC^{\\top})_{ij}`, where
+    :math:`B` is the modularity matrix.  For a one-hot assignment ``C``
+    this reduces to the standard Newman modularity; for soft or
+    overlapping assignments it is a smooth, differentiable relaxation
+    suitable as an optimisation objective.
 
-    Dispatches on the type of ``A``:
+    The implementation dispatches on the type of ``A``:
 
-    - **Dense** ``A``: materialises ``B`` and ``CC^T``, sums.  Easy
-      to read; quadratic in ``n`` for both memory and compute.
-    - **ELL / SectionedELL** ``A``: factorised path.  Computes
-      ``Q = trace(A · CC^T) - (gamma / 2m) * |C^T k|^2`` with
-      sparse matvecs; never materialises the dense ``B``.  Cost is
-      ``O(nnz * k)`` where ``nnz`` is the non-zero count and ``k``
-      is the community count.
+    - **Dense** ``A``: materialises :math:`B` and :math:`CC^{\\top}` and
+      sums.  Easy to read; quadratic in :math:`n` for both memory and
+      compute.
+    - :class:`~nitrix.sparse.ELL` / :class:`~nitrix.sparse.SectionedELL`
+      ``A``: factorised path.  Computes
+      :math:`Q = \\operatorname{tr}(A\\,CC^{\\top}) - (\\gamma / 2m)\\,
+      \\lVert C^{\\top} k\\rVert^2` with sparse matrix-vector products and
+      never materialises the dense :math:`B`.  Cost is
+      :math:`O(\\mathrm{nnz}\\cdot k)`, where :math:`\\mathrm{nnz}` is the
+      non-zero count and :math:`k` the community count.
 
-    For ``A`` larger than ~5k nodes the sparse path is the right
-    answer; for small dense graphs the readable path is fine.
+    For ``A`` larger than roughly 5k nodes the sparse path is preferable;
+    for small dense graphs the readable dense path is fine.
+
+    Parameters
+    ----------
+    A : Num[Array, '... n n'] or ELL or SectionedELL
+        (Weighted) adjacency, dense or sparse, batched over leading axes.
+    C : Num[Array, '... n k']
+        Community-assignment matrix over ``k`` communities; one-hot for a
+        hard partition, otherwise a soft or overlapping assignment.
+    C_other : Num[Array, '... n k'], optional
+        Optional second assignment for asymmetric or bipartite cases.
+        Defaults to ``C``.
+    bridge : Num[Array, '... k k'], optional
+        Optional mapping between community indices, giving the
+        coaffiliation :math:`C\\,\\mathrm{bridge}\\,C_{\\mathrm{other}}^{\\top}`.
+    gamma : float, optional
+        Resolution parameter.  Larger values favour smaller communities.
+        Default ``1.0``.
+    null : callable, optional
+        Null-model factory used on the dense path.  Default
+        :func:`girvan_newman_null`.  (The sparse path uses the equivalent
+        rank-1 degree-based correction directly.)
+    normalise_modularity : bool, optional
+        If ``True`` (default), normalise the modularity by the total edge
+        weight :math:`2m`.
+    normalise_coaffiliation : bool, optional
+        If ``True`` (default), normalise ``C`` (and ``C_other``) by their
+        maximum value before forming the coaffiliation.
+    exclude_diag : bool, optional
+        If ``True`` (default), drop the diagonal of the coaffiliation so
+        a node's trivial self-affiliation does not bias the score.
+    directed : bool, optional
+        If ``False`` (default), halve the score to correct for counting
+        each undirected edge twice; if ``True``, return the raw sum.
+    sign : {'+', '-', None}, optional
+        Weight handling on the dense path, forwarded to
+        :func:`modularity_matrix`.  ``'+'`` (default) clips negative
+        weights; ``'-'`` clips positive weights; ``None`` uses the raw
+        input.  Ignored on the sparse path.
+
+    Returns
+    -------
+    Num[Array, '...']
+        The scalar relaxed modularity per batch element.
     """
     if isinstance(A, (ELL, SectionedELL)):
         return _relaxed_modularity_sparse(
@@ -338,19 +453,54 @@ def _relaxed_modularity_sparse(
 ) -> Num[Array, '...']:
     """Factored relaxed modularity for ELL / SectionedELL adjacency.
 
-    ``A @ C`` (using semiring ELL matmul) is ``(n, k_comm)``; then
-    ``trace(A · CC^T) = sum_i C_i^T (A @ C)_i = sum_{i, k} C[i, k] (AC)[i, k]``.
-    For ``bridge`` and ``C_other`` we generalise to ``trace(C · L · C_o^T · A)``
-    via the same path.
+    The product ``A @ C`` (via the semiring ELL matrix multiply) has shape
+    ``(n, k)``; then
+    :math:`\\operatorname{tr}(A\\,CC^{\\top}) = \\sum_i C_i^{\\top}(AC)_i
+    = \\sum_{i,k} C_{ik}\\,(AC)_{ik}`.  For ``bridge`` and ``C_other`` this
+    generalises to :math:`\\operatorname{tr}(C\\,L\\,C_{\\mathrm{o}}^{\\top}\\,A)`
+    along the same path.
 
-    The rank-1 correction ``gamma/2m * |C^T k|^2`` uses a single
-    matvec ``C^T k`` (cheap, ``(k_comm,)`` result).
+    The rank-1 correction :math:`(\\gamma / 2m)\\,\\lVert C^{\\top} k\\rVert^2`
+    uses a single matrix-vector product :math:`C^{\\top} k` (cheap, with a
+    length-``k`` result).
 
-    ``exclude_diag``: we'd need to subtract the diagonal entries of
-    ``CC^T``; sparse path doesn't expose them cheaply.  We compute
-    ``diag(CC^T) = (C ** 2).sum(-1)`` and subtract the matching
-    self-loop contributions of ``A``.  For most graphs ``A`` has no
-    self-loops so this is a no-op; we still do it for correctness.
+    When ``exclude_diag`` is set, the diagonal of the coaffiliation must be
+    subtracted; the sparse path does not expose it cheaply, so
+    :math:`\\operatorname{diag}(CC^{\\top}) = \\sum_k C_{\\cdot k}^2` is
+    formed and the matching self-loop contributions of :math:`A` are
+    subtracted.  For most graphs :math:`A` has no self-loops so this is a
+    no-op, but it is applied unconditionally for correctness.
+
+    Parameters
+    ----------
+    A : ELL or SectionedELL
+        Sparse (weighted) adjacency, batched over leading axes.
+    C : Num[Array, '... n k']
+        Community-assignment matrix over ``k`` communities.
+    C_other : Num[Array, '... n k'] or None
+        Optional second assignment for asymmetric or bipartite cases;
+        ``None`` reuses ``C``.
+    bridge : Num[Array, '... k k'] or None
+        Optional mapping between community indices; ``None`` uses the
+        identity coupling.
+    gamma : float
+        Resolution parameter scaling the rank-1 null-model correction.
+    normalise_modularity : bool
+        Whether to normalise the modularity by the total edge weight
+        :math:`2m`.
+    normalise_coaffiliation : bool
+        Whether to normalise ``C`` (and ``C_other``) by their maximum
+        value before forming the coaffiliation.
+    exclude_diag : bool
+        Whether to drop the diagonal contribution of the coaffiliation.
+    directed : bool
+        If ``False``, halve the score to correct for double-counting
+        undirected edges; if ``True``, return the raw sum.
+
+    Returns
+    -------
+    Num[Array, '...']
+        The scalar relaxed modularity per batch element.
     """
     # ---------------- Normalisations ----------------
     if normalise_coaffiliation:

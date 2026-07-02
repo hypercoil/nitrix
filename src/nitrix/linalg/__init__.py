@@ -14,7 +14,8 @@ Four submodules:
   point clouds; specialises onto ``semiring_ell_matmul`` for
   ``O(n * k)`` scaling at scale.
 - ``spd``      -- symmetric positive-definite manifold ops
-  (matrix exp/log/sqrt/power) with the SPEC §4.5 stability fix.
+  (matrix exp/log/sqrt/power) with a stabilised eigenspace
+  reconditioning step.
 
 Re-exports the most commonly imported public symbols.  See the
 submodule docstrings for the full surface.
@@ -62,6 +63,7 @@ from .optimize import (
 )
 from .residual import partial_residualise, residualise
 from .solve import cho_solve, solve
+from .subspace import orthogonal_procrustes
 from .spd import (
     cone_project_spd,
     mean_euclidean,
@@ -103,6 +105,8 @@ __all__ = [
     'implicit_least_squares',
     'implicit_minimize',
     'OptimizeResult',
+    # subspace geometry / orthogonal alignment
+    'orthogonal_procrustes',
     # kernel
     'cosine_kernel',
     'gaussian_kernel',

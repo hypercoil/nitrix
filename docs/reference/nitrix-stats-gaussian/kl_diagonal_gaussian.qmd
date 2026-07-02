@@ -1,0 +1,54 @@
+---
+title: "kl_diagonal_gaussian"
+generated: true
+description: "Kullback-Leibler divergence of a diagonal Gaussian from the standard normal."
+---
+
+[‹ back to `nitrix.stats.gaussian`](../nitrix-stats-gaussian.qmd)
+
+<!-- nitrix:gen sig:kl_diagonal_gaussian -->
+```python
+kl_diagonal_gaussian(mean: Float[Array, '...'], log_var: Float[Array, '...'], *, axis: Optional[_AxisArg] = None, reduction: Reduction = 'sum') -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:kl_diagonal_gaussian -->
+Kullback-Leibler divergence of a diagonal Gaussian from the standard normal.
+
+Evaluates, in closed form, the KL divergence of the diagonal Gaussian
+$\mathcal{N}(\mu, \operatorname{diag} e^{\ell})$ from the
+standard normal $\mathcal{N}(0, I)$, where $\mu$ is
+`mean` and $\ell$ is the log-variance `log_var`.
+
+The closed form for a diagonal Gaussian against the standard normal,
+per dimension, is
+
+$$
+\tfrac{1}{2}\left(\mu^2 + e^{\ell} - 1 - \ell\right),
+$$
+
+which is non-negative and zero exactly at $\mu = 0$,
+$\ell = 0$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:kl_diagonal_gaussian -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mean` | `Float` | `...` | — | The Gaussian's mean $\mu$, of arbitrary shape. |
+| `log_var` | `Float` | `...` | — | The Gaussian's log-variance $\ell$, of the same shape as `mean`. |
+| `axis` | `Optional[_AxisArg]` | — | `None` | Axes to reduce over. Default `None` reduces over all axes. The latent KL is conventionally *summed* over the latent dimension, so pass the latent axis together with `reduction="sum"` for a per-sample KL. |
+| `reduction` | `Reduction` | — | `'sum'` | How to reduce the per-dimension divergence over `axis`. `"sum"` (the default, since the per-dimension KL is additive), `"mean"`, or `"none"` to leave it unreduced. |
+
+**Returns** `Float` — shape `...`. The reduced KL divergence: a scalar when `axis` is `None`, per-sample when `axis` selects the latent axis, or the full per-dimension divergence (same shape as `mean`) when `reduction="none"`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:kl_diagonal_gaussian -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

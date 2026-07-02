@@ -1,0 +1,51 @@
+---
+title: "nitrix.nn"
+generated: true
+signature-hash: dc27663499c9c730
+description: "Functional neural-network forward-block kernels."
+listing:
+  id: nitrix-nn-symbols
+  contents: "nitrix-nn/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.nn`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Functional neural-network forward-block kernels.
+
+Pure `(Array, ...) -> Array` contractions for the inner kernels of
+transformer and state-space model forward blocks, behind the standard
+`backend=` dispatch (a `pallas-cuda` fused fast path with a `jax`
+reference fallback). These are *functions*, not stateful modules: the
+learnable modules that hold the parameters live in downstream libraries;
+this subpackage owns only the inner kernel.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### Submodules
+
+attention
+    [`scaled_dot_product_attention`](nitrix-nn-attention/scaled_dot_product_attention.qmd) (dense / windowed additive-bias /
+    causal / cross), with a flash-attention fast path.
+ssm
+    [`selective_scan`](nitrix-nn-ssm/selective_scan.qmd) (the selective state-space scan of Mamba / S6),
+    with a parallel associative-scan GPU path and a fused chunked-scan
+    kernel.
+norm
+    [`layer_norm`](nitrix-nn-norm/layer_norm.qmd), [`group_norm`](nitrix-nn-norm/group_norm.qmd), and `instance_norm`, each
+    exposing the curse-of-depth `out_scale` hook; the fused single-pass
+    kernel is performance-gated.
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-nn-symbols}
+:::

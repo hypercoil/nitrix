@@ -1,0 +1,63 @@
+---
+title: "lncc_grad_center"
+generated: true
+description: "Center-only local-cross-correlation force (the ANTs / ITK convention)."
+---
+
+[‹ back to `nitrix.metrics.intensity`](../nitrix-metrics-intensity.qmd)
+
+<!-- nitrix:gen sig:lncc_grad_center -->
+```python
+lncc_grad_center(moving: Float[Array, '... *spatial'], fixed: Float[Array, '... *spatial'], *, radius: Union[int, Sequence[int]] = 4, spatial_rank: Optional[int] = None, mode: BoundaryMode = 'reflect', eps: float = 1e-05) -> Float[Array, '... *spatial']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:lncc_grad_center -->
+Center-only local-cross-correlation force (the ANTs / ITK convention).
+
+The per-voxel ascent direction ITK's `ANTSNeighborhoodCorrelation` metric
+uses: each window's local CC derivative is attributed to its **window centre
+only**, so -- unlike the exact [`lncc_grad`](../nitrix-metrics-intensity/lncc_grad.qmd) (which back-propagates every
+window's CC to all of its members, the extra four box sums of its second
+pass) -- it needs only the **five** windowed sums
+
+`$text
+sFF = \Sigma f^2 - (\Sigma f)^2/n,   sMM = \Sigma m^2 - (\Sigma m)^2/n,   sFM = \Sigma fm - \Sigma f\Sigma m/n
+fA  = f - \Sigma f/n,        mA  = m - \Sigma m/n        (centre minus window mean)
+grad = 2\cdot sFM/(sFF\cdot sMM) \cdot  (fA - (sFM/sMM)\cdot mA)$`
+
+zeroed where $s_{FF}$ or $s_{MM}$ is $\le$ `eps`
+(a flat window -- ITK's guard).  Multiply by the spatial gradient of
+`moving` for the deformation force (as
+[`LNCCForce`](../nitrix-register/LNCCForce.qmd) does).  This is a *different*,
+cheaper force than [`lncc_grad`](../nitrix-metrics-intensity/lncc_grad.qmd) (not its gradient): the
+centre-only approximation ANTs ships, ~5/9 the box-sum work and a
+single windowed pass (so it admits the sliding-window kernel the
+exact two-pass form cannot).  The *value* [`lncc`](../nitrix-metrics-intensity/lncc.qmd) is unchanged
+-- only the derivative convention differs.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:lncc_grad_center -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `moving` | `Float` | `...` × `*spatial` | — | Images of identical shape, `(..., *spatial)`. Leading axes are treated as batch; the force is attributed to `moving`. |
+| `fixed` | `Float` | `...` × `*spatial` | — | Images of identical shape, `(..., *spatial)`. Leading axes are treated as batch; the force is attributed to `moving`. |
+| `radius` | `Union[int, Sequence[int]]` | — | `4` | Window half-width $r$, giving a box of size $2r + 1$ per axis. An `int` gives an isotropic window; a sequence gives one radius per spatial axis. |
+| `spatial_rank` | `Optional[int]` | — | `None` | Number of trailing axes to treat as spatial. `None` (default) infers from `radius` (if a sequence) else assumes all of `moving.ndim`. |
+| `mode` | `BoundaryMode` | — | `'reflect'` | Boundary mode for the windowed sums. Default `"reflect"`, which keeps the window count uniform. |
+| `eps` | `float` | — | `1e-05` | Flat-window threshold: the force is zeroed wherever the fixed- or moving-image window variance does not exceed this value. |
+
+**Returns** `Float` — shape `...` × `*spatial`. The per-voxel centre-only local cross-correlation force, of the same shape as `moving`, zero on flat windows.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:lncc_grad_center -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

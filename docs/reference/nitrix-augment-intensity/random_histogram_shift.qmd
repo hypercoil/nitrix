@@ -1,0 +1,46 @@
+---
+title: "random_histogram_shift"
+generated: true
+description: "Random monotone piecewise-linear remap of the intensity range."
+---
+
+[‹ back to `nitrix.augment.intensity`](../nitrix-augment-intensity.qmd)
+
+<!-- nitrix:gen sig:random_histogram_shift -->
+```python
+random_histogram_shift(x: Float[Array, '...'], key: Array, *, n_control_points: int = 10, shift_range: Tuple[float, float] = (-0.1, 0.1)) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:random_histogram_shift -->
+Random monotone piecewise-linear remap of the intensity range.
+
+Places `n_control_points` equally-spaced reference levels across
+`[min(x), max(x)]`, perturbs each by a random offset drawn from
+`shift_range` (as a fraction of the intensity span), pins the two
+endpoints (so the global range is preserved), enforces monotonicity
+by a running maximum, then remaps every value through the resulting
+table by linear interpolation.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:random_histogram_shift -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Float` | `...` | — | Intensity tensor. |
+| `key` | `Array` | — | — | PRNG key. |
+| `n_control_points` | `int` | — | `10` | Number of reference levels, including the two endpoints (`>= 2`). |
+| `shift_range` | `Tuple[float, float]` | — | `(-0.1, 0.1)` | Per-control-point offset range, as a fraction of the intensity span. |
+
+**Returns** `Float` — shape `...`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:random_histogram_shift -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

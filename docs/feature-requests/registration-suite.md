@@ -362,3 +362,22 @@ compatibility is **not** a constraint.
 Full verified findings (per-dimension, with the adversarial verdicts and
 refined recommendations) backing this roadmap: the 2026-06-22 six-lens audit
 (`/scratch/regprof/registration-audit-2026-06.md`).
+
+## 9. New capability — functional alignment (representation-space)
+
+Owned by [`register-functional-alignment`](register-functional-alignment.md)
+(do not duplicate here). Extends the suite's scope from **spatial** registration
+to **alignment in representation space**: a closed-form orthogonal-Procrustes
+aligner with an optional **matrix von Mises–Fisher** (matrix-Langevin) spatial
+prior on the rotation (the ProMises model), on the §6.5 `fit`/`apply` seam, with
+a **method ADT** (ProMises now; other hyperalignment algorithms follow) so
+``functional_align`` is a family, not a synonym for one algorithm.  A sibling
+recipe family — *not* a `TransformModel` chart (closed-form, not an `exp`-map
+optimised by GN/LM) and *not* a `CoordinateSpace` (feature space, not
+voxel/world). Reframes `register/__init__.py` from "pairwise registration
+recipes" to "pairwise **alignment** recipes (spatial + functional)". Solver
+dependency: [`linalg-orthogonal-procrustes`](linalg-orthogonal-procrustes.md)
+(shipped). The whole-brain regime needs the **efficient ProMises** subspace
+method (tracked in the FR §6). Migrated theory-faithfully (not ported) from the
+deprecated `hypercoil-examples` repo — see the
+[migration ledger](hypercoil-examples-migration.md). Numerics-only.

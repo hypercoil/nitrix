@@ -1,0 +1,50 @@
+---
+title: "nitrix.geometry.topology"
+generated: true
+signature-hash: 1da4ac4316c434ec
+description: "Mesh topology invariants -- the genus-0 defect gate."
+listing:
+  id: nitrix-geometry-topology-symbols
+  contents: "nitrix-geometry-topology/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.geometry.topology`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Mesh topology invariants -- the genus-0 defect gate.
+
+Cheap combinatorial invariants of a triangle mesh: the Euler characteristic
+$\chi = V - E + F$ and (for a closed orientable surface) the genus
+$g = (2 - \chi) / 2$.  These form a **defect gate** for the field-to-mesh
+route: a consumer checks `euler_characteristic(mesh) == 2` (equivalently
+[`genus`](nitrix-geometry-topology/genus.qmd) `== 0`) to know whether a marching-cubes / level-set extraction
+produced the expected spherical topology -- i.e. whether the template escape
+hatch is safe, or a topology correction is required.
+
+These are host-side integer combinatorics; they return Python `int`\ s, not
+traced arrays, and are not differentiable.
+
+A full topology *corrector* (in the manner of FreeSurfer's `mris_fix_topology`)
+is deliberately out of scope here; the field-to-mesh pipeline keeps the seam open
+so that a corrector can slot between extraction and inflation later.
+
+Because there is no corrector yet, raw [`marching_cubes`](nitrix-geometry-isosurface/marching_cubes.qmd) output is
+gate-only: if [`genus`](nitrix-geometry-topology/genus.qmd) reports a value `> 0` the topology defect can be
+detected but not repaired.  The supported route to a genus-0 surface is a
+template-correspondence model followed by [`deform_to_sdf`](nitrix-geometry-surface/deform_to_sdf.qmd), which inherits
+genus-0 from the template; a marching-cubes mesh with handles must be corrected
+by an external tool.
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-geometry-topology-symbols}
+:::

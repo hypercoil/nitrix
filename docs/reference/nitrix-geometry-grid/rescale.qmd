@@ -1,0 +1,12 @@
+---
+title: "rescale"
+generated: true
+description: "Alias for resample."
+---
+
+[‹ back to `nitrix.geometry.grid`](../nitrix-geometry-grid.qmd)
+
+<!-- nitrix:gen sig:rescale -->
+`rescale` is an alias for [`resample`](resample.qmd).
+<!-- nitrix:/gen -->
+

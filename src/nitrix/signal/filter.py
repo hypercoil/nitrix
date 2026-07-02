@@ -4,27 +4,27 @@
 """
 Linear filtering: polynomial detrend and frequency-domain band-pass.
 
-**Polynomial detrending** (``polynomial_detrend``): fit a polynomial of
-degree ``d`` to a time series and subtract the fit.  Used for low-frequency
-drift removal in fMRI BOLD signals.  Built on a rescaled Vandermonde basis
-fed to ``nitrix.linalg.residualise``.
+**Polynomial detrending** (:func:`polynomial_detrend`): fit a polynomial of
+degree :math:`d` to a time series and subtract the fit.  Used for
+low-frequency drift removal in fMRI BOLD signals.  Built on a rescaled
+Vandermonde basis fed to :func:`residualise`.
 
-**Frequency-domain filtering** (``bandpass`` / ``bandstop`` / ``lowpass`` /
-``highpass``): a zero-phase filter applied as a real magnitude weight over
-the rfft frequency grid, via ``nitrix.signal.fourier.product_filter`` (the
-low-level FFT-multiply engine).  ``bandstop`` is the notch case -- it
-*rejects* the ``(lo, hi)`` band and passes outside it; the canonical use is
-removing a respiratory peak from motion-estimate timeseries.  Three
-response designs:
+**Frequency-domain filtering** (:func:`bandpass` / :func:`bandstop` /
+:func:`lowpass` / :func:`highpass`): a zero-phase filter applied as a real
+magnitude weight over the rfft frequency grid, via
+:func:`product_filter` (the low-level FFT-multiply engine).
+:func:`bandstop` is the notch case -- it *rejects* the ``(lo, hi)`` band and
+passes outside it; the canonical use is removing a respiratory peak from
+motion-estimate timeseries.  Three response designs:
 
 - ``'maxflat'`` (default) -- the maximally-flat (Butterworth) *magnitude*
-  shape ``1 / sqrt(1 + (f / f_c)^{2 n})`` (-3 dB at ``f_c``), applied as a
-  zero-phase weight.  Because a real frequency-domain mask is a circular
-  convolution with its inverse DFT, this is a frequency-sampled **FIR**
-  filter that merely *borrows the Butterworth magnitude curve* -- it has no
-  phase response and no poles.  It is **not** a recursive Butterworth; the
-  genuine IIR Butterworth (with poles and real or ``filtfilt`` phase) is
-  ``iir_filter`` (separate primitive).
+  shape :math:`1 / \\sqrt{1 + (f / f_c)^{2 n}}` (-3 dB at :math:`f_c`),
+  applied as a zero-phase weight.  Because a real frequency-domain mask is a
+  circular convolution with its inverse DFT, this is a frequency-sampled
+  **FIR** filter that merely *borrows the Butterworth magnitude curve* -- it
+  has no phase response and no poles.  It is **not** a recursive
+  Butterworth; the genuine IIR Butterworth (with poles and real or
+  ``filtfilt`` phase) is :func:`iir_filter` (separate primitive).
 - ``'ideal'`` -- a brick-wall pass mask (sharpest, but rings in time).
 - ``'cosine'`` -- raised-cosine transition bands (compact, tunable width).
 
@@ -35,11 +35,11 @@ per-unit invariant.  Differentiable through the signal and JIT-friendly
 (the weight is data-independent; ``fs`` / cut-offs / ``order`` are static).
 
 **Recursive IIR** filtering -- the genuine Butterworth (poles, bilinear
-transform, second-order sections) -- is ``iir_filter`` / ``butterworth_sos``
-/ ``sosfilt`` / ``sosfiltfilt``, re-exported here from ``_iir``.  Unlike the
-``ftype='maxflat'`` magnitude window above, these are real recursive filters
-with the Butterworth phase (or zero-phase via ``filtfilt``), validated to
-machine precision against ``scipy.signal``.
+transform, second-order sections) -- is :func:`iir_filter` /
+:func:`butterworth_sos` / :func:`sosfilt` / :func:`sosfiltfilt`, re-exported
+here.  Unlike the ``ftype='maxflat'`` magnitude window above, these are real
+recursive filters with the Butterworth phase (or zero-phase via
+``filtfilt``), validated to machine precision against ``scipy.signal``.
 """
 
 from __future__ import annotations
@@ -72,12 +72,30 @@ def _polynomial_basis(
     degree: int,
     dtype: DTypeLike,
 ) -> Float[Array, 'degree+1 obs']:
-    """Build a polynomial basis ``[1, t, t^2, ..., t^d]`` along
-    rescaled time ``t in [-1, 1]``.
+    """Build a polynomial design basis along rescaled time.
 
-    Rescaling is essential for numerical stability when ``degree``
-    is moderately large; integer powers of ``[0, n_obs)`` blow up
-    fast and ill-condition the regression matrix.
+    Rows are the integer powers :math:`[1, t, t^2, \\ldots, t^d]` evaluated
+    on time rescaled to :math:`t \\in [-1, 1]`.  Rescaling is essential for
+    numerical stability when ``degree`` is moderately large; integer powers
+    of :math:`[0, n_{obs})` blow up fast and ill-condition the regression
+    matrix.
+
+    Parameters
+    ----------
+    n_obs
+        Number of time samples (columns of the returned basis).  Fewer than
+        two samples is degenerate and falls back to a matrix of ones.
+    degree
+        Highest polynomial power :math:`d`; the basis has ``degree + 1``
+        rows (powers ``0`` through ``degree``).
+    dtype
+        Floating dtype of the returned basis.
+
+    Returns
+    -------
+    Float[Array, 'degree+1 obs']
+        Polynomial basis with one row per power and one column per time
+        sample.
     """
     if n_obs < 2:
         # Edge case: too few samples for any polynomial.
@@ -95,9 +113,9 @@ def polynomial_detrend(
     """Subtract a polynomial fit of the named ``degree`` from each
     observation channel.
 
-    Equivalent to ``residualise(X, polynomial_basis)`` where the
-    basis is the rescaled Vandermonde matrix
-    ``[1, t, t^2, ..., t^degree]``.
+    Equivalent to :func:`residualise` against a rescaled Vandermonde basis
+    with rows :math:`[1, t, t^2, \\ldots, t^{degree}]`, which regresses the
+    polynomial trend out of every channel and returns the residual.
 
     Parameters
     ----------
@@ -143,8 +161,27 @@ def _cosine_edge(
 ) -> Array:
     """Raised-cosine edge centred on ``cutoff`` with transition ``width``.
 
-    ``pass_below`` -- unit gain below the band, rolling to zero above (the
-    low-pass edge); ``False`` rolls the other way (the high-pass edge).
+    The gain transitions smoothly across a band of width ``width`` centred
+    on ``cutoff``, following a half-cosine taper, and is clamped to the
+    plateau values outside that band.
+
+    Parameters
+    ----------
+    f
+        Frequency grid (cycles/sample) at which to evaluate the edge.
+    cutoff
+        Centre of the transition band, in cycles/sample.
+    width
+        Width of the raised-cosine transition band, in cycles/sample.
+    pass_below
+        If ``True``, unit gain below the band rolling to zero above (the
+        low-pass edge); if ``False``, zero gain below rolling to unity above
+        (the high-pass edge).
+
+    Returns
+    -------
+    Array
+        Magnitude weights in ``[0, 1]``, matching the shape of ``f``.
     """
     lo_e = cutoff - 0.5 * width
     hi_e = cutoff + 0.5 * width
@@ -157,7 +194,31 @@ def _cosine_edge(
 def _lowpass_mag(
     f: Array, cutoff: float, ftype: _FilterType, order: int, width: float
 ) -> Array:
-    """Magnitude response passing frequencies *below* ``cutoff``."""
+    """Magnitude response passing frequencies *below* ``cutoff``.
+
+    Selects one of the three magnitude-window designs and evaluates it on
+    the frequency grid.
+
+    Parameters
+    ----------
+    f
+        Frequency grid (cycles/sample) at which to evaluate the response.
+    cutoff
+        Pass-band edge, in cycles/sample.
+    ftype
+        Window design: ``'maxflat'`` (Butterworth magnitude shape),
+        ``'ideal'`` (brick wall), or ``'cosine'`` (raised-cosine edge).
+    order
+        Roll-off exponent of the ``'maxflat'`` design; ignored otherwise.
+    width
+        Transition-band width for the ``'cosine'`` design, in cycles/sample;
+        ignored otherwise.
+
+    Returns
+    -------
+    Array
+        Magnitude weights in ``[0, 1]``, matching the shape of ``f``.
+    """
     if ftype == 'maxflat':
         # Butterworth *magnitude* shape (-3 dB at cutoff), applied as a
         # zero-phase weight -- a frequency-sampled FIR, not a recursive IIR.
@@ -174,7 +235,31 @@ def _lowpass_mag(
 def _highpass_mag(
     f: Array, cutoff: float, ftype: _FilterType, order: int, width: float
 ) -> Array:
-    """Magnitude response passing frequencies *above* ``cutoff``."""
+    """Magnitude response passing frequencies *above* ``cutoff``.
+
+    Selects one of the three magnitude-window designs and evaluates it on
+    the frequency grid.  The DC bin is always rejected.
+
+    Parameters
+    ----------
+    f
+        Frequency grid (cycles/sample) at which to evaluate the response.
+    cutoff
+        Pass-band edge, in cycles/sample.
+    ftype
+        Window design: ``'maxflat'`` (Butterworth magnitude shape),
+        ``'ideal'`` (brick wall), or ``'cosine'`` (raised-cosine edge).
+    order
+        Roll-off exponent of the ``'maxflat'`` design; ignored otherwise.
+    width
+        Transition-band width for the ``'cosine'`` design, in cycles/sample;
+        ignored otherwise.
+
+    Returns
+    -------
+    Array
+        Magnitude weights in ``[0, 1]``, matching the shape of ``f``.
+    """
     if ftype == 'maxflat':
         # Guard the DC bin (f = 0) before dividing; it is always rejected.
         f_safe = jnp.where(f > 0, f, 1.0)
@@ -196,7 +281,33 @@ def _apply_frequency_filter(
     axis: int,
     padding: int,
 ) -> Num[Array, '... obs']:
-    """Move ``axis`` to the end, build the rfft weight, filter, restore."""
+    """Move ``axis`` to the end, build the rfft weight, filter, restore.
+
+    Moves the filtered axis to the trailing position, optionally reflect-pads
+    it, builds the real magnitude weight over the rfft frequency grid,
+    multiplies in the frequency domain via :func:`product_filter`, then crops
+    the padding and restores the original axis order.
+
+    Parameters
+    ----------
+    X
+        Signal to filter; the axis given by ``axis`` is the observation/time
+        axis.
+    weight_fn
+        Callable mapping the rfft frequency grid (cycles/sample) to a real
+        magnitude weight of the same shape.
+    axis
+        Axis of ``X`` to filter.
+    padding
+        Number of samples to reflect-pad on each end of the filtered axis
+        before filtering, then crop afterwards; reduces circular-convolution
+        wrap-around at the edges.  Must be non-negative.
+
+    Returns
+    -------
+    Num[Array, '... obs']
+        Filtered signal, same shape as ``X``.
+    """
     x = jnp.moveaxis(jnp.asarray(X), axis, -1)
     n = x.shape[-1]
     if padding < 0:
@@ -219,7 +330,26 @@ def _apply_frequency_filter(
 
 
 def _normalise_cutoff(cutoff: float, fs: float, name: str) -> float:
-    """Convert a physical cut-off (Hz) to normalised cycles/sample."""
+    """Convert a physical cut-off (Hz) to normalised cycles/sample.
+
+    Validates that the cut-off lies strictly between DC and the Nyquist
+    frequency, then divides by the sampling frequency.
+
+    Parameters
+    ----------
+    cutoff
+        Physical cut-off frequency, in Hz.
+    fs
+        Sampling frequency, in Hz.
+    name
+        Argument name, used only to make the validation error message
+        specific.
+
+    Returns
+    -------
+    float
+        The cut-off in cycles/sample (``cutoff / fs``).
+    """
     nyq = 0.5 * fs
     if not 0.0 < cutoff < nyq:
         raise ValueError(
@@ -254,7 +384,7 @@ def bandpass(
     ftype
         Magnitude-window design: ``'maxflat'`` (default; the Butterworth
         magnitude *shape*, applied zero-phase -- a frequency-sampled FIR,
-        not a recursive IIR Butterworth -- see ``iir_filter`` for that),
+        not a recursive IIR Butterworth -- see :func:`iir_filter` for that),
         ``'ideal'`` (brick wall), or ``'cosine'`` (raised-cosine edges).
     order
         Steepness of the ``'maxflat'`` roll-off (the exponent of the
@@ -303,11 +433,43 @@ def bandstop(
 ) -> Num[Array, '... obs']:
     """Zero-phase frequency-domain band-stop (notch): reject ``(lo, hi)``.
 
-    The complement of ``bandpass``: passes frequencies below ``lo`` and
+    The complement of :func:`bandpass`: passes frequencies below ``lo`` and
     above ``hi``, attenuating the band between.  Canonical use is notching
     a respiratory peak (~0.2-0.4 Hz) out of head-motion estimates before
-    they are used as nuisance regressors.  Arguments are as for
-    ``bandpass``; ``(lo, hi)`` is the *rejected* band.
+    they are used as nuisance regressors.
+
+    Parameters
+    ----------
+    X
+        Signal; the filtered axis is last by default (``axis``).
+    fs
+        Sampling frequency in Hz.  Pass ``fs = 1 / TR`` for fMRI.
+    lo, hi
+        Edges of the *rejected* band in Hz (``0 < lo < hi < fs / 2``).
+    ftype
+        Magnitude-window design: ``'maxflat'`` (default; the Butterworth
+        magnitude *shape*, applied zero-phase -- a frequency-sampled FIR,
+        not a recursive IIR Butterworth -- see :func:`iir_filter` for that),
+        ``'ideal'`` (brick wall), or ``'cosine'`` (raised-cosine edges).
+    order
+        Steepness of the ``'maxflat'`` roll-off (the exponent of the
+        Butterworth magnitude shape).  Ignored for the other designs.
+        Default ``2``.
+    transition
+        Raised-cosine transition width in Hz (``'cosine'`` only); defaults
+        to 10 % of Nyquist.
+    axis
+        Axis to filter.  Default ``-1`` (trailing time/observation axis).
+    padding
+        Reflect-pad this many samples on each end before filtering, then
+        crop -- reduces the circular-convolution wrap-around at the edges.
+        Default ``0`` (pure FFT).
+
+    Returns
+    -------
+    Num[Array, '... obs']
+        Filtered signal, same shape as ``X``.  Differentiable through ``X``;
+        ``fs`` / ``lo`` / ``hi`` / ``order`` are static.
     """
     lo_n = _normalise_cutoff(lo, fs, 'lo')
     hi_n = _normalise_cutoff(hi, fs, 'hi')
@@ -337,7 +499,41 @@ def lowpass(
 ) -> Num[Array, '... obs']:
     """Zero-phase frequency-domain low-pass: keep frequencies below ``cutoff``.
 
-    Arguments as for ``bandpass``; ``cutoff`` is the pass-band edge in Hz.
+    Passes frequencies below ``cutoff`` and attenuates those above, applied
+    zero-phase as a real magnitude weight over the rfft grid.
+
+    Parameters
+    ----------
+    X
+        Signal; the filtered axis is last by default (``axis``).
+    fs
+        Sampling frequency in Hz.  Pass ``fs = 1 / TR`` for fMRI.
+    cutoff
+        Pass-band edge in Hz (``0 < cutoff < fs / 2``).
+    ftype
+        Magnitude-window design: ``'maxflat'`` (default; the Butterworth
+        magnitude *shape*, applied zero-phase -- a frequency-sampled FIR,
+        not a recursive IIR Butterworth -- see :func:`iir_filter` for that),
+        ``'ideal'`` (brick wall), or ``'cosine'`` (raised-cosine edges).
+    order
+        Steepness of the ``'maxflat'`` roll-off (the exponent of the
+        Butterworth magnitude shape).  Ignored for the other designs.
+        Default ``2``.
+    transition
+        Raised-cosine transition width in Hz (``'cosine'`` only); defaults
+        to 10 % of Nyquist.
+    axis
+        Axis to filter.  Default ``-1`` (trailing time/observation axis).
+    padding
+        Reflect-pad this many samples on each end before filtering, then
+        crop -- reduces the circular-convolution wrap-around at the edges.
+        Default ``0`` (pure FFT).
+
+    Returns
+    -------
+    Num[Array, '... obs']
+        Filtered signal, same shape as ``X``.  Differentiable through ``X``;
+        ``fs`` / ``cutoff`` / ``order`` are static.
     """
     c_n = _normalise_cutoff(cutoff, fs, 'cutoff')
     tw = (transition / fs) if transition is not None else 0.05
@@ -361,7 +557,42 @@ def highpass(
 ) -> Num[Array, '... obs']:
     """Zero-phase frequency-domain high-pass: keep frequencies above ``cutoff``.
 
-    Arguments as for ``bandpass``; ``cutoff`` is the pass-band edge in Hz.
+    Passes frequencies above ``cutoff`` and attenuates those below (the DC
+    bin is always rejected), applied zero-phase as a real magnitude weight
+    over the rfft grid.
+
+    Parameters
+    ----------
+    X
+        Signal; the filtered axis is last by default (``axis``).
+    fs
+        Sampling frequency in Hz.  Pass ``fs = 1 / TR`` for fMRI.
+    cutoff
+        Pass-band edge in Hz (``0 < cutoff < fs / 2``).
+    ftype
+        Magnitude-window design: ``'maxflat'`` (default; the Butterworth
+        magnitude *shape*, applied zero-phase -- a frequency-sampled FIR,
+        not a recursive IIR Butterworth -- see :func:`iir_filter` for that),
+        ``'ideal'`` (brick wall), or ``'cosine'`` (raised-cosine edges).
+    order
+        Steepness of the ``'maxflat'`` roll-off (the exponent of the
+        Butterworth magnitude shape).  Ignored for the other designs.
+        Default ``2``.
+    transition
+        Raised-cosine transition width in Hz (``'cosine'`` only); defaults
+        to 10 % of Nyquist.
+    axis
+        Axis to filter.  Default ``-1`` (trailing time/observation axis).
+    padding
+        Reflect-pad this many samples on each end before filtering, then
+        crop -- reduces the circular-convolution wrap-around at the edges.
+        Default ``0`` (pure FFT).
+
+    Returns
+    -------
+    Num[Array, '... obs']
+        Filtered signal, same shape as ``X``.  Differentiable through ``X``;
+        ``fs`` / ``cutoff`` / ``order`` are static.
     """
     c_n = _normalise_cutoff(cutoff, fs, 'cutoff')
     tw = (transition / fs) if transition is not None else 0.05

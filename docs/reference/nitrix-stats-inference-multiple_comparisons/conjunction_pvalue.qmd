@@ -1,0 +1,51 @@
+---
+title: "conjunction_pvalue"
+generated: true
+description: "Conjunction p-value across `k` contrasts."
+---
+
+[‹ back to `nitrix.stats.inference.multiple_comparisons`](../nitrix-stats-inference-multiple_comparisons.qmd)
+
+<!-- nitrix:gen sig:conjunction_pvalue -->
+```python
+conjunction_pvalue(p_values: Float[Array, 'k *spatial']) -> Float[Array, '*spatial']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:conjunction_pvalue -->
+Conjunction p-value across `k` contrasts.
+
+Returns the per-element maximum of the per-contrast p-values, the p-scale
+dual of [`conjunction`](../nitrix-stats-inference-multiple_comparisons/conjunction.qmd). The minimum-statistic conjunction is significant
+at level $\alpha$ if and only if every contrast's p-value is below
+$\alpha$, equivalently if and only if their maximum is, so the maximum
+p-value is the valid conjunction p-value.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:conjunction_pvalue -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `p_values` | `Float` | `k` × `*spatial` | — | The `k` per-contrast p-value maps stacked on the leading axis, each of shape `*spatial`. |
+
+**Returns** `Float` — shape `*spatial`. The per-element maximum p-value over the `k` contrasts.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:conjunction_pvalue -->
+### References
+
+Nichols, T., Brett, M., Andersson, J., Wager, T., & Poline, J.-B. (2005).
+Valid conjunction inference with the minimum statistic. NeuroImage, 25(3),
+653-660. https://doi.org/10.1016/j.neuroimage.2004.12.005
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:conjunction_pvalue -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `k` | kernel or basis components |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

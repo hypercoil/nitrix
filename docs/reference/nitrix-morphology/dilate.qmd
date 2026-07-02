@@ -1,0 +1,113 @@
+---
+title: "dilate"
+generated: true
+description: "Grayscale dilation $ mathrm{out}[i] =  max_p ( x[i + p] +  mathrm{se}[p] )$."
+---
+
+[‹ back to `nitrix.morphology`](../nitrix-morphology.qmd)
+
+*Re-exported here; defined in `nitrix.morphology._mm`.*
+
+<!-- nitrix:gen sig:dilate -->
+```python
+dilate(x: Num[Array, '... *spatial'], *, structuring_element: Optional[Num[Array, '*kspatial']] = None, size: Optional[Union[int, Sequence[int]]] = None, padding: str = 'SAME', backend: Backend = 'auto') -> Num[Array, '... *spatial']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:dilate -->
+Grayscale dilation $\mathrm{out}[i] = \max_p ( x[i + p] + \mathrm{se}[p] )$.
+
+For a flat (all-zero) structuring element this reduces to a
+sliding-window max -- the most common case.  For a non-trivial
+`structuring_element`, the values are added per-position before
+taking the max.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:dilate -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Num` | `...` × `*spatial` | — | Single-channel input, `(..., *spatial)`. |
+| `structuring_element` | `Optional[Num[Array, '*kspatial']]` | — | `None` | Per-position offsets; shape `(*kspatial,)` matching the spatial rank of `x`. `None` selects a flat box of `size`. |
+| `size` | `Optional[Union[int, Sequence[int]]]` | — | `None` | Side length of a flat hyper-rectangular structuring element. `int` is broadcast to all spatial dims. Ignored if `structuring_element` is provided. Default `3`. |
+| `padding` | `str` | — | `'SAME'` | `"SAME"` (default) or `"VALID"`. `"SAME"` pads with the algebra identity (`-inf` for max-plus), preserving the spatial shape. **For non-Euclidean boundaries** (periodic / spherical-grid / custom), do not pass a new `padding` mode here -- instead pre-pad the input via the appropriate topology helper and call `dilate(..., padding="VALID")`. The VALID dilation consumes exactly the pad you added when `pad == se_radius`; the result has the original spatial shape, no explicit unpad needed: # Spherical-grid topology (parameterised sphere): from nitrix.geometry import sphere_grid_pad_2d se_radius = (size - 1) // 2 padded = sphere_grid_pad_2d(mask, pad=se_radius) result = dilate(padded, size=size, padding='VALID') # Generic periodic (toroidal): p = (size - 1) // 2 padded = jnp.pad(mask, ((p, p), (p, p)), mode='wrap') result = dilate(padded, size=size, padding='VALID') If you padded by more than the SE radius (e.g. to chain multiple kernel passes), strip the surplus via [`sphere_grid_unpad_2d`](../nitrix-geometry.qmd) (for the spherical case) or a plain slice (for the toroidal case). Threading `padding='periodic'` into `dilate` itself was considered and rejected: it would only solve the toroidal case, not the pole-flip case that the spherical-grid primitive handles. Composition is more general and only costs 2 lines. |
+| `backend` | `Backend` | — | `'auto'` | `"auto"`, `"pallas-cuda"`, or `"jax"`. Consulted only for the non-flat (explicit `structuring_element`) path; the common flat-box case lowers to a fused `lax.reduce_window` regardless. |
+
+**Returns** `Num` — shape `...` × `*spatial`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:dilate -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **351.91 ms** (median, L4); up to **186.88× faster** than `simpleitk.GrayscaleDilate`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_DILATE.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| dilate | jax-cuda12 | shape=[128, 128, 128],se=ball,radius=2,batch=4,tier=large | `cupyx.scipy.ndimage.grey_dilation` | ok | 1.87 ms / 1.89 ms | 216.07 ms | 33.55 MB (hbm) | n/a (no oracle) | 0.01x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[128, 128, 128],se=ball,radius=2,batch=4,tier=large | `nitrix-jax` | ok | 351.58 ms / 351.91 ms | 1.429 s | 8724.15 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[256, 256, 256],se=ball,radius=2,tier=large | `cupyx.scipy.ndimage.grey_dilation` | ok | 2.35 ms / 2.37 ms | 209.48 ms | 67.11 MB (hbm) | n/a (no oracle) | 0.00x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[256, 256, 256],se=ball,radius=2,tier=large | `nitrix-jax` | ok | 698.60 ms / 698.93 ms | 2.105 s | 16995.32 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[256, 256, 256],se=ball,radius=4,tier=large | `cupyx.scipy.ndimage.grey_dilation` | ok | 12.02 ms / 13.63 ms | 21.361 s | 67.11 MB (hbm) | n/a (no oracle) | — |
+| dilate | jax-cuda12 | shape=[256, 256, 256],se=ball,radius=4,tier=large | `nitrix-jax` | oom | — | — | — | — | — |
+| dilate | jax-cuda12 | shape=[256, 256, 256],se=box,size=3,tier=large | `cupyx.scipy.ndimage.grey_dilation` | ok | 2.29 ms / 2.31 ms | 172.21 ms | 67.11 MB (hbm) | n/a (no oracle) | 3.62x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[256, 256, 256],se=box,size=3,tier=large | `nitrix-jax` | ok | 632.4 µs / 637.9 µs | 123.82 ms | 201.33 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| dilate | jax-cpu | shape=[256, 256],se=box,size=15 | `cupyx.scipy.ndimage.grey_dilation` | skipped | — | — | — | — | — |
+| dilate | jax-cpu | shape=[256, 256],se=box,size=15 | `nitrix-jax` | ok | 4.08 ms / 4.50 ms | 65.57 ms | 706 MB (rss) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| dilate | jax-cpu | shape=[256, 256],se=box,size=15 | `scipy.ndimage.grey_dilation` | ok | 1.31 ms / 1.33 ms | 1.35 ms | 706 MB (rss) | ✓ 0×tol | 0.32x vs nitrix-jax |
+| dilate | jax-cpu | shape=[256, 256],se=box,size=15 | `simpleitk.GrayscaleDilate` | ok | 6.09 ms / 6.18 ms | 61.53 ms | 706 MB (rss) | ✓ 0×tol | 1.49x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[256, 256],se=box,size=15 | `cupyx.scipy.ndimage.grey_dilation` | ok | 137.4 µs / 205.0 µs | 167.11 ms | 0.26 MB (hbm) | ✓ 0×tol | 0.94x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[256, 256],se=box,size=15 | `nitrix-jax` | ok | 145.8 µs / 191.2 µs | 138.01 ms | 0.79 MB (hbm) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[256, 256],se=box,size=15 | `scipy.ndimage.grey_dilation` | ok | 1.29 ms / 1.31 ms | 1.34 ms | 0.26 MB (hbm) | ✓ 0×tol | 8.88x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[256, 256],se=box,size=15 | `simpleitk.GrayscaleDilate` | ok | 6.06 ms / 6.12 ms | 60.57 ms | 0.26 MB (hbm) | ✓ 0×tol | 41.59x vs nitrix-jax |
+| dilate | jax-cpu | shape=[256, 256],se=box,size=3 | `cupyx.scipy.ndimage.grey_dilation` | skipped | — | — | — | — | — |
+| dilate | jax-cpu | shape=[256, 256],se=box,size=3 | `nitrix-jax` | ok | 336.9 µs / 358.8 µs | 67.10 ms | 706 MB (rss) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| dilate | jax-cpu | shape=[256, 256],se=box,size=3 | `scipy.ndimage.grey_dilation` | ok | 1.21 ms / 1.22 ms | 1.28 ms | 706 MB (rss) | ✓ 0×tol | 3.60x vs nitrix-jax |
+| dilate | jax-cpu | shape=[256, 256],se=box,size=3 | `simpleitk.GrayscaleDilate` | ok | 3.30 ms / 3.45 ms | 66.37 ms | 706 MB (rss) | ✓ 0×tol | 9.81x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[256, 256],se=box,size=3 | `cupyx.scipy.ndimage.grey_dilation` | ok | 126.8 µs / 131.7 µs | 357.76 ms | 0.26 MB (hbm) | ✓ 0×tol | 1.39x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[256, 256],se=box,size=3 | `nitrix-jax` | ok | 91.1 µs / 93.8 µs | 119.64 ms | 0.79 MB (hbm) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[256, 256],se=box,size=3 | `scipy.ndimage.grey_dilation` | ok | 1.21 ms / 1.22 ms | 1.25 ms | 0.26 MB (hbm) | ✓ 0×tol | 13.26x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[256, 256],se=box,size=3 | `simpleitk.GrayscaleDilate` | ok | 4.87 ms / 5.42 ms | 143.75 ms | 0.26 MB (hbm) | ✓ 0×tol | 53.43x vs nitrix-jax |
+| dilate | jax-cpu | shape=[256, 256],se=box,size=3,dtype=float16 | `nitrix-jax` | ok | 406.3 µs / 415.7 µs | 66.83 ms | 706 MB (rss) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[256, 256],se=box,size=3,dtype=float16 | `nitrix-jax` | ok | 93.8 µs / 106.1 µs | 108.69 ms | 0.39 MB (hbm) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| dilate | jax-cpu | shape=[256, 256],se=disk,radius=3 | `cupyx.scipy.ndimage.grey_dilation` | skipped | — | — | — | — | — |
+| dilate | jax-cpu | shape=[256, 256],se=disk,radius=3 | `nitrix-jax` | ok | 6.88 ms / 10.27 ms | 135.63 ms | 706 MB (rss) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| dilate | jax-cpu | shape=[256, 256],se=disk,radius=3 | `scipy.ndimage.grey_dilation` | ok | 1.34 ms / 1.38 ms | 2.74 ms | 706 MB (rss) | ✓ 0×tol | 0.20x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[256, 256],se=disk,radius=3 | `cupyx.scipy.ndimage.grey_dilation` | ok | 292.5 µs / 299.4 µs | 227.96 ms | 0.26 MB (hbm) | ✓ 0×tol | 0.78x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[256, 256],se=disk,radius=3 | `nitrix-jax` | ok | 375.5 µs / 388.8 µs | 814.85 ms | 93.06 MB (hbm) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[256, 256],se=disk,radius=3 | `scipy.ndimage.grey_dilation` | ok | 1.34 ms / 1.37 ms | 1.39 ms | 0.26 MB (hbm) | ✓ 0×tol | 3.56x vs nitrix-jax |
+| dilate | jax-cpu | shape=[256, 256],se=disk,radius=7 | `cupyx.scipy.ndimage.grey_dilation` | skipped | — | — | — | — | — |
+| dilate | jax-cpu | shape=[256, 256],se=disk,radius=7 | `nitrix-jax` | ok | 39.56 ms / 46.46 ms | 161.51 ms | 706 MB (rss) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| dilate | jax-cpu | shape=[256, 256],se=disk,radius=7 | `scipy.ndimage.grey_dilation` | ok | 6.30 ms / 6.50 ms | 6.39 ms | 706 MB (rss) | ✓ 0×tol | 0.16x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[256, 256],se=disk,radius=7 | `cupyx.scipy.ndimage.grey_dilation` | ok | 307.3 µs / 320.1 µs | 208.18 ms | 0.26 MB (hbm) | ✓ 0×tol | 0.19x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[256, 256],se=disk,radius=7 | `nitrix-jax` | ok | 1.58 ms / 1.64 ms | 663.64 ms | 193.46 MB (hbm) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[256, 256],se=disk,radius=7 | `scipy.ndimage.grey_dilation` | ok | 6.29 ms / 6.39 ms | 6.32 ms | 0.26 MB (hbm) | ✓ 0×tol | 3.99x vs nitrix-jax |
+| dilate | jax-cpu | shape=[64, 64, 64],se=ball,radius=2 | `cupyx.scipy.ndimage.grey_dilation` | skipped | — | — | — | — | — |
+| dilate | jax-cpu | shape=[64, 64, 64],se=ball,radius=2 | `nitrix-jax` | ok | 125.05 ms / 141.70 ms | 270.83 ms | 729 MB (rss) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| dilate | jax-cpu | shape=[64, 64, 64],se=ball,radius=2 | `scipy.ndimage.grey_dilation` | ok | 5.98 ms / 6.38 ms | 6.25 ms | 706 MB (rss) | ✓ 0×tol | 0.05x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[64, 64, 64],se=ball,radius=2 | `cupyx.scipy.ndimage.grey_dilation` | ok | 344.5 µs / 408.9 µs | 277.26 ms | 1.05 MB (hbm) | ✓ 0×tol | 0.11x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[64, 64, 64],se=ball,radius=2 | `nitrix-jax` | ok | 3.09 ms / 3.23 ms | 676.09 ms | 336.59 MB (hbm) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[64, 64, 64],se=ball,radius=2 | `scipy.ndimage.grey_dilation` | ok | 5.89 ms / 5.93 ms | 6.13 ms | 1.05 MB (hbm) | ✓ 0×tol | 1.91x vs nitrix-jax |
+| dilate | jax-cpu | shape=[64, 64, 64],se=box,size=3 | `cupyx.scipy.ndimage.grey_dilation` | skipped | — | — | — | — | — |
+| dilate | jax-cpu | shape=[64, 64, 64],se=box,size=3 | `nitrix-jax` | ok | 3.25 ms / 3.80 ms | 73.81 ms | 706 MB (rss) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| dilate | jax-cpu | shape=[64, 64, 64],se=box,size=3 | `scipy.ndimage.grey_dilation` | ok | 7.88 ms / 7.95 ms | 8.03 ms | 706 MB (rss) | ✓ 0×tol | 2.43x vs nitrix-jax |
+| dilate | jax-cpu | shape=[64, 64, 64],se=box,size=3 | `simpleitk.GrayscaleDilate` | ok | 20.22 ms / 20.76 ms | 78.40 ms | 706 MB (rss) | ✓ 0×tol | 6.22x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[64, 64, 64],se=box,size=3 | `cupyx.scipy.ndimage.grey_dilation` | ok | 180.5 µs / 190.2 µs | 170.50 ms | 1.05 MB (hbm) | ✓ 0×tol | 1.67x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[64, 64, 64],se=box,size=3 | `nitrix-jax` | ok | 108.0 µs / 116.7 µs | 115.77 ms | 3.15 MB (hbm) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[64, 64, 64],se=box,size=3 | `scipy.ndimage.grey_dilation` | ok | 7.86 ms / 7.91 ms | 8.03 ms | 1.05 MB (hbm) | ✓ 0×tol | 72.75x vs nitrix-jax |
+| dilate | jax-cuda12 | shape=[64, 64, 64],se=box,size=3 | `simpleitk.GrayscaleDilate` | ok | 20.19 ms / 20.96 ms | 77.76 ms | 1.05 MB (hbm) | ✓ 0×tol | 186.88x vs nitrix-jax |
+:::
+
+*source: bench `5066cd0f` · nitrix `c31df7e1`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:dilate -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

@@ -1,0 +1,53 @@
+---
+title: "reference_semiring_conv"
+generated: true
+description: "Pure-JAX reference for [`semiring_conv`](../nitrix-semiring-conv/semiring_conv.qmd)."
+---
+
+[‹ back to `nitrix.semiring.conv`](../nitrix-semiring-conv.qmd)
+
+<!-- nitrix:gen sig:reference_semiring_conv -->
+```python
+reference_semiring_conv(x: Num[Array, '... *spatial c_in'], k: Num[Array, '*kspatial c_in c_out'], *, semiring: Semiring[Any], stride: Union[int, Sequence[int]] = 1, padding: Union[str, Sequence[tuple[int, int]]] = 'SAME', dilation: Union[int, Sequence[int]] = 1, backend: Backend = 'jax') -> Num[Array, '... *spatial_out c_out']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:reference_semiring_conv -->
+Pure-JAX reference for [`semiring_conv`](../nitrix-semiring-conv/semiring_conv.qmd).
+
+Performs NaN-safe patch extraction (padding with the algebra's
+identity and gathering via `jnp.take`) and then applies
+[`semiring_matmul`](../nitrix-semiring.qmd) over the reshaped patches
+for the per-output-position reduction.  See the module docstring
+for the full forward strategy.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:reference_semiring_conv -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Num` | `...` × `*spatial` × `c_in` | — | Input array in channel-last layout: arbitrary leading batch dimensions, followed by the spatial dimensions and a trailing input-channel axis `c_in`. |
+| `k` | `Num` | `*kspatial` × `c_in` × `c_out` | — | Convolution kernel: the spatial extents `*kspatial`, then the input-channel axis `c_in` (which must match `x`) and the output-channel axis `c_out`. The number of spatial dimensions is inferred as `k.ndim - 2`. |
+| `semiring` | `Semiring[Any]` | — | — | Algebra whose `binary_op` combines the receptive field with the kernel and whose `monoid` reduces the products; its `identity` is used as the padding value. |
+| `stride` | `Union[int, Sequence[int]]` | — | `1` | Per-spatial-dim window stride, either a single `int` applied to every dimension or one value per dimension. Default `1`. |
+| `padding` | `Union[str, Sequence[tuple[int, int]]]` | — | `'SAME'` | `'SAME'`, `'VALID'`, or an explicit per-spatial-dim sequence of `(lo, hi)` pairs. Default `'SAME'`. |
+| `dilation` | `Union[int, Sequence[int]]` | — | `1` | Per-spatial-dim kernel dilation, either a single `int` or one value per dimension. Default `1`. |
+| `backend` | `Backend` | — | `'jax'` | Execution engine forwarded to the inner [`semiring_matmul`](../nitrix-semiring.qmd). Default `'jax'`. |
+
+**Returns** `Num` — shape `...` × `*spatial_out` × `c_out`. Convolved output in channel-last layout: the original leading batch dimensions, the strided/padded output spatial extents `*spatial_out`, and the output-channel axis `c_out`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:reference_semiring_conv -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `c_in` | *(undocumented — add to `_dimensions.yml`)* |
+| `*kspatial` | a variadic group of axes (`kspatial`) |
+| `c_out` | *(undocumented — add to `_dimensions.yml`)* |
+| `*spatial_out` | a variadic group of axes (`spatial_out`) |
+<!-- nitrix:/gen -->

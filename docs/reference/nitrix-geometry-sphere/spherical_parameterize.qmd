@@ -1,0 +1,66 @@
+---
+title: "spherical_parameterize"
+generated: true
+description: "Map an inflated genus-0 surface to the sphere, minimising distortion."
+---
+
+[‹ back to `nitrix.geometry.sphere`](../nitrix-geometry-sphere.qmd)
+
+<!-- nitrix:gen sig:spherical_parameterize -->
+```python
+spherical_parameterize(mesh: 'Mesh', *, init: Literal['spectral', 'radial'] = 'spectral', n_iterations: int = 200, conformal_weight: float = 1.0, area_weight: float = 1.0, step: float = 0.05, radius: float = 1.0) -> Float[Array, 'n_vertices 3']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:spherical_parameterize -->
+Map an inflated genus-0 surface to the sphere, minimising distortion.
+
+The `mris_sphere` analogue.  Starts from a fast (near-)bijective init and,
+if `n_iterations > 0`, refines it by **Riemannian gradient descent on
+(S^2)^n** under a conformal + areal distortion energy, with a **fold-safe
+backtracking line-search** (a step is accepted only if it lowers the energy
+and does not increase the number of flipped triangles) and a
+centroid/Mobius normalisation each step (which, with the area term, blocks
+the conformal collapse-to-a-point).  Bijectivity is thus driven to strict
+(no flipped triangles) and held.
+
+`n_iterations = 0` returns the init alone -- with `init='spectral'` that
+is the recon-surf-grade one-shot map
+([`spectral_sphere_embedding`](../nitrix-geometry-sphere/spectral_sphere_embedding.qmd)).
+
+Execution class: **host-orchestrated**, not a jittable kernel.  It builds the
+cotangent operator host-side
+(`mesh_cotangent_laplacian`, NumPy) once and,
+for `init='spectral'`, runs the host eigensolve; the per-iteration refine
+*body* (energy, tangent-projected gradient, fold-safe line-search) is pure
+JAX and runs on device, but the function as a whole is **not** jittable nor
+differentiable w.r.t. `mesh.vertices` (the operator weights are NumPy
+constants).  Call it to *produce* a spherical map; do not wrap it in
+`jax.jit` / `jax.grad`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:spherical_parameterize -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mesh` | `'Mesh'` | — | — | Inflated genus-0 mesh (e.g. [`inflate_surface`](../nitrix-geometry.qmd) output). |
+| `init` | `Literal['spectral', 'radial']` | — | `'spectral'` | `'spectral'` (default, the recon-surf LBO embedding) or `'radial'` (centroid projection -- only for near-convex inputs). |
+| `n_iterations` | `int` | — | `200` | Refinement iterations (`0` -> init only). |
+| `conformal_weight` | `float` | — | `1.0` | Energy weights (Dirichlet/conformal core + areal log-ratio term). |
+| `area_weight` | `float` | — | `1.0` | Energy weights (Dirichlet/conformal core + areal log-ratio term). |
+| `step` | `float` | — | `0.05` | Initial line-search step. |
+| `radius` | `float` | — | `1.0` | Output sphere radius. |
+
+**Returns** `Float` — shape `n_vertices` × `3`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:spherical_parameterize -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_vertices` | *(undocumented — add to `_dimensions.yml`)* |
+| `3` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

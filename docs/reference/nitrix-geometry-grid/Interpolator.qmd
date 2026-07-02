@@ -1,0 +1,48 @@
+---
+title: "Interpolator"
+generated: true
+description: "Sample an image at continuous coordinates with a fixed kernel."
+---
+
+[‹ back to `nitrix.geometry.grid`](../nitrix-geometry-grid.qmd)
+
+*Re-exported here; defined in `nitrix.geometry._interpolate`.*
+
+<!-- nitrix:gen sig:Interpolator -->
+```python
+class Interpolator(Protocol)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:Interpolator -->
+Sample an image at continuous coordinates with a fixed kernel.
+
+A method maps an unbatched channel-last image `(*spatial, c)` and
+a coordinate field `(*out_spatial, ndim)` to the sampled values
+`(*out_spatial, c)`.  `coords[..., d]` is the floating-point
+position along input axis `d`.  Leading batch axes are composed by
+callers ([`spatial_transform`](../nitrix-geometry-grid/spatial_transform.qmd) vmaps the core); a method only
+sees the unbatched core shapes.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:Interpolator.sample -->
+```python
+sample(image: Float[Array, '*spatial c'], coords: Float[Array, '*out_spatial ndim'], *, mode: BoundaryMode, cval: float) -> Float[Array, '*out_spatial c']
+```
+<!-- nitrix:/gen -->
+
+Sample the image at continuous coordinates with this kernel.
+
+
+<!-- nitrix:gen dims:Interpolator -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `c` | feature channels (channels-last) |
+| `*out_spatial` | the output grid's spatial axes (variadic) |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->

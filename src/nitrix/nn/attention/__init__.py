@@ -3,16 +3,18 @@
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 # isort: skip_file
 """
-nitrix.nn.attention -- scaled-dot-product / flash attention.
+Scaled-dot-product / flash attention.
 
-Public ``scaled_dot_product_attention`` with three-level backend
-selection (SPEC §3.2).  The two-tier parity contract (suite plan §4): the
-``jax`` reference is the bit-faithful oracle; ``pallas-cuda`` is the fused
-flash path (suite Phase 2), certified ``pallas-cuda ≈ jax`` only inside
-nitrix.  ilex pins its own forward-parity to ``backend='jax'``.
+The public entry point :func:`scaled_dot_product_attention` supports
+three-level backend selection.  Under the two-tier parity contract the
+``'jax'`` reference is the bit-faithful oracle and ``'pallas-cuda'`` is the
+fused flash path, certified equivalent to the reference (:math:`\\text{pallas-cuda}
+\\approx \\text{jax}`) only inside nitrix; downstream consumers pin their own
+forward-parity oracle to ``backend='jax'``.
 
-Until the fused kernel lands, an explicit / auto-resolved ``pallas-cuda``
-request falls back to the reference with a loud ``NitrixBackendFallback``.
+Until the fused kernel lands, an explicit or auto-resolved ``'pallas-cuda'``
+request falls back to the reference with a loud ``NitrixBackendFallback``
+warning.
 """
 
 from __future__ import annotations
@@ -67,11 +69,37 @@ def _attention_pallas(
     scale: float,
     causal: bool,
 ) -> Optional[Float[Array, '... h s d_v']]:
-    """Pallas dispatch; ``None`` if the kernel rejects the shape / host.
+    """Dispatch to the fused Pallas attention kernel, or signal it is unusable.
 
-    Import-on-call so a Pallas-broken install still reaches the JAX
-    fallback.  Catches only ``PallasNotTileable`` -- a real kernel failure
-    is not silently swallowed.
+    The kernel module is imported on call so that a Pallas-broken install
+    still reaches the JAX fallback rather than failing at import time.  Only
+    ``PallasNotTileable`` (the kernel declining an unsupported shape or host)
+    is caught; any other exception is a genuine kernel failure and is not
+    silently swallowed.
+
+    Parameters
+    ----------
+    q, k, v
+        Query / key / value, layout ``(..., h, s, d)`` / ``(..., h, t, d)`` /
+        ``(..., h, t, d_v)``.
+    bias
+        Optional additive logit bias broadcast to ``(..., h, s, t)``, or
+        ``None``.
+    mask
+        Optional boolean keep-mask (``True`` keeps an entry) broadcast to
+        ``(..., h, s, t)``, or ``None``.
+    scale
+        Softmax temperature applied to the query-key dot product.
+    causal
+        If ``True``, apply a causal keep-mask so query ``i`` attends only to
+        keys ``j <= i``.
+
+    Returns
+    -------
+    Optional[Float[Array, '... h s d_v']]
+        Attention output of shape ``(..., h, s, d_v)`` when the fused kernel
+        runs, or ``None`` if the kernel is unavailable or rejects the shape /
+        host (signalling the caller to fall back to the reference path).
     """
     try:
         from ..._kernels.cuda.attention import (
@@ -108,38 +136,55 @@ def scaled_dot_product_attention(
 ) -> Float[Array, '... h s d_v']:
     """Scaled-dot-product attention with backend dispatch.
 
-    Computes ``softmax(scale * q @ kᵀ + bias  [masked]) @ v`` over the key
-    axis ``t`` (see :func:`reference_scaled_dot_product_attention` for the
-    math).  ``backend`` selects the implementation:
+    Computes :math:`\\operatorname{softmax}(\\text{scale} \\cdot q k^{\\top} +
+    \\text{bias}\\ [\\text{masked}])\\, v` over the key axis ``t`` (see
+    :func:`reference_scaled_dot_product_attention` for the full definition).
+    The ``backend`` argument selects the implementation:
 
     - ``'jax'`` -- the pure-JAX reference (the bit-faithful oracle).
-    - ``'pallas-cuda'`` -- the fused flash path on Ampere+ (suite Phase 2);
-      currently falls back to the reference with a loud warning.
-    - ``'auto'`` (default) -- ``pallas-cuda`` on Ampere+ NVIDIA, else
-      ``'jax'`` (see ``nitrix._internal.backend``).
+    - ``'pallas-cuda'`` -- the fused flash path on Ampere+; currently falls
+      back to the reference with a loud warning until the kernel lands.
+    - ``'auto'`` (default) -- ``'pallas-cuda'`` on Ampere+ NVIDIA hardware,
+      else ``'jax'``.
 
     Parameters
     ----------
     q, k, v
-        Query / key / value, layout ``(..., h, s, d)`` / ``(..., h, t, d)``
-        / ``(..., h, t, d_v)``.  The module owns heads / windowing; the
-        kernel sees already-partitioned ``q``/``k``/``v``.
-    bias, mask, scale, causal, qk_norm
-        As in :func:`reference_scaled_dot_product_attention`.
+        Query / key / value, layout ``(..., h, s, d)`` / ``(..., h, t, d)`` /
+        ``(..., h, t, d_v)``.  Head partitioning and windowing are the
+        caller's responsibility; this function sees already-partitioned
+        ``q`` / ``k`` / ``v``.  ``q`` and ``k`` share head dim ``d``; ``k``
+        and ``v`` share key length ``t``.  Query length ``s`` may differ from
+        ``t`` (cross-attention).
+    bias
+        Optional additive logit bias (e.g. a relative-position table),
+        broadcast to ``(..., h, s, t)``.
+    mask
+        Optional boolean keep-mask (``True`` keeps an entry), broadcast to
+        ``(..., h, s, t)`` and combined with ``causal`` by logical-and.
+    scale
+        Softmax temperature; defaults to :math:`1 / \\sqrt{d}`.
+    causal
+        If ``True``, query ``i`` attends only to keys ``j <= i`` (indices
+        aligned at 0, the standard self-attention convention).
+    qk_norm
+        If ``True``, RMS-normalise ``q`` and ``k`` over the head dim before
+        the dot product (QK-norm; logit-growth control at depth / scale).
     backend
-        ``'auto'`` / ``'pallas-cuda'`` / ``'jax'``.
+        Execution engine: ``'auto'``, ``'pallas-cuda'`` or ``'jax'``.
 
     Returns
     -------
-    Attention output of shape ``(..., h, s, d_v)``.
+    Float[Array, '... h s d_v']
+        Attention output of shape ``(..., h, s, d_v)``.
 
-    Differentiability
-    -----------------
-    The reference path is autodiff-native.  On the fused path, ``qk_norm`` is a
-    pure-elementwise RMS pre-op applied *outside* the kernel's ``custom_vjp``,
-    so autodiff chains its VJP onto the unchanged fused forward / backward (the
-    in-kernel tile-fusion of the norm is a later bandwidth-only optimisation).
-    ``qk_norm=False`` is byte-identical to the no-norm path.
+    Notes
+    -----
+    The reference path is autodiff-native.  On the fused path, ``qk_norm`` is
+    a pure-elementwise RMS pre-op applied *outside* the kernel's custom VJP,
+    so autodiff chains its VJP onto the unchanged fused forward / backward
+    (in-kernel tile-fusion of the norm is a later bandwidth-only
+    optimisation).  ``qk_norm=False`` is byte-identical to the no-norm path.
     """
     _validate(q, k, v)
     resolved_scale = default_scale(q.shape[-1]) if scale is None else scale

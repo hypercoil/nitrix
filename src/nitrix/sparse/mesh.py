@@ -4,29 +4,30 @@
 """
 Triangle-mesh sparse adjacency constructors.
 
-Supports two mesh families with the same ``Mesh`` representation:
+Supports two mesh families with the same :class:`Mesh` representation:
 
-- **Arbitrary triangulations**: ``Mesh(vertices, faces)`` from
+- **Arbitrary triangulations**: :class:`Mesh` from
   user-supplied tensors.  The k-ring adjacency, edge incidence,
   and cotangent Laplacian are all derived combinatorially from
   ``faces``.
-- **Icosphere**: ``icosphere(n_iterations)`` builds the canonical
+- **Icosphere**: :func:`icosphere` builds the canonical
   spherical mesh via recursive subdivision of the icosahedron.
-  Vertex count ``10 * 4^n + 2``: ``n=0`` -> 12 (icosahedron),
-  ``n=7`` -> 163842 (FreeSurfer's "ico7").
+  The vertex count follows :math:`10 \\cdot 4^{n} + 2`: :math:`n=0`
+  gives 12 (the icosahedron), :math:`n=7` gives 163842 (FreeSurfer's
+  "ico7").
 
-Operators returned as ``ELL`` for ``semiring_ell_matmul``
-compatibility.
+Operators are returned as an :class:`~nitrix.sparse.ell.ELL` for
+:func:`~nitrix.semiring.semiring_ell_matmul` compatibility.
 
 The construction is host-side NumPy -- the BFS for k-ring
 adjacency and the icosphere midpoint table are not natural in
 pure JAX (they need dynamic-shape intermediates).  The resulting
-``ELL`` is plain JAX from there.
+:class:`~nitrix.sparse.ell.ELL` is plain JAX from there.
 
 Use cases:
 
 - **Cortical surface analysis**: FreeSurfer-style icospheres for
-  cross-subject registration.  ``mesh_k_ring_adjacency`` gives
+  cross-subject registration.  :func:`mesh_k_ring_adjacency` gives
   the neighbourhood structure for smoothing / atlas alignment.
 - **Surface-based convolutional networks**: the k-ring adjacency
   is the natural support for ``spherical_conv`` (already in
@@ -134,7 +135,17 @@ class Mesh:
     ) -> Tuple[
         Tuple[Float[Array, 'n_vertices 3'], Int[Array, 'n_faces 3']], None
     ]:
-        """Children: ``(vertices, faces)``; no static aux."""
+        """Flatten the mesh into its pytree children and auxiliary data.
+
+        Returns
+        -------
+        children : tuple
+            The two array children ``(vertices, faces)``: the
+            ``(n_vertices, 3)`` vertex coordinates and the
+            ``(n_faces, 3)`` face-index topology.
+        aux_data : None
+            No static auxiliary data (both fields are array children).
+        """
         return (self.vertices, self.faces), None
 
     @classmethod
@@ -155,9 +166,17 @@ class Mesh:
 def _icosahedron() -> Tuple[NDArray[Any], NDArray[Any]]:
     """Base icosahedron: 12 vertices, 20 faces.
 
-    Coordinates from the standard ``(±1, ±φ, 0)``-permutation
-    construction with ``φ = (1 + √5) / 2``.  All vertices lie on
-    the unit sphere after normalisation.
+    Coordinates from the standard cyclic-permutation construction on
+    :math:`(\\pm 1, \\pm \\varphi, 0)` with the golden ratio
+    :math:`\\varphi = (1 + \\sqrt{5}) / 2`.  All vertices lie on the
+    unit sphere after normalisation.
+
+    Returns
+    -------
+    verts : (12, 3) ndarray
+        Unit-sphere vertex coordinates (``float64``).
+    faces : (20, 3) ndarray
+        Oriented per-face vertex indices (``int64``).
     """
     phi = (1.0 + np.sqrt(5.0)) / 2.0
     verts_unnorm = np.array(
@@ -217,16 +236,28 @@ def _subdivide(
     Vertex / face counts grow by 4x faces and approximately 4x
     vertices (the exact growth is ``new_v = old_v + new_edges``).
 
+    Parameters
+    ----------
+    verts : (n_verts, 3) ndarray
+        Coarse-level vertex coordinates on the unit sphere.
+    faces : (n_faces, 3) ndarray
+        Coarse-level oriented face-index topology.
+
     Returns
     -------
-    ``(new_verts, new_faces, parents)`` where ``parents`` is an
-    ``(n_new_verts, 2)`` ``int64`` array giving the parentage of
-    each new vertex relative to the **coarse** vertex set:
+    new_verts : (n_new_verts, 3) ndarray
+        Refined vertex coordinates (coarse vertices preserved in place,
+        followed by the projected edge midpoints).
+    new_faces : (4 * n_faces, 3) ndarray
+        Refined face-index topology (each coarse triangle split into 4).
+    parents : (n_new_verts, 2) ndarray
+        ``int64`` parentage of each new vertex relative to the
+        **coarse** vertex set:
 
-    - For a coarse-original vertex ``v`` (preserved in place at the
-      same index), ``parents[v] = (v, v)``.
-    - For an edge-midpoint vertex with parent coarse edge
-      ``(a, b)`` (sorted ``a < b``), ``parents[v] = (a, b)``.
+        - For a coarse-original vertex ``v`` (preserved in place at the
+          same index), ``parents[v] = (v, v)``.
+        - For an edge-midpoint vertex with parent coarse edge
+          ``(a, b)`` (sorted ``a < b``), ``parents[v] = (a, b)``.
     """
     midpoint_cache: dict[Tuple[int, int], int] = {}
     new_verts = verts.tolist()
@@ -267,14 +298,15 @@ def icosphere(n_iterations: int = 0) -> Mesh:
     Parameters
     ----------
     n_iterations
-        Subdivision count.  ``0`` -> 12 vertices (base icosahedron).
-        ``n`` -> ``10 * 4^n + 2`` vertices:
+        Subdivision count.  ``0`` gives 12 vertices (base icosahedron).
+        ``n`` gives :math:`10 \\cdot 4^{n} + 2` vertices:
         ``n=1`` -> 42, ``n=2`` -> 162, ..., ``n=7`` -> 163842
         (matches FreeSurfer's ``ico7``).
 
     Returns
     -------
-    ``Mesh`` with unit-sphere vertices and oriented faces.
+    Mesh
+        A :class:`Mesh` with unit-sphere vertices and oriented faces.
     """
     if n_iterations < 0:
         raise ValueError(f'n_iterations must be >= 0; got {n_iterations}.')
@@ -296,11 +328,12 @@ def icosphere(n_iterations: int = 0) -> Mesh:
 class IcosphereHierarchy:
     """Sequence of icosphere meshes at subdivision levels ``0..max_level``.
 
-    Built by ``icosphere_hierarchy(max_level)``.  Holds the per-level
+    Built by :func:`icosphere_hierarchy`.  Holds the per-level
     meshes plus the parent-child bookkeeping needed by
-    ``icosphere_cross_level_adjacency`` and ``icosphere_bary_upsampler``
-    to construct the cross-level ELLs in O(n_vertices) without
-    re-running subdivision.
+    :func:`icosphere_cross_level_adjacency` and
+    :func:`icosphere_bary_upsampler` to construct the cross-level
+    :class:`~nitrix.sparse.ell.ELL` operators in
+    :math:`O(n_{\\text{vertices}})` without re-running subdivision.
 
     Attributes
     ----------
@@ -327,7 +360,9 @@ class IcosphereHierarchy:
     plain JAX, so the downstream matmul / pool / upsample paths
     stay GPU-native.
 
-    Unlike ``Mesh`` / ``ELL`` / ``SectionedELL``, ``IcosphereHierarchy`` is
+    Unlike :class:`Mesh` / :class:`~nitrix.sparse.ell.ELL` /
+    :class:`~nitrix.sparse.ell_sectioned.SectionedELL`,
+    :class:`IcosphereHierarchy` is
     **deliberately not registered as a JAX pytree**.  Its ``parents`` tables
     are host-side NumPy construction metadata (unhashable as static aux), and
     the hierarchy is a *construction artefact*: a consumer uses it once on the
@@ -360,8 +395,9 @@ def icosphere_hierarchy(max_level: int) -> IcosphereHierarchy:
 
     Returns
     -------
-    ``IcosphereHierarchy`` with ``meshes`` and ``parents`` tables
-    populated (``parents[0] is None``).
+    IcosphereHierarchy
+        An :class:`IcosphereHierarchy` with ``meshes`` and ``parents``
+        tables populated (``parents[0] is None``).
 
     Notes
     -----
@@ -405,7 +441,7 @@ def icosphere_hierarchy_from_levels(
     """Package caller-supplied per-level meshes + parent tables into a hierarchy.
 
     Use this when the subdivision hierarchy does **not** come from
-    nitrix's own math-canonical ``icosphere`` -- most importantly when
+    nitrix's own math-canonical :func:`icosphere` -- most importantly when
     the per-level meshes are an external icosphere-subdivision family
     with a different vertex ordering and coordinates, e.g. FreeSurfer's
     ``fsaverage{0..6}.sphere``.  Pre-trained surface models (SUGAR,
@@ -415,14 +451,14 @@ def icosphere_hierarchy_from_levels(
     **nitrix does not source the topology.**  Reading FreeSurfer
     ``.sphere`` binaries (``nibabel.freesurfer.read_geometry``),
     resolving ``$SUBJECTS_DIR``, or loading any neuroimaging container
-    is outside nitrix's dependency contract (SPEC §6.2: no ``nibabel``,
-    no filesystem / container concerns -- those live in ``thrux`` or the
+    is outside nitrix's dependency contract (no ``nibabel``, no
+    filesystem / container concerns -- those live in ``thrux`` or the
     consuming port).  The caller reads the files and hands nitrix plain
     arrays; this constructor validates them and produces the same
-    ``IcosphereHierarchy`` that ``icosphere_hierarchy`` builds.  Every
-    cross-level operator -- ``icosphere_cross_level_adjacency``,
-    ``icosphere_bary_upsampler``, ``mesh_pool_max``,
-    ``mesh_coarsen_meanpool`` -- then works unchanged and with no
+    :class:`IcosphereHierarchy` that :func:`icosphere_hierarchy` builds.
+    Every cross-level operator -- :func:`icosphere_cross_level_adjacency`,
+    :func:`icosphere_bary_upsampler`, :func:`mesh_pool_max`,
+    :func:`mesh_coarsen_meanpool` -- then works unchanged and with no
     topology-source branching, because they depend only on the parent
     tables and per-level vertex counts, not on the coordinates being
     math-canonical.
@@ -450,7 +486,8 @@ def icosphere_hierarchy_from_levels(
 
     Returns
     -------
-    ``IcosphereHierarchy``.
+    IcosphereHierarchy
+        The validated :class:`IcosphereHierarchy`.
 
     Raises
     ------
@@ -545,28 +582,31 @@ def icosphere_cross_level_adjacency(
     at real (vertex, child) entries and ``0`` at padding.  This serves
     both downstream consumers without a per-consumer rebuild:
 
-    - ``mesh_pool_max(adj, fine_features)`` ignores the values (it
-      substitutes the TROPICAL_MAX_PLUS identity internally), so the
+    - :func:`mesh_pool_max` ignores the values (it
+      substitutes the ``TROPICAL_MAX_PLUS`` identity internally), so the
       indicator is harmless there.
-    - ``mesh_coarsen_meanpool(adj, fine_features)`` reads the indicator
+    - :func:`mesh_coarsen_meanpool` reads the indicator
       directly as the per-edge weight and as the per-row count, so a
       row-mean over the real children falls out for free.
 
     Parameters
     ----------
     hierarchy
-        ``IcosphereHierarchy`` produced by ``icosphere_hierarchy``.
+        An :class:`IcosphereHierarchy` produced by
+        :func:`icosphere_hierarchy`.
     coarse_level, fine_level
         Must be consecutive: ``fine_level == coarse_level + 1``.
         Multi-level pooling is composed by the consumer.
 
     Returns
     -------
-    ``ELL`` of shape ``(n_coarse, n_fine)`` with
-    ``k_max = 1 + max_coarse_degree`` (6 for the base icosahedron,
-    7 for every subdivided level).  ``values`` carry a ``1.0 / 0.0``
-    validity indicator (real entries / padding); ``identity`` is the
-    REAL identity ``0.0``.
+    ELL
+        An :class:`~nitrix.sparse.ell.ELL` of shape
+        ``(n_coarse, n_fine)`` with ``k_max = 1 + max_coarse_degree``
+        (6 for the base icosahedron, 7 for every subdivided level).
+        ``values`` carry a ``1.0 / 0.0`` validity indicator (real
+        entries / padding); ``identity`` is the ``REAL`` identity
+        ``0.0``.
     """
     _validate_consecutive(hierarchy, coarse_level, fine_level)
     n_coarse = hierarchy.meshes[coarse_level].n_vertices
@@ -626,20 +666,23 @@ def icosphere_bary_upsampler(
     - Midpoint fine vertex of coarse edge ``(a, b)``: two sources
       (``a``, ``b``) with weights ``(0.5, 0.5)``.
 
-    Feeds ``mesh_bary_upsample(bary_ell, coarse_features)`` to
+    Feeds :func:`mesh_bary_upsample` to
     interpolate per-vertex coordinates or features from the coarse
     level to the fine level.
 
     Parameters
     ----------
     hierarchy
-        ``IcosphereHierarchy`` produced by ``icosphere_hierarchy``.
+        An :class:`IcosphereHierarchy` produced by
+        :func:`icosphere_hierarchy`.
     coarse_level, fine_level
         Must be consecutive: ``fine_level == coarse_level + 1``.
 
     Returns
     -------
-    ``ELL`` of shape ``(n_fine, n_coarse)`` with ``k_max = 2``.
+    ELL
+        An :class:`~nitrix.sparse.ell.ELL` of shape
+        ``(n_fine, n_coarse)`` with ``k_max = 2``.
     """
     _validate_consecutive(hierarchy, coarse_level, fine_level)
     n_coarse = hierarchy.meshes[coarse_level].n_vertices
@@ -681,7 +724,16 @@ def icosphere_bary_upsampler(
 def _edges_from_faces(faces_np: NDArray[Any]) -> NDArray[Any]:
     """Return the unique undirected edge list from a face list.
 
-    ``edges[e] = [i, j]`` with ``i < j``; one row per undirected edge.
+    Parameters
+    ----------
+    faces_np : (n_faces, 3) ndarray
+        Per-face vertex indices.
+
+    Returns
+    -------
+    (n_edges, 2) ndarray
+        Unique undirected edges: ``edges[e] = [i, j]`` with ``i < j``,
+        one row per edge, sorted lexicographically.
     """
     e = np.concatenate(
         [
@@ -699,7 +751,23 @@ def _onering_adj_list(
     faces_np: NDArray[Any],
     n_vertices: int,
 ) -> list[list[int]]:
-    """Per-vertex 1-ring neighbour lists (NumPy/host construction)."""
+    """Per-vertex 1-ring neighbour lists (NumPy/host construction).
+
+    Parameters
+    ----------
+    faces_np : (n_faces, 3) ndarray
+        Per-face vertex indices.
+    n_vertices : int
+        Total number of vertices (fixes the output length so isolated
+        vertices get an empty neighbour list rather than being dropped).
+
+    Returns
+    -------
+    list of list of int
+        Length ``n_vertices``; entry ``v`` is the list of vertices
+        sharing an edge with ``v`` (each undirected edge contributes to
+        both endpoints).
+    """
     edges = _edges_from_faces(faces_np)
     adj: List[List[int]] = [[] for _ in range(n_vertices)]
     for i, j in edges:
@@ -712,7 +780,23 @@ def _kring_adj_list(
     onering: list[list[int]],
     k: int,
 ) -> list[list[int]]:
-    """BFS expansion of 1-ring adjacency to k-ring."""
+    """BFS expansion of 1-ring adjacency to k-ring.
+
+    Parameters
+    ----------
+    onering : list of list of int
+        Per-vertex 1-ring neighbour lists (as from
+        :func:`_onering_adj_list`).
+    k : int
+        Ring depth: the number of breadth-first expansion steps from
+        each vertex.
+
+    Returns
+    -------
+    list of list of int
+        Per-vertex k-ring neighbour lists, each sorted ascending and
+        with the source vertex itself removed (strict neighbours).
+    """
     n = len(onering)
     out = [set([v]) for v in range(n)]  # include self
     frontiers = [set([v]) for v in range(n)]
@@ -743,7 +827,29 @@ _AUTO_SECTION_RATIO = 2.0
 
 
 def _resolve_format(fmt: str, degrees: Sequence[int]) -> str:
-    """Resolve a ``format=`` request to ``'ell'`` or ``'sectioned'``."""
+    """Resolve a ``format=`` request to ``'ell'`` or ``'sectioned'``.
+
+    Parameters
+    ----------
+    fmt : str
+        The requested format: ``'ell'``, ``'sectioned'``, or ``'auto'``.
+    degrees : sequence of int
+        Per-row degrees (neighbour-set sizes), consulted only when
+        ``fmt == 'auto'`` to decide whether the degree spread is wide
+        enough to warrant a sectioned layout.
+
+    Returns
+    -------
+    str
+        Either ``'ell'`` or ``'sectioned'``.  For ``'auto'``, resolves to
+        ``'sectioned'`` when the max/median degree ratio exceeds the
+        section threshold, else ``'ell'``.
+
+    Raises
+    ------
+    ValueError
+        If ``fmt`` is not one of ``'ell'``, ``'sectioned'``, ``'auto'``.
+    """
     if fmt in ('ell', 'sectioned'):
         return fmt
     if fmt != 'auto':
@@ -785,19 +891,24 @@ def mesh_k_ring_adjacency(
         If ``True``, every vertex's neighbour list includes itself.
         Default ``False`` (strict adjacency).
     format
-        ``'ell'`` (default) returns a flat ``ELL`` padded to the global
+        ``'ell'`` (default) returns a flat
+        :class:`~nitrix.sparse.ell.ELL` padded to the global
         max degree -- byte-identical to the prior behaviour.
-        ``'sectioned'`` returns a degree-bucketed ``SectionedELL`` (avoids
+        ``'sectioned'`` returns a degree-bucketed
+        :class:`~nitrix.sparse.ell_sectioned.SectionedELL` (avoids
         the flat-padding cliff on irregular-valence meshes).  ``'auto'``
         picks ``'sectioned'`` only when the max/median degree ratio exceeds
         ~2 (near-uniform meshes such as the icosphere / fsaverage stay flat).
 
     Returns
     -------
-    ``ELL`` (``format='ell'``) or ``SectionedELL`` (``'sectioned'``) of
-    shape ``(n_vertices, n_vertices)``; both feed ``sparse.apply_operator``.
-    The flat ``ELL`` has ``k_max = max neighbour-set size`` (pad rows below
-    k_max use the ELL identity).
+    ELL or SectionedELL
+        An :class:`~nitrix.sparse.ell.ELL` (``format='ell'``) or
+        :class:`~nitrix.sparse.ell_sectioned.SectionedELL`
+        (``'sectioned'``) of shape ``(n_vertices, n_vertices)``; both
+        feed ``sparse.apply_operator``.  The flat ``ELL`` has
+        ``k_max = max neighbour-set size`` (pad rows below ``k_max`` use
+        the ELL identity).
 
     Notes
     -----
@@ -874,6 +985,13 @@ def _cotangent_weights(
     edge weight in the assembled Laplacian is the sum of cot/2 over
     the (one or two) triangles incident to the edge.
 
+    Parameters
+    ----------
+    vertices_np : (n_vertices, 3) ndarray
+        Per-vertex coordinates.
+    faces_np : (n_faces, 3) ndarray
+        Per-face vertex indices.
+
     Returns
     -------
     ``(n_faces, 3)`` array where entry ``[f, k]`` is the cotangent
@@ -914,42 +1032,46 @@ def mesh_cotangent_laplacian(
     The standard finite-element / discrete-exterior-calculus
     Laplacian on a triangle mesh:
 
-    ``(L u)[i] = sum_{j ∈ N(i)} w_ij (u[j] - u[i])``
+    :math:`(L u)_i = \\sum_{j \\in N(i)} w_{ij} (u_j - u_i)`
 
-    where ``w_ij = (cot α_ij + cot β_ij) / 2`` with ``α_ij`` and
-    ``β_ij`` the angles opposite edge ``(i, j)`` in the two
-    triangles sharing that edge (or only one cot for boundary
-    edges in an open mesh).
+    where :math:`w_{ij} = (\\cot \\alpha_{ij} + \\cot \\beta_{ij}) / 2`
+    with :math:`\\alpha_{ij}` and :math:`\\beta_{ij}` the angles
+    opposite edge :math:`(i, j)` in the two triangles sharing that edge
+    (or only one cotangent for boundary edges in an open mesh).
 
-    The diagonal entry is ``L_ii = -sum_j w_ij``, so each row sums
-    to zero (the Laplacian sends constants to zero).
+    The diagonal entry is :math:`L_{ii} = -\\sum_j w_{ij}`, so each row
+    sums to zero (the Laplacian sends constants to zero).
 
     Parameters
     ----------
     mesh
         Triangle mesh.
     format
-        ``'ell'`` (default) flat ``ELL``; ``'sectioned'`` degree-bucketed
-        ``SectionedELL``; ``'auto'`` sections only when the degree spread is
-        wide (icosphere / fsaverage stay flat).  Both feed
-        ``sparse.apply_operator``.  The diagonal-first column layout (below)
-        holds only for the flat ``ELL``.
+        ``'ell'`` (default) flat :class:`~nitrix.sparse.ell.ELL`;
+        ``'sectioned'`` degree-bucketed
+        :class:`~nitrix.sparse.ell_sectioned.SectionedELL`; ``'auto'``
+        sections only when the degree spread is wide (icosphere /
+        fsaverage stay flat).  Both feed ``sparse.apply_operator``.  The
+        diagonal-first column layout (below) holds only for the flat
+        ``ELL``.
 
     Returns
     -------
-    ``ELL`` or ``SectionedELL`` of shape ``(n_vertices, n_vertices)``.  For
-    the flat ``ELL``, ``k_max`` is the 1-ring max degree plus 1 (the diagonal
-    entry).
+    ELL or SectionedELL
+        An :class:`~nitrix.sparse.ell.ELL` or
+        :class:`~nitrix.sparse.ell_sectioned.SectionedELL` of shape
+        ``(n_vertices, n_vertices)``.  For the flat ``ELL``, ``k_max`` is
+        the 1-ring max degree plus 1 (the diagonal entry).
 
     Notes
     -----
     Construction is host-side; the matvec via
-    ``semiring_ell_matmul`` is pure JAX.
+    :func:`~nitrix.semiring.semiring_ell_matmul` is pure JAX.
 
     Sign convention: returns the **positive-semidefinite** form
-    ``-Δ`` (eigenvalues ``≥ 0``).  For the negative-semidefinite
-    form (matching the continuous Laplacian sign), negate the
-    output's ``values``.
+    :math:`-\\Delta` (eigenvalues :math:`\\geq 0`).  For the
+    negative-semidefinite form (matching the continuous Laplacian
+    sign), negate the output's ``values``.
     """
     verts_np = np.asarray(mesh.vertices, dtype=np.float64)
     faces_np = np.asarray(mesh.faces)
@@ -1057,13 +1179,35 @@ def _apply_shared_ell(
 ) -> Num[Array, '... m d']:
     """Apply a *shared* (un-batched) ELL to possibly-batched features.
 
-    ``semiring_ell_matmul`` vmaps over leading dims that are present on
-    *all* of ``values`` / ``indices`` / ``B``.  The cross-level wrappers
-    hold a single 2-D ELL (one per (coarse, fine) level pair) and apply
-    it to features ``(..., n, d)`` whose leading axes are batch / channel
-    groupings.  We vmap the 2-D core over those leading axes so the same
-    operator broadcasts across the batch without materialising a batched
-    copy of the ELL.
+    :func:`~nitrix.semiring.semiring_ell_matmul` vmaps over leading dims
+    that are present on *all* of ``values`` / ``indices`` / ``B``.  The
+    cross-level wrappers hold a single 2-D ELL (one per (coarse, fine)
+    level pair) and apply it to features ``(..., n, d)`` whose leading
+    axes are batch / channel groupings.  We vmap the 2-D core over those
+    leading axes so the same operator broadcasts across the batch without
+    materialising a batched copy of the ELL.
+
+    Parameters
+    ----------
+    values : (m, k_max) array
+        Per-row ELL values of the shared 2-D operator.
+    indices : (m, k_max) array
+        Per-row ELL column indices into the ``n``-column space.
+    B : (..., n, d) array
+        Operand features; any leading axes are treated as batch / channel
+        groupings over which the shared operator is broadcast.
+    semiring
+        Algebra under which the matmul reduces (e.g. ``REAL``,
+        ``TROPICAL_MAX_PLUS``).
+    n_cols : int
+        Number of columns ``n`` of the operator (the operand's
+        second-to-last dimension).
+
+    Returns
+    -------
+    (..., m, d) array
+        The matmul result, one output row per operator row, with the
+        operand's leading batch axes preserved.
     """
     from ..semiring import semiring_ell_matmul
 
@@ -1092,19 +1236,20 @@ def mesh_pool_max(
 
     For each coarse vertex ``i``, returns the max of fine-vertex
     features at the positions ``cross_level_adjacency.indices[i, :]``.
-    Equivalent to a ``semiring_ell_matmul`` under
+    Equivalent to a :func:`~nitrix.semiring.semiring_ell_matmul` under
     ``TROPICAL_MAX_PLUS`` with the ELL's ``values`` ignored (the
     max-plus reduction degenerates to ``max`` when all values are 0).
 
     Used in mesh hierarchies (e.g. icosphere-cascaded networks) for
     coarse-to-fine downsampling: ``cross_level_adjacency`` is the
-    ELL whose row ``i`` (coarse vertex) lists the fine vertices
-    that map to it under the subdivision rule.
+    :class:`~nitrix.sparse.ell.ELL` whose row ``i`` (coarse vertex) lists
+    the fine vertices that map to it under the subdivision rule.
 
     Parameters
     ----------
     cross_level_adjacency
-        ``ELL`` of shape ``(n_coarse, n_fine)``; row ``i`` indexes
+        An :class:`~nitrix.sparse.ell.ELL` of shape
+        ``(n_coarse, n_fine)``; row ``i`` indexes
         the fine vertices belonging to coarse vertex ``i``.  Stored
         ``values`` are ignored (replaced internally by zeros for
         the max-plus identity).
@@ -1140,30 +1285,32 @@ def mesh_coarsen_meanpool(
                     / (sum_p values[i, p])
 
     With the ``1.0 / 0.0`` validity indicator that
-    ``icosphere_cross_level_adjacency`` stores, this is a plain mean
+    :func:`icosphere_cross_level_adjacency` stores, this is a plain mean
     over the real children of coarse vertex ``i`` (the padding columns,
     weight ``0``, drop out of both sum and count).  A coarse vertex
     whose row is entirely padding returns zeros rather than ``NaN``.
 
-    This is the mean-pool sibling of ``mesh_pool_max`` (max over the
+    This is the mean-pool sibling of :func:`mesh_pool_max` (max over the
     same children).  It matches the "scatter-mean with self-loop"
     coarsening used by surface-domain encoders (e.g. SUGAR's
     ``IcosahedronPooling``): the coarse vertex's own previous-level
     feature is included because the coarse-original fine vertex is one
     of the children in the cross-level adjacency row.
 
-    The op is documented sugar over ``semiring_ell_matmul`` under
+    The op is documented sugar over
+    :func:`~nitrix.semiring.semiring_ell_matmul` under
     ``REAL``: the numerator is one matmul; the denominator is the
     per-row sum of ``values`` (no second matmul needed).
 
     Parameters
     ----------
     coarsen_ell
-        ``ELL`` of shape ``(n_coarse, n_fine)``; row ``i`` (coarse
+        An :class:`~nitrix.sparse.ell.ELL` of shape
+        ``(n_coarse, n_fine)``; row ``i`` (coarse
         vertex) lists the fine vertices belonging to coarse vertex
         ``i``, with ``values`` the per-edge weight (use the ``1.0 /
-        0.0`` indicator from ``icosphere_cross_level_adjacency`` for an
-        unweighted mean).
+        0.0`` indicator from :func:`icosphere_cross_level_adjacency` for
+        an unweighted mean).
     fine_features
         ``(..., n_fine, d)`` per-vertex fine-level features.
 
@@ -1191,7 +1338,7 @@ def mesh_unpool_max(
 ) -> Float[Array, '... n_fine d']:
     """Max-unpool coarse-level features back to a fine level.
 
-    Symmetric to ``mesh_pool_max``: the cross-level adjacency is
+    Symmetric to :func:`mesh_pool_max`: the cross-level adjacency is
     interpreted as fine-to-coarse (each row is a fine vertex,
     listing the coarse vertex / vertices it maps from), and the
     max-plus reduction produces a per-fine-vertex output.  In
@@ -1199,8 +1346,20 @@ def mesh_unpool_max(
     per fine vertex (each fine vertex has one parent coarse
     vertex), in which case "max" reduces to the trivial gather.
 
-    Parameters / Returns mirror ``mesh_pool_max`` with the levels
-    swapped.
+    Parameters
+    ----------
+    cross_level_adjacency
+        An :class:`~nitrix.sparse.ell.ELL` of shape
+        ``(n_fine, n_coarse)``; row ``i`` (fine vertex) indexes the
+        coarse vertices it maps from.  Stored ``values`` are ignored
+        (replaced internally by zeros for the max-plus identity).
+    coarse_features
+        ``(..., n_coarse, d)`` per-vertex coarse-level features.
+
+    Returns
+    -------
+    (..., n_fine, d) array
+        Per-vertex fine-level features.
     """
     from ..semiring import TROPICAL_MAX_PLUS
 
@@ -1225,9 +1384,9 @@ def mesh_bary_upsample(
         out[i, :] = sum_k bary_ell.values[i, k]
                     * coarse_coords[bary_ell.indices[i, k], :]
 
-    Standard ``semiring_ell_matmul`` under ``REAL``; provided as a
-    named wrapper so mesh-hierarchy code reads at the right level
-    of abstraction.
+    Standard :func:`~nitrix.semiring.semiring_ell_matmul` under
+    ``REAL``; provided as a named wrapper so mesh-hierarchy code reads at
+    the right level of abstraction.
 
     The ``bary_ell`` is the "barycentric upsampler" structure:
     row ``i`` (fine vertex) lists the ``k`` coarse vertices that
@@ -1269,11 +1428,13 @@ def face_normals(
 ) -> Float[Array, 'n_faces 3']:
     """Unit per-face normals of a triangle mesh.
 
-    The normalised edge cross product ``(v1 - v0) x (v2 - v0) / ||.||`` for
+    The normalised edge cross product
+    :math:`(v_1 - v_0) \\times (v_2 - v_0) / \\lVert \\cdot \\rVert` for
     each face, oriented by the face's vertex winding.  Distinct from the
     un-normalised, area-weighted face cross product
-    ``compute_vertex_normals`` accumulates onto vertices: here each face
-    normal is **unit** length, so it is the per-face surface direction
+    :func:`compute_vertex_normals` accumulates onto vertices: here each
+    face normal is **unit** length, so it is the per-face surface
+    direction
     (e.g. for a face-normal-consistency regulariser or a flat-shading
     normal), not an area weight.
 
@@ -1395,9 +1556,10 @@ def compute_vertex_normals(
 def face_areas(mesh: Mesh) -> Float[Array, 'n_faces']:
     """Per-face triangle area.
 
-    ``area_f = 1/2 * ||(v1 - v0) x (v2 - v0)||`` -- half the magnitude of
-    the face cross product (the same cross product
-    ``compute_vertex_normals`` accumulates, here taken as a magnitude).
+    :math:`\\text{area}_f = \\tfrac{1}{2} \\lVert (v_1 - v_0) \\times
+    (v_2 - v_0) \\rVert` -- half the magnitude of the face cross product
+    (the same cross product :func:`compute_vertex_normals` accumulates,
+    here taken as a magnitude).
 
     Parameters
     ----------
@@ -1423,8 +1585,9 @@ def vertex_areas(
     """Per-vertex surface area (the lumped mass-matrix diagonal).
 
     The area measure under every area-weighted surface operation:
-    ``M^{-1} L`` mean curvature, areal distortion, anatomical surface area,
-    and the backward-Euler geodesic-smoothing solve ``(M + tL) x = M x_0``.
+    :math:`M^{-1} L` mean curvature, areal distortion, anatomical surface
+    area, and the backward-Euler geodesic-smoothing solve
+    :math:`(M + t L) x = M x_0`.
 
     Two schemes, both partitioning each triangle's area among its three
     vertices (so ``sum(vertex_areas) == sum(face_areas)`` exactly for both):
@@ -1432,9 +1595,10 @@ def vertex_areas(
     - ``'barycentric'`` -- each face donates ``area / 3`` to each of its
       vertices.  Cheap, always non-negative, the safe fallback.
     - ``'voronoi'`` (default) -- the mixed Voronoi rule of Meyer et al.
-      (2003).  For a non-obtuse triangle, vertex ``i`` receives the
+      (2003).  For a non-obtuse triangle, vertex :math:`i` receives the
       circumcentric-dual (Voronoi) area
-      ``1/8 (cot(angle_k) |x_i - x_j|^2 + cot(angle_j) |x_i - x_k|^2)``.
+      :math:`\\tfrac{1}{8} (\\cot(\\text{angle}_k) \\lVert x_i - x_j
+      \\rVert^2 + \\cot(\\text{angle}_j) \\lVert x_i - x_k \\rVert^2)`.
       For an **obtuse** triangle the Voronoi cell falls outside the
       triangle, so the area is assigned ``area / 2`` to the obtuse vertex
       and ``area / 4`` to each of the others.  **This obtuse branch is
@@ -1457,6 +1621,13 @@ def vertex_areas(
     ------
     ValueError
         If ``scheme`` is not ``'voronoi'`` or ``'barycentric'``.
+
+    References
+    ----------
+    Meyer, M., Desbrun, M., Schröder, P., & Barr, A. H. (2003).
+    Discrete differential-geometry operators for triangulated
+    2-manifolds. In *Visualization and Mathematics III* (pp. 35-57).
+    Springer. https://doi.org/10.1007/978-3-662-05105-4_2
     """
     v = mesh.vertices
     f = mesh.faces
@@ -1519,32 +1690,39 @@ def mesh_mass_matrix(
 ) -> ELL:
     """Mass matrix ``M`` of a triangle mesh, as a (diagonal) ELL operator.
 
-    The companion of ``mesh_cotangent_laplacian`` (which is the unnormalised
-    *stiffness* ``L``): the discrete inner product that turns the stiffness
-    into a true Laplace-Beltrami operator ``M^{-1} L``.  The lumped mass is
-    diagonal -- ``M_ii = vertex_areas(mesh)[i]`` -- hence trivially
-    invertible, which is exactly what ``M^{-1} L`` mean curvature and the
-    ``(M + tL)`` backward-Euler smoothing solve need.
+    The companion of :func:`mesh_cotangent_laplacian` (which is the
+    unnormalised *stiffness* :math:`L`): the discrete inner product that
+    turns the stiffness into a true Laplace-Beltrami operator
+    :math:`M^{-1} L`.  The lumped mass is diagonal --
+    :math:`M_{ii} = \\text{vertex\\_areas}(\\text{mesh})_i` -- hence
+    trivially invertible, which is exactly what :math:`M^{-1} L` mean
+    curvature and the :math:`(M + t L)` backward-Euler smoothing solve
+    need.
 
-    Returned as a width-1 diagonal ``ELL`` so it composes through
-    ``sparse.apply_operator`` (``M @ x == vertex_areas[:, None] * x``); for
-    the common case the caller usually wants the diagonal vector directly
-    (use ``vertex_areas``).
+    Returned as a width-1 diagonal :class:`~nitrix.sparse.ell.ELL` so it
+    composes through ``sparse.apply_operator``
+    (``M @ x == vertex_areas[:, None] * x``); for the common case the
+    caller usually wants the diagonal vector directly (use
+    :func:`vertex_areas`).
 
-    Note (audit AI-A7 / INT-2): the shipped algorithms consume the **lumped mass
-    as the ``vertex_areas`` vector directly** (``mean_curvature`` forms
-    ``0.5 L v / area``; ``surface_smooth`` forms ``area * v + t L v``;
-    ``spectral_sphere_embedding`` uses ``1/sqrt(area)``), not this ELL.  The ELL
-    form is a convenience for symmetry with ``L`` (so ``M`` can flow through the
-    same ``apply_operator`` seam); it is *not* a load-bearing seam that any
-    algorithm currently requires.
+    Notes
+    -----
+    The shipped algorithms consume the lumped mass as the
+    :func:`vertex_areas` vector directly (mean curvature forms
+    :math:`0.5 \\, L v / \\text{area}`; surface smoothing forms
+    :math:`\\text{area} \\cdot v + t \\, L v`; the spectral sphere
+    embedding uses :math:`1 / \\sqrt{\\text{area}}`), not this ELL.  The
+    ELL form is a convenience for symmetry with :math:`L` (so :math:`M`
+    can flow through the same ``apply_operator`` seam); it is *not* a
+    load-bearing seam that any algorithm currently requires.
 
     Parameters
     ----------
     mesh
         Triangle mesh.
     scheme
-        Area scheme forwarded to ``vertex_areas`` (``'voronoi'`` default).
+        Area scheme forwarded to :func:`vertex_areas` (``'voronoi'``
+        default).
     lumped
         ``True`` (default) -- the diagonal lumped mass.  ``False`` (the
         consistent linear-FEM mass with off-diagonal coupling) is not yet
@@ -1552,7 +1730,9 @@ def mesh_mass_matrix(
 
     Returns
     -------
-    ``ELL`` of shape ``(n_vertices, n_vertices)`` with ``k_max = 1``.
+    ELL
+        An :class:`~nitrix.sparse.ell.ELL` of shape
+        ``(n_vertices, n_vertices)`` with ``k_max = 1``.
 
     Raises
     ------

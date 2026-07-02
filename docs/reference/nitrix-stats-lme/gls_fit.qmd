@@ -1,0 +1,57 @@
+---
+title: "gls_fit"
+generated: true
+description: "Voxelwise generalised least squares with a structured residual."
+---
+
+[‹ back to `nitrix.stats.lme`](../nitrix-stats-lme.qmd)
+
+*Re-exported here; defined in `nitrix.stats.lme._corrfit`.*
+
+<!-- nitrix:gen sig:gls_fit -->
+```python
+gls_fit(Y: Float[Array, 'V N'], X: Float[Array, 'N p'], *, group: Int[Array, 'N'], corr: Union[str, CorrSpec] = 'iid', time: Optional[Float[Array, 'N']] = None, weights: Optional[VarFunc] = None, n_iter: int = 15, damping: float = 1e-06, block: Optional[int] = None) -> GLSResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:gls_fit -->
+Voxelwise generalised least squares with a structured residual.
+
+Fits, per voxel, $y_v = X \beta_v + \varepsilon_v$ with a
+within-group structured residual
+$\operatorname{Cov}(\varepsilon_v) = \sigma_e^2
+\operatorname{diag}(g) R(\rho) \operatorname{diag}(g)$ -- `nlme`'s
+`gls(correlation=corAR1 / corCAR1 / corCompSymm, weights=varPower /
+varIdent)`.  $R$ is the correlation structure; $g$ the optional
+variance function (heteroscedasticity).  There is no random effect here; for
+a random effect *plus* a structured residual, use `fit_corr_lme`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:gls_fit -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `Y` | `Float` | `V` × `N` | — | `(V, N)` responses and `(N, p)` shared fixed-effect design (carries its own intercept). |
+| `X` | `Float` | `N` × `p` | — | `(V, N)` responses and `(N, p)` shared fixed-effect design (carries its own intercept). |
+| `group` | `Int` | `N` | — | `(N,)` integer grouping factor. The residual is correlated *within* groups and independent across them (block-diagonal `V`). |
+| `corr` | `Union[str, CorrSpec]` | — | `'iid'` | Correlation structure: `'ar1'` (discrete AR(1)), `'car1'` (continuous-time AR(1); pass `time`), `'cs'` (compound symmetry), `'iid'` (no correlation -- the default, for a pure variance-function fit), or a [`CorrSpec`](../nitrix-stats-lme/CorrSpec.qmd). |
+| `time` | `Optional[Float[Array, 'N']]` | — | `None` | `(N,)` observation times for `'car1'` (and to order `'ar1'` when the rows are not already in within-group time order). Defaults to the within-group appearance order (unit gaps). |
+| `weights` | `Optional[VarFunc]` | — | `None` | Optional residual **variance function** (heteroscedasticity): [`var_power`](../nitrix-stats-lme/var_power.qmd) ($\operatorname{Var} \sim \|v\|^{2\delta}$) or [`var_ident`](../nitrix-stats-lme/var_ident.qmd) (a separate variance per stratum). Composes with any `corr`; with `corr='iid'` it is a pure heteroscedastic GLS. |
+| `n_iter` | `int` | — | `15` | Newton iterations, damping factor, and the optional voxel-block size. |
+| `damping` | `float` | — | `1e-06` | Newton iterations, damping factor, and the optional voxel-block size. |
+| `block` | `Optional[int]` | — | `None` | Newton iterations, damping factor, and the optional voxel-block size. |
+
+**Returns** `GLSResult`. The per-voxel fit: `beta_hat`, `sigma_e_sq`, `rho`, `var_params`, `log_lik`, the GLS `fixed_cov`, and `df_resid = N - p`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:gls_fit -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `N` | observations — time points, subjects, or sampled points |
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

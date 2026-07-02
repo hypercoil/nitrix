@@ -1,0 +1,50 @@
+---
+title: "syn_pipeline"
+generated: true
+description: "Staged rigid -> affine -> SyN registration in one call."
+---
+
+[‹ back to `nitrix.register.recipes`](../nitrix-register-recipes.qmd)
+
+<!-- nitrix:gen sig:syn_pipeline -->
+```python
+syn_pipeline(moving: Float[Array, '*spatial'], fixed: Float[Array, '*spatial'], *, transform: Literal['rigid', 'affine', 'syn'] = 'syn', rigid_spec: Optional[RegistrationSpec] = None, affine_spec: Optional[RegistrationSpec] = None, syn_spec: Optional[SyNSpec] = None, force: Optional[Union[Force, Sequence[Force]]] = None, affine_restarts: Optional[int] = None) -> PipelineResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:syn_pipeline -->
+Staged rigid -> affine -> SyN registration in one call.
+
+The `antsRegistrationSyN` workhorse, composed from the leaf recipes: each
+stage **warm-starts** the next -- rigid (moment init) seeds affine
+(`init_transform`), the affine result seeds SyN (`init_affine`) -- so
+the SyN stage's returned `displacement` is the **full** fixed -> moving
+map (linear + non-linear).  `apply_transform(image, result)` then applies
+the whole composite.  Numerics only -- no image I/O (`thrux`).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:syn_pipeline -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `moving` | `Float` | `*spatial` | — | Single-channel images sharing a grid (the [`IndexSpace`](../nitrix-register/IndexSpace.qmd) norm). |
+| `fixed` | `Float` | `*spatial` | — | Single-channel images sharing a grid (the [`IndexSpace`](../nitrix-register/IndexSpace.qmd) norm). |
+| `transform` | `Literal['rigid', 'affine', 'syn']` | — | `'syn'` | How far to stage: `'rigid'`, `'affine'`, or `'syn'` (default). |
+| `rigid_spec` | `Optional[RegistrationSpec]` | — | `None` | Per-stage configuration; `None` -> a cross-modal-robust default ([`MI`](../nitrix-register/MI.qmd) linear stages, the default [`LNCCForce`](../nitrix-register/LNCCForce.qmd) SyN -- the antsRegistrationSyN convention). For a faster **within-modality** run pass [`SSD`](../nitrix-register/SSD.qmd) linear specs (the inverse-compositional fast path). |
+| `affine_spec` | `Optional[RegistrationSpec]` | — | `None` | Per-stage configuration; `None` -> a cross-modal-robust default ([`MI`](../nitrix-register/MI.qmd) linear stages, the default [`LNCCForce`](../nitrix-register/LNCCForce.qmd) SyN -- the antsRegistrationSyN convention). For a faster **within-modality** run pass [`SSD`](../nitrix-register/SSD.qmd) linear specs (the inverse-compositional fast path). |
+| `syn_spec` | `Optional[SyNSpec]` | — | `None` | Per-stage configuration; `None` -> a cross-modal-robust default ([`MI`](../nitrix-register/MI.qmd) linear stages, the default [`LNCCForce`](../nitrix-register/LNCCForce.qmd) SyN -- the antsRegistrationSyN convention). For a faster **within-modality** run pass [`SSD`](../nitrix-register/SSD.qmd) linear specs (the inverse-compositional fast path). |
+| `force` | `Optional[Union[Force, Sequence[Force]]]` | — | `None` | Per-stage configuration; `None` -> a cross-modal-robust default ([`MI`](../nitrix-register/MI.qmd) linear stages, the default [`LNCCForce`](../nitrix-register/LNCCForce.qmd) SyN -- the antsRegistrationSyN convention). For a faster **within-modality** run pass [`SSD`](../nitrix-register/SSD.qmd) linear specs (the inverse-compositional fast path). |
+| `affine_restarts` | `Optional[int]` | — | `None` | Multi-start count for the affine stage; `None` -> `4` for a histogram ([`MI`](../nitrix-register/MI.qmd) / [`CorrelationRatio`](../nitrix-register/CorrelationRatio.qmd)) affine metric (the non-deterministic GPU scatter), else `1`. |
+
+**Returns** `PipelineResult`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:syn_pipeline -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

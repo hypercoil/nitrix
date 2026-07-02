@@ -1,0 +1,45 @@
+---
+title: "gp_aic"
+generated: true
+description: "Per-element Akaike information criterion for a GP / HGP fit."
+---
+
+[‹ back to `nitrix.stats.gp`](../nitrix-stats-gp.qmd)
+
+<!-- nitrix:gen sig:gp_aic -->
+```python
+gp_aic(result: _ICResult) -> Float[Array, 'V']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:gp_aic -->
+Per-element Akaike information criterion for a GP / HGP fit.
+
+The marginal AIC $-2 l_R + 2 k$ (lower is better).  Uses the REML log
+marginal likelihood `log_mlik` (so it is comparable across kernels / ranks /
+amplitudes on the same data) and the effective degrees of freedom $k$
+(`_total_edf`) as the model complexity -- the mgcv-style marginal AIC.
+Like any REML criterion it is valid for models with the same fixed-effect
+structure (a different `parametric` design changes the restriction); within
+that, it is immediate for GP-vs-GP and GP-vs-spline (an
+[`hsgp_basis`](../nitrix-stats-basis/hsgp_basis.qmd) / kernel choice) selection.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:gp_aic -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `result` | `_ICResult` | — | — | A GP / HGP fit conforming to `_ICResult`. |
+
+**Returns** `Float` — shape `V`. The per-element AIC.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:gp_aic -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+<!-- nitrix:/gen -->

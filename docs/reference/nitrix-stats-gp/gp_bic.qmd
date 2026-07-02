@@ -1,0 +1,40 @@
+---
+title: "gp_bic"
+generated: true
+description: "Per-element Bayesian information criterion for a GP / HGP fit."
+---
+
+[‹ back to `nitrix.stats.gp`](../nitrix-stats-gp.qmd)
+
+<!-- nitrix:gen sig:gp_bic -->
+```python
+gp_bic(result: _ICResult) -> Float[Array, 'V']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:gp_bic -->
+Per-element Bayesian information criterion for a GP / HGP fit.
+
+The marginal BIC $-2 l_R + k \log N$ (lower is better), with $k$
+the effective degrees of freedom (`_total_edf`) and $N$ the number
+of observations; see [`gp_aic`](../nitrix-stats-gp/gp_aic.qmd) for the comparability caveat.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:gp_bic -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `result` | `_ICResult` | — | — | A GP / HGP fit conforming to `_ICResult`. |
+
+**Returns** `Float` — shape `V`. The per-element BIC.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:gp_bic -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+<!-- nitrix:/gen -->

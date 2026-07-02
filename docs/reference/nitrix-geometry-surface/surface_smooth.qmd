@@ -1,0 +1,62 @@
+---
+title: "surface_smooth"
+generated: true
+description: "Geodesic (along-surface) Gaussian smoothing by heat diffusion."
+---
+
+[‹ back to `nitrix.geometry.surface`](../nitrix-geometry-surface.qmd)
+
+<!-- nitrix:gen sig:surface_smooth -->
+```python
+surface_smooth(mesh: Mesh, values: Float[Array, '... n_vertices'], *, fwhm: float, area_scheme: Literal['voronoi', 'barycentric'] = 'voronoi', roi: Optional[Bool[Array, 'n_vertices']] = None, tol: float = 1e-06, maxiter: Optional[int] = None) -> Float[Array, '... n_vertices']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:surface_smooth -->
+Geodesic (along-surface) Gaussian smoothing by heat diffusion.
+
+Smooths a per-vertex scalar *along the surface* (not through Euclidean
+space) -- the correct smoother for `sulc` / `curv` / myelin / thickness
+maps and surface-GLM inputs.  One **backward-Euler** heat step solves the
+SPD system $(M + t L) x = M x_0$ for the lumped mass $M$
+(`vertex_areas`) and cotangent stiffness $L$
+(`mesh_cotangent_laplacian`), with diffusion time
+$t = \mathrm{fwhm}^2 / (16 \ln 2)$ (the Gaussian variance
+$\sigma^2 = 2t$, $\mathrm{FWHM} = 2 \sqrt{2 \ln 2}\,
+\sigma$).  The solve is matrix-free conjugate gradients (`cg`) --
+GPU-native and cuSolver-free.
+
+This is the nitrix-native geodesic smoother; it is **not** identical to
+Connectome Workbench's `-metric-smoothing` (a geodesic-distance-weighted
+Gaussian) -- a documented divergence.
+
+Conserves the area-weighted integral $\sum_i A_i x_i$ (since
+$\mathbf{1}^{\top} L = 0$) and fixes constants; `fwhm = 0` is the
+identity.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:surface_smooth -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mesh` | `Mesh` | — | — | Triangle mesh (concrete -- the operator is built host-side once). |
+| `values` | `Float` | `...` × `n_vertices` | — | Per-vertex field(s), shape `(..., n_vertices)` (vertex axis last). |
+| `fwhm` | `float` | — | — | Target full-width-at-half-maximum of the smoothing kernel, in the mesh's coordinate units. |
+| `area_scheme` | `Literal['voronoi', 'barycentric']` | — | `'voronoi'` | Vertex-area / mass scheme (`'voronoi'` default). |
+| `roi` | `Optional[Bool[Array, 'n_vertices']]` | — | `None` | Optional `(n_vertices,)` boolean cortex mask. Diffusion is given a **Neumann boundary** at the ROI edge (no flux across it), so values do not bleed across the medial wall (whose data are meaningless); out-of-ROI vertices are returned unchanged. This is the `wb_command -metric-smoothing -roi` guard. Requires a flat ELL Laplacian. |
+| `tol` | `float` | — | `1e-06` | Conjugate-gradient convergence tolerance. |
+| `maxiter` | `Optional[int]` | — | `None` | Conjugate-gradient iteration cap. |
+
+**Returns** `Float` — shape `...` × `n_vertices`. Smoothed field(s), same shape as `values`. Differentiable with respect to `values` (implicit CG rule).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:surface_smooth -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n_vertices` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

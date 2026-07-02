@@ -1,0 +1,49 @@
+---
+title: "ordinal_fit"
+generated: true
+description: "Mass-univariate ordinal regression (cumulative-link / proportional odds)."
+---
+
+[‹ back to `nitrix.stats.ordinal`](../nitrix-stats-ordinal.qmd)
+
+<!-- nitrix:gen sig:ordinal_fit -->
+```python
+ordinal_fit(Y: Int[Array, 'V N'], X: Float[Array, 'N p'], *, n_classes: int, link: str = 'logit', n_iter: int = 50, ridge: float = 1e-08, block: Optional[int] = None) -> OrdinalResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:ordinal_fit -->
+Mass-univariate ordinal regression (cumulative-link / proportional odds).
+
+Fits, per element, the ordered-categorical model $P(y_v \le k) =
+F(\theta_k - X \beta_v)$ for $y_v \in \{0, \ldots, K-1\}$, with
+$F$ the logistic (`link='logit'`) or normal (`link='probit'`) CDF.
+`X` carries **no** intercept (the $K - 1$ thresholds absorb it).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:ordinal_fit -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `Y` | `Int` | `V` × `N` | — | `(V, N)` ordered class labels in `{0, .., n_classes-1}`. |
+| `X` | `Float` | `N` × `p` | — | `(N, p)` shared design (no intercept column). |
+| `n_classes` | `int` | — | — | Number of ordered classes $K$ (`>= 2`). |
+| `link` | `str` | — | `'logit'` | `'logit'` (proportional odds, default) or `'probit'` (ordered probit). |
+| `n_iter` | `int` | — | `50` | Newton iterations (default `50`). |
+| `ridge` | `float` | — | `1e-08` | Small stabiliser on the Newton / information solves. |
+| `block` | `Optional[int]` | — | `None` | Optional element-block size bounding peak memory. |
+
+**Returns** `OrdinalResult`. A result with `coef` (proportional-odds slopes), ordered `thresholds`, `cov_coef` (the coefficient information block), and `log_lik`. A coefficient contrast is $c^{\top} \mathrm{coef}$ with standard error $\sqrt{c^{\top}\, \mathrm{cov\_coef}\, c}$.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:ordinal_fit -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `N` | observations — time points, subjects, or sampled points |
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

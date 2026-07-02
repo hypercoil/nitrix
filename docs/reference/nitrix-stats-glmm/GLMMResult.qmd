@@ -1,0 +1,39 @@
+---
+title: "GLMMResult"
+generated: true
+description: "Per-element random-intercept GLMM fit output (PQL)."
+---
+
+[‹ back to `nitrix.stats.glmm`](../nitrix-stats-glmm.qmd)
+
+*Re-exported here; defined in `nitrix.stats.glmm._base`.*
+
+<!-- nitrix:gen sig:GLMMResult -->
+```python
+class GLMMResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:GLMMResult -->
+Per-element random-intercept GLMM fit output (PQL).
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:GLMMResult.__init__ -->
+```python
+__init__(beta_hat: Float[Array, 'V p'], blups: Float[Array, 'V q'], re_var: Float[Array, 'V r r'], dispersion: Float[Array, 'V'], deviance: Float[Array, 'V'], edf_total: Float[Array, 'V'], family: Family, n_obs: int, n_groups: int, tier: GLMMTier) -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:GLMMResult -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `q` | random-effect columns |
+| `r` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

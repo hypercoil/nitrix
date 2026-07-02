@@ -1,19 +1,25 @@
 # -*- coding: utf-8 -*-
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
-"""
-nitrix.register -- pairwise registration recipes.
+r"""
+nitrix.register -- pairwise alignment recipes (spatial + functional).
 
 Pure-functional registrators that compose the substrate (geometry
 transforms + pyramid, image-similarity metrics, the matrix-free
 nonlinear-least-squares optimiser) into end-to-end alignment.  Outputs
-are ``NamedTuple``s of arrays (the ``reml_fit`` precedent) -- no PyTree
+are ``NamedTuple``s of arrays (the :func:`reml_fit` precedent) -- no PyTree
 modules, no atlas data structures, no I/O; ``entense`` wraps these.
 
-- ``rigid_register`` -- 6-DOF (3-D) / 3-DOF (2-D) Gauss-Newton / LM
+Two alignment families: **spatial** registration (rigid/affine/volreg/BBR,
+log-Demons/SyN -- aligning *images* in voxel/world space) and **functional**
+alignment (:func:`functional_align` -- aligning *representations* in feature
+space, the hyperalignment task; ``ProMises`` (dense) and ``EfficientProMises``
+(whole-brain subspace) are its first methods).
+
+- :func:`rigid_register` -- 6-DOF (3-D) / 3-DOF (2-D) Gauss-Newton / LM
   intensity registration on SE(2)/SE(3) (the 3dvolreg / AIR lineage).
-- ``affine_register`` -- 12-DOF (3-D) / 6-DOF (2-D), linear block via
-  ``matrix_exp``.
+- :func:`affine_register` -- 12-DOF (3-D) / 6-DOF (2-D), linear block via
+  :func:`matrix_exp`.
 - ``volreg`` -- batched rigid motion realignment of a ``(T, *spatial)``
   series to a common reference (the ``3dvolreg`` / ``mcflirt`` task);
   ``vmap``-ed over frames with the reference work hoisted out of the
@@ -21,9 +27,9 @@ modules, no atlas data structures, no I/O; ``entense`` wraps these.
 - ``bbr_register`` -- volumetric boundary-based registration (Greve-Fischl):
   rigid alignment to a tissue boundary (points + normals), maximising the
   cross-boundary contrast.  Returns ``BBRResult``.
-- ``Objective`` -- the objective ADT (``θ ↦ cost``) the optimiser
-  minimises; ``MetricObjective`` (an image pair) and ``BoundaryObjective``
-  (BBR) are its implementers.
+- ``Objective`` -- the objective ADT (:math:`\theta \mapsto \mathrm{cost}`)
+  the optimiser minimises; ``MetricObjective`` (an image pair) and
+  ``BoundaryObjective`` (BBR) are its implementers.
 - ``RegistrationSpec`` -- static config (pyramid, iterations, metric,
   interpolation); ``RegistrationResult`` -- the output record.
 - ``Metric`` -- the similarity objective ADT (``SSD`` / ``LNCC`` / ``MI``
@@ -93,6 +99,17 @@ from ._force import (
     MetricForce,
     MIForce,
     SumForce,
+)
+from ._functional import (
+    AlignmentMethod,
+    DenseAlignment,
+    EfficientProMises,
+    FunctionalAlignment,
+    ProMises,
+    SubspaceAlignment,
+    functional_align,
+    functional_align_apply,
+    functional_align_fit,
 )
 from ._implicit import (
     affine_register_implicit,
@@ -172,4 +189,14 @@ __all__ = [
     'gradient_smoothness',
     'bending_energy',
     'jacobian_folding_penalty',
+    # functional alignment (representation-space)
+    'functional_align',
+    'functional_align_fit',
+    'functional_align_apply',
+    'FunctionalAlignment',
+    'DenseAlignment',
+    'SubspaceAlignment',
+    'AlignmentMethod',
+    'ProMises',
+    'EfficientProMises',
 ]

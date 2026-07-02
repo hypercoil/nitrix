@@ -1,0 +1,59 @@
+---
+title: "sharpen_histogram"
+generated: true
+description: "Sharpen an intensity image by Wiener deconvolution of its histogram."
+---
+
+[‹ back to `nitrix.bias`](../nitrix-bias.qmd)
+
+*Re-exported here; defined in `nitrix.bias._sharpen`.*
+
+<!-- nitrix:gen sig:sharpen_histogram -->
+```python
+sharpen_histogram(image: Float[Array, '... *spatial'], *, weight: Optional[Float[Array, '... *spatial']] = None, n_bins: int = 200, fwhm: float = 0.15, wiener_noise: float = 0.01) -> Float[Array, '... *spatial']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:sharpen_histogram -->
+Sharpen an intensity image by Wiener deconvolution of its histogram.
+
+The N3 / N4 histogram-deconvolution step.  In N4 this is applied to the
+*log* of the (partially corrected) image; it is exposed standalone
+because the operation -- "deblur an intensity distribution under a
+Gaussian-spread model and remap" -- is a reusable primitive.
+
+The entire input is treated as a single intensity population (one
+histogram).  For independent per-volume sharpening of a batch,
+`jax.vmap` over the batch axis.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:sharpen_histogram -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `image` | `Float` | `...` × `*spatial` | — | Intensities to sharpen, `(..., *spatial)`. In N4 this is the log of the current bias-corrected image. |
+| `weight` | `Optional[Float[Array, '... *spatial']]` | — | `None` | Optional confidence / mask, same broadcastable shape as `image`. Only voxels with non-zero weight contribute to the histogram (and define its intensity range). `None` uses every voxel. |
+| `n_bins` | `int` | — | `200` | Number of histogram bins. Default `200` (ITK default). |
+| `fwhm` | `float` | — | `0.15` | Full-width-at-half-maximum of the assumed Gaussian intensity spread, in the same units as `image` (log-intensity units in N4). Default `0.15` (ITK default). Larger -> more aggressive sharpening. |
+| `wiener_noise` | `float` | — | `0.01` | Wiener-filter regularisation (the noise-to-signal floor that keeps the deconvolution stable). Default `0.01` (ITK default). |
+
+**Returns** `Float` — shape `...` × `*spatial`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:sharpen_histogram -->
+::: {.callout-note}
+Not differentiable through the histogram binning (piecewise constant).
+The FFT length is a static power of two, so the op JITs cleanly.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:sharpen_histogram -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

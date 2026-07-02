@@ -4,21 +4,24 @@
 """
 Explicit penalties on a displacement / velocity field.
 
-The diffeomorphic recipe in ``diffeomorphic`` regularises *implicitly*,
-by Gaussian-smoothing the update (the Green's function of the
-fluid/diffusion operator).  These are the *explicit* penalties a
-learned or directly-optimised warp adds to its loss:
+The diffeomorphic Demons recipe regularises *implicitly*, by
+Gaussian-smoothing the update (the Green's function of the
+fluid/diffusion operator). These are the *explicit* penalties a learned
+or directly-optimised warp adds to its objective:
 
-- ``gradient_smoothness`` -- the diffusion (first-order) penalty
-  ``‖∇u‖²`` per voxel, summed over components: the squared Frobenius norm
-  of the displacement Jacobian.  Penalises sharp / incoherent flow.
-- ``bending_energy`` -- the thin-plate (second-order) penalty
-  ``‖∇²u‖²``: the squared Frobenius norm of the per-voxel Hessian.
-  Penalises curvature rather than slope (an affine flow is free).
-- ``jacobian_folding_penalty`` -- penalises folding (loss of
-  invertibility), ``relu(-det J)`` of the deformation Jacobian
-  ``J = I + ∇u``: zero where the map is locally orientation-preserving
-  (``det J > 0``), growing with the degree of fold (``det J <= 0``).
+- :func:`gradient_smoothness` -- the diffusion (first-order) penalty
+  :math:`\\|\\nabla u\\|^2` per voxel, summed over components: the
+  squared Frobenius norm of the displacement Jacobian. Penalises sharp or
+  incoherent flow.
+- :func:`bending_energy` -- the thin-plate (second-order) penalty
+  :math:`\\|\\nabla^2 u\\|^2`: the squared Frobenius norm of the
+  per-voxel Hessian. Penalises curvature rather than slope (an affine
+  flow is free).
+- :func:`jacobian_folding_penalty` -- penalises folding (loss of
+  invertibility) via :math:`\\operatorname{relu}(-\\det J)` of the
+  deformation Jacobian :math:`J = I + \\nabla u`: zero where the map is
+  locally orientation-preserving (:math:`\\det J > 0`), growing with the
+  degree of fold (:math:`\\det J \\le 0`).
 
 All take a channels-last field ``(*spatial, ndim)``, build on the shipped
 ``geometry`` differential operators, and are differentiable.
@@ -46,7 +49,28 @@ __all__ = [
 def _grad_components(
     field: Float[Array, '*spatial k'], spatial_rank: int
 ) -> Float[Array, '*spatial k ndim']:
-    """Spatial gradient of each trailing component: ``(..., k) -> (..., k, ndim)``."""
+    """Spatial gradient of each trailing component of a field.
+
+    Stacks the per-axis spatial gradient of every trailing component,
+    mapping ``(*spatial, k) -> (*spatial, k, ndim)``.
+
+    Parameters
+    ----------
+    field
+        Channels-last field ``(*spatial, k)`` whose ``k`` trailing
+        components are each differentiated over the ``spatial_rank``
+        leading spatial axes.
+    spatial_rank
+        Number of leading spatial axes (``ndim``) over which the spatial
+        gradient is taken.
+
+    Returns
+    -------
+    Float[Array, '*spatial k ndim']
+        The stacked spatial gradients, with a new trailing axis of length
+        ``ndim`` holding the derivative of each component along each
+        spatial axis.
+    """
     grads = [
         spatial_gradient(field[..., c], spatial_rank=spatial_rank)
         for c in range(field.shape[-1])
@@ -59,19 +83,29 @@ def gradient_smoothness(
     *,
     reduction: Reduction = 'mean',
 ) -> Float[Array, '...']:
-    """Diffusion (first-order) smoothness penalty ``‖∇u‖²``.
+    """Diffusion (first-order) smoothness penalty :math:`\\|\\nabla u\\|^2`.
 
-    The squared Frobenius norm of the displacement Jacobian ``∇u``
-    (recovered as ``J - I`` from :func:`geometry.jacobian_displacement`),
-    summed over the ``ndim x ndim`` derivative entries at each voxel.
+    The squared Frobenius norm of the displacement Jacobian
+    :math:`\\nabla u` (recovered as :math:`J - I` from
+    :func:`geometry.jacobian_displacement`), summed over the
+    :math:`\\mathrm{ndim} \\times \\mathrm{ndim}` derivative entries at
+    each voxel. Penalises sharp or incoherent flow.
 
     Parameters
     ----------
-    field
-        Displacement field ``(*spatial, ndim)``.
-    reduction
-        ``"mean"`` (default), ``"sum"``, or ``"none"`` (the per-voxel
-        energy map).
+    field : Float[Array, '*spatial ndim']
+        Channels-last displacement field ``(*spatial, ndim)``, with the
+        trailing axis holding the ``ndim`` displacement components.
+    reduction : {'mean', 'sum', 'none'}, optional
+        How the per-voxel energy is reduced: ``"mean"`` (default) or
+        ``"sum"`` collapse the spatial axes to a scalar, while ``"none"``
+        returns the unreduced per-voxel energy map.
+
+    Returns
+    -------
+    Float[Array, '...']
+        The scalar total (for ``"mean"`` / ``"sum"``) or the per-voxel
+        energy map of shape ``(*spatial,)`` (for ``"none"``).
     """
     ndim = field.shape[-1]
     grad_u = jacobian_displacement(field) - jnp.eye(ndim, dtype=field.dtype)
@@ -84,21 +118,29 @@ def bending_energy(
     *,
     reduction: Reduction = 'mean',
 ) -> Float[Array, '...']:
-    """Thin-plate (second-order) bending penalty ``‖∇²u‖²``.
+    """Thin-plate (second-order) bending penalty :math:`\\|\\nabla^2 u\\|^2`.
 
     The squared Frobenius norm of the per-voxel Hessian (all second
-    partials ``∂²u_c / ∂x_a ∂x_b``), computed by differentiating the
-    displacement Jacobian a second time.  Unlike
-    :func:`gradient_smoothness` it does not penalise a uniform (affine)
-    flow -- only curvature.
+    partials :math:`\\partial^2 u_c / \\partial x_a \\partial x_b`),
+    computed by differentiating the displacement Jacobian a second time.
+    Unlike :func:`gradient_smoothness` it does not penalise a uniform
+    (affine) flow -- only curvature.
 
     Parameters
     ----------
-    field
-        Displacement field ``(*spatial, ndim)``.
-    reduction
-        ``"mean"`` (default), ``"sum"``, or ``"none"`` (the per-voxel
-        energy map).
+    field : Float[Array, '*spatial ndim']
+        Channels-last displacement field ``(*spatial, ndim)``, with the
+        trailing axis holding the ``ndim`` displacement components.
+    reduction : {'mean', 'sum', 'none'}, optional
+        How the per-voxel energy is reduced: ``"mean"`` (default) or
+        ``"sum"`` collapse the spatial axes to a scalar, while ``"none"``
+        returns the unreduced per-voxel energy map.
+
+    Returns
+    -------
+    Float[Array, '...']
+        The scalar total (for ``"mean"`` / ``"sum"``) or the per-voxel
+        energy map of shape ``(*spatial,)`` (for ``"none"``).
     """
     ndim = field.shape[-1]
     grad_u = jacobian_displacement(field) - jnp.eye(ndim, dtype=field.dtype)
@@ -113,20 +155,29 @@ def jacobian_folding_penalty(
     *,
     reduction: Reduction = 'mean',
 ) -> Float[Array, '...']:
-    """Folding penalty ``relu(-det J)`` of the deformation Jacobian.
+    """Folding penalty :math:`\\operatorname{relu}(-\\det J)` of the deformation Jacobian.
 
-    ``J = I + ∇u`` (via :func:`geometry.jacobian_det_displacement`); the
-    per-voxel penalty is ``max(-det J, 0)`` -- zero where the map is
-    locally orientation-preserving (``det J > 0``) and growing with the
-    magnitude of any fold (``det J <= 0``).
+    The deformation Jacobian is :math:`J = I + \\nabla u`, whose
+    determinant is obtained via :func:`geometry.jacobian_det_displacement`.
+    The per-voxel penalty is :math:`\\max(-\\det J, 0)` -- zero where the
+    map is locally orientation-preserving (:math:`\\det J > 0`) and
+    growing with the magnitude of any fold (:math:`\\det J \\le 0`).
 
     Parameters
     ----------
-    field
-        Displacement field ``(*spatial, ndim)``.
-    reduction
-        ``"mean"`` (default), ``"sum"``, or ``"none"`` (the per-voxel
-        penalty map).
+    field : Float[Array, '*spatial ndim']
+        Channels-last displacement field ``(*spatial, ndim)``, with the
+        trailing axis holding the ``ndim`` displacement components.
+    reduction : {'mean', 'sum', 'none'}, optional
+        How the per-voxel penalty is reduced: ``"mean"`` (default) or
+        ``"sum"`` collapse the spatial axes to a scalar, while ``"none"``
+        returns the unreduced per-voxel penalty map.
+
+    Returns
+    -------
+    Float[Array, '...']
+        The scalar total (for ``"mean"`` / ``"sum"``) or the per-voxel
+        penalty map of shape ``(*spatial,)`` (for ``"none"``).
     """
     det = jacobian_det_displacement(field)
     return reduce(jnp.maximum(-det, 0.0), reduction=reduction)

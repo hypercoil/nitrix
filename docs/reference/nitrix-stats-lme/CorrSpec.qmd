@@ -1,0 +1,54 @@
+---
+title: "CorrSpec"
+generated: true
+description: "A within-group correlation structure, as a record of pure functions."
+---
+
+[‹ back to `nitrix.stats.lme`](../nitrix-stats-lme.qmd)
+
+*Re-exported here; defined in `nitrix.stats.lme._corr`.*
+
+<!-- nitrix:gen sig:CorrSpec -->
+```python
+class CorrSpec
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:CorrSpec -->
+A within-group correlation structure, as a record of pure functions.
+
+Frozen and hashable so it rides as a static config (a `vmap` /
+`custom_vjp` nondiff argument), like [`Family`](../nitrix-stats.qmd) /
+[`VarCompSpec`](../nitrix-stats-lme.qmd).
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:CorrSpec.__init__ -->
+```python
+__init__(name: str, n_params: int, whiten: Callable[[Float[Array, 'G T k'], Float[Array, 'G T'], Float[Array, 'G'], Bool[Array, 'G T'], Float[Array, 'n']], Tuple[Float[Array, 'G T k'], Float[Array, '']]], to_natural: Callable[[Float[Array, 'n']], Float[Array, '']], init_raw: Callable[[Any], Float[Array, 'n']]) -> None
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:CorrSpec -->
+### Fields
+
+name
+    Structure name (`'ar1'` / `'car1'` / `'cs'` / `'iid'`).
+n_params
+    Number of correlation parameters (`1` for [`ar1`](../nitrix-stats-lme/ar1.qmd), [`car1`](../nitrix-stats-lme/car1.qmd)
+    and [`cs`](../nitrix-stats-lme/cs.qmd); `0` for [`iid`](../nitrix-stats-lme/iid.qmd)).
+whiten
+    `(z_pad, gaps, nsize, mask, raw) -> (w_pad, half_logdet)`: apply the
+    per-group whitener to a `(G, T, k)` padded stack `z_pad` (zeroed pad),
+    returning the whitened stack and $0.5 \sum_i \log|R_i|$ (summed over
+    groups).  `gaps` is the `(G, T)` time gap to the previous in-group
+    observation (used by [`car1`](../nitrix-stats-lme/car1.qmd)); `nsize` the `(G,)` real group
+    sizes; `mask` the `(G, T)` validity mask; `raw` the `(n_params,)`
+    unconstrained parameter.
+to_natural
+    `raw -> rho` (the bounded natural correlation, for reporting).
+init_raw
+    A reasonable unconstrained start, as a function of dtype.
+<!-- nitrix:/gen -->
+

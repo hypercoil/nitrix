@@ -2,48 +2,66 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Crossed random-effects REML for two crossed grouping factors (tier R4).
+Crossed random-effects REML for two crossed grouping factors.
 
-Two **crossed** scalar random intercepts ``(1 | g1) + (1 | g2)`` -- the
-subjects-x-items design (each observation has a ``g1`` and a ``g2`` level, and
-the factors are not nested).  The covariance::
+Fit two *crossed* scalar random intercepts ``(1 | g1) + (1 | g2)`` -- the
+subjects-by-items design, in which each observation carries one ``g1`` level and
+one ``g2`` level and the two factors are not nested. The marginal covariance
 
-    V = sigma1^2 Z1 Z1^T + sigma2^2 Z2 Z2^T + sigma_e^2 I
+.. math::
 
-is **not** block-diagonal across either factor (the FaST-LMM rotation and the
-block-Woodbury per-group trick both fail), so this is the sparse mixed-model-
-equations regime the v3 ledger gates as Tier-2.
+    V = \\sigma_1^2 Z_1 Z_1^{\\top}
+        + \\sigma_2^2 Z_2 Z_2^{\\top}
+        + \\sigma_e^2 I
 
-The tractable structure.  Stack ``Z = [Z1 | Z2]`` (``N x (q1+q2)``); Woodbury
-gives ``V^{-1} = sigma_e^{-2}(I - Z K^{-1} Z^T)`` with the inner matrix
+is not block-diagonal across either factor, so the per-group rotations that make
+a purely nested model cheap do not apply here.
 
-    K = sigma_e^2 G^{-1} + Z^T Z
-      = [[ sigma_e^2/sigma1^2 I + D1 ,      N12      ],
-         [        N12^T          , sigma_e^2/sigma2^2 I + D2 ]]
+The tractable structure comes from stacking the two random-effect designs as
+:math:`Z = [Z_1 \\mid Z_2]` (shape :math:`N \\times (q_1 + q_2)`). The
+Woodbury identity gives
+:math:`V^{-1} = \\sigma_e^{-2}(I - Z K^{-1} Z^{\\top})` with inner matrix
 
-where ``D1 = diag(Z1^T Z1)`` / ``D2 = diag(Z2^T Z2)`` are the per-level **counts**
-(both diagonal) and ``N12 = Z1^T Z2`` is the ``q1 x q2`` cross-tabulation
-(incidence).  The two diagonal blocks let a **Schur complement** eliminate the
-*larger* factor in ``O(q)`` and reduce to a single dense
-``min(q1, q2) x min(q1, q2)`` solve::
+.. math::
 
-    S = (sigma_e^2/sigma2^2 I + D2) - N12^T diag(A1^{-1}) N12,   A1 = sigma_e^2/sigma1^2 + D1
-    log|K| = sum log A1 + log|S|
+    K = \\sigma_e^2 G^{-1} + Z^{\\top} Z
+      = \\begin{bmatrix}
+        \\sigma_e^2/\\sigma_1^2\\, I + D_1 & N_{12} \\\\
+        N_{12}^{\\top} & \\sigma_e^2/\\sigma_2^2\\, I + D_2
+        \\end{bmatrix}
 
-(taking ``q1 >= q2`` w.l.o.g.; the caller orders the factors so the dense solve
-is on the smaller one).  Everything else -- ``X^T V^{-1} X``, ``X^T V^{-1} y``,
-``y^T V^{-1} y``, ``log|V| = (N - q1 - q2) log sigma_e^2 + q1 log sigma1^2 +
-q2 log sigma2^2 + log|K|`` -- assembles from ``K^{-1}`` applied to the shared
-Grams.  cuSOLVER-free (the ``S`` and ``(p, p)`` solves go through
-``small_inv_logdet``).
+where :math:`D_1 = \\operatorname{diag}(Z_1^{\\top} Z_1)` and
+:math:`D_2 = \\operatorname{diag}(Z_2^{\\top} Z_2)` are the per-level counts
+(both diagonal) and :math:`N_{12} = Z_1^{\\top} Z_2` is the
+:math:`q_1 \\times q_2` cross-tabulation (the incidence between the two factors).
+Because the two diagonal blocks are cheap to invert, a Schur complement
+eliminates the larger factor in :math:`O(q)` and reduces the problem to a single
+dense :math:`\\min(q_1, q_2) \\times \\min(q_1, q_2)` solve:
 
-**Cost / HLO gate.**  The per-voxel cost is ``O(min(q1, q2)^3)`` per Newton step
-(the dense Schur solve) -- cheap when one factor is small (e.g. 30 items x 1000
-subjects) and expensive when both are large.  This is the tier-R4 trade the
-ledger flags; ``lme_fit`` only routes here for an explicit crossed spec.  The
-three variance components ``theta = [log sigma1^2, log sigma2^2, log sigma_e^2]``
-are fit by the shared damped/saddle-free Newton (``_optimise``), like the nested
-R3 (a well-behaved log-variance problem).
+.. math::
+
+    S = (\\sigma_e^2/\\sigma_2^2\\, I + D_2)
+        - N_{12}^{\\top} \\operatorname{diag}(A_1^{-1}) N_{12},
+    \\qquad A_1 = \\sigma_e^2/\\sigma_1^2 + D_1
+
+    \\log|K| = \\textstyle\\sum \\log A_1 + \\log|S|
+
+(taking :math:`q_1 \\ge q_2` without loss of generality; the caller orders the
+factors so the dense solve falls on the smaller one). Everything else --
+:math:`X^{\\top} V^{-1} X`, :math:`X^{\\top} V^{-1} y`,
+:math:`y^{\\top} V^{-1} y`, and
+:math:`\\log|V| = (N - q_1 - q_2)\\log\\sigma_e^2 + q_1\\log\\sigma_1^2
++ q_2\\log\\sigma_2^2 + \\log|K|` -- assembles from :math:`K^{-1}` applied to
+the shared Grams. The dense solves for :math:`S` and for the
+:math:`(p, p)` fixed-effect system go through
+:func:`~nitrix.linalg._smalllinalg.small_inv_logdet`, avoiding cuSOLVER.
+
+The per-voxel cost is :math:`O(\\min(q_1, q_2)^3)` per Newton step (the dense
+Schur solve) -- cheap when one factor is small (for example 30 items by 1000
+subjects) and expensive when both are large. The three variance components
+:math:`\\theta = [\\log\\sigma_1^2, \\log\\sigma_2^2, \\log\\sigma_e^2]` are fit
+by the shared damped, saddle-free Newton optimiser, as in the nested case (a
+well-behaved log-variance problem).
 """
 
 from __future__ import annotations
@@ -62,7 +80,35 @@ __all__ = ['CrossedStats', 'crossed_grams', 'fit_crossed_reml']
 
 
 class CrossedStats(NamedTuple):
-    """Shared (``y``-independent) Grams for a crossed design (``q1 >= q2``)."""
+    """Shared, response-independent Grams for a crossed design.
+
+    Holds the pieces of the mixed-model system that do not depend on the
+    response ``y`` and can therefore be formed once and reused across every
+    voxel of a batched fit. The two factors are ordered so that
+    :math:`q_1 \\ge q_2`.
+
+    Attributes
+    ----------
+    d1 : Float[Array, 'q1']
+        Per-level observation counts of factor 1 (the larger), i.e. the diagonal
+        of :math:`Z_1^{\\top} Z_1`.
+    d2 : Float[Array, 'q2']
+        Per-level observation counts of factor 2 (the smaller), i.e. the
+        diagonal of :math:`Z_2^{\\top} Z_2`.
+    n12 : Float[Array, 'q1 q2']
+        Cross-tabulation :math:`Z_1^{\\top} Z_2` between the two factors' levels.
+    xtz : Float[Array, 'q p']
+        The stacked design cross-product :math:`[Z_1 \\mid Z_2]^{\\top} X`, with
+        ``q = q1 + q2``.
+    xtx : Float[Array, 'p p']
+        The fixed-effect Gram :math:`X^{\\top} X`.
+    q1 : int
+        Number of levels of factor 1 (the larger).
+    q2 : int
+        Number of levels of factor 2 (the smaller).
+    n_obs : int
+        Number of observations ``N``.
+    """
 
     d1: Float[Array, 'q1']  # per-level counts of factor 1 (the larger)
     d2: Float[Array, 'q2']  # per-level counts of factor 2 (the smaller)
@@ -79,7 +125,31 @@ def crossed_grams(
     oh1: Float[Array, 'N q1'],
     oh2: Float[Array, 'N q2'],
 ) -> CrossedStats:
-    """Shared crossed-design Grams from the two one-hot designs (``q1 >= q2``)."""
+    """Form the shared crossed-design Grams from the two one-hot designs.
+
+    Precomputes the response-independent quantities of the crossed mixed model
+    (per-level counts, cross-tabulation, and fixed-effect cross-products) so
+    they can be reused across every voxel of a batched fit. The factors must be
+    ordered so that :math:`q_1 \\ge q_2`.
+
+    Parameters
+    ----------
+    X : Float[Array, 'N p']
+        Fixed-effect design matrix (``N`` observations, ``p`` covariates).
+    oh1 : Float[Array, 'N q1']
+        One-hot design of the first (larger) crossed factor, with ``q1`` levels.
+    oh2 : Float[Array, 'N q2']
+        One-hot design of the second (smaller) crossed factor, with ``q2``
+        levels.
+
+    Returns
+    -------
+    CrossedStats
+        The shared Grams: per-level counts ``d1`` / ``d2``, the cross-tabulation
+        ``n12``, the stacked design cross-product ``xtz``, the fixed-effect Gram
+        ``xtx``, the two level counts ``q1`` / ``q2``, and the observation count
+        ``n_obs``.
+    """
     d1 = jnp.sum(oh1, axis=0)
     d2 = jnp.sum(oh2, axis=0)
     n12 = oh1.T @ oh2
@@ -108,9 +178,41 @@ def _nll_and_beta(
 ) -> Tuple[Float[Array, ''], Float[Array, 'p']]:
     """Profile REML negative log-likelihood (and ``beta``) for the crossed model.
 
-    Eliminates factor 1 (the larger, diagonal block) by Schur complement, leaving
-    one dense ``q2 x q2`` solve.  ``K^{-1}`` is applied to the stacked Grams
-    ``[Z1 | Z2]^T [X | y]`` to form the fixed-effect system.
+    Evaluates the restricted negative log-likelihood at a single set of
+    log-variance parameters, together with the corresponding generalised
+    least-squares fixed-effect estimate. Factor 1 (the larger, diagonal block)
+    is eliminated by a Schur complement, leaving one dense
+    :math:`q_2 \\times q_2` solve; :math:`K^{-1}` is then applied to the stacked
+    Grams :math:`[Z_1 \\mid Z_2]^{\\top} [X \\mid y]` to form the fixed-effect
+    system.
+
+    Parameters
+    ----------
+    theta : Float[Array, '3']
+        Log-variance parameters
+        :math:`[\\log\\sigma_1^2, \\log\\sigma_2^2, \\log\\sigma_e^2]`.
+    stats : CrossedStats
+        Shared, response-independent Grams for the crossed design.
+    zty : Float[Array, 'q']
+        The stacked random-effect projection
+        :math:`[Z_1 \\mid Z_2]^{\\top} y`, with ``q = q1 + q2``.
+    xty : Float[Array, 'p']
+        The fixed-effect projection :math:`X^{\\top} y`.
+    yty : Float[Array, '']
+        The response sum of squares :math:`y^{\\top} y`.
+    p : int
+        Number of fixed-effect covariates.
+    ridge : float
+        Small stabiliser added to the diagonal of the Schur complement ``S`` and
+        of the fixed-effect system :math:`X^{\\top} V^{-1} X` before inversion,
+        guarding near-singular designs.
+
+    Returns
+    -------
+    nll : Float[Array, '']
+        The restricted negative log-likelihood at ``theta``.
+    beta : Float[Array, 'p']
+        The generalised least-squares fixed-effect estimate at ``theta``.
     """
     q1, q2 = stats.q1, stats.q2
     s1 = jnp.exp(theta[0])
@@ -164,7 +266,42 @@ def _fit_one(
     p: int,
     spec: VarCompSpec,
 ) -> Tuple[Float[Array, '3'], Float[Array, 'p'], Float[Array, '']]:
-    """Single-voxel crossed REML fit via the shared saddle-free Newton."""
+    """Fit the crossed REML model for a single voxel.
+
+    Minimises the profile restricted negative log-likelihood over the three
+    log-variance parameters with the shared damped, saddle-free Newton
+    optimiser, then re-evaluates at the optimum to recover the fixed-effect
+    estimate and the log-likelihood.
+
+    Parameters
+    ----------
+    zty : Float[Array, 'q']
+        The stacked random-effect projection
+        :math:`[Z_1 \\mid Z_2]^{\\top} y`, with ``q = q1 + q2``.
+    xty : Float[Array, 'p']
+        The fixed-effect projection :math:`X^{\\top} y`.
+    yty : Float[Array, '']
+        The response sum of squares :math:`y^{\\top} y`.
+    theta_init : Float[Array, '3']
+        Initial log-variance parameters
+        :math:`[\\log\\sigma_1^2, \\log\\sigma_2^2, \\log\\sigma_e^2]`.
+    stats : CrossedStats
+        Shared, response-independent Grams for the crossed design.
+    p : int
+        Number of fixed-effect covariates.
+    spec : VarCompSpec
+        Configuration for the Newton iteration and the fixed-effect ridge floor.
+
+    Returns
+    -------
+    theta : Float[Array, '3']
+        The fitted log-variance parameters.
+    beta : Float[Array, 'p']
+        The fixed-effect estimate at the optimum.
+    log_lik : Float[Array, '']
+        The restricted log-likelihood at the optimum (the negated final
+        negative log-likelihood).
+    """
 
     def nll(theta: Float[Array, '3']) -> Float[Array, '']:
         return _nll_and_beta(theta, stats, zty, xty, yty, p, spec.ridge)[0]
@@ -184,12 +321,43 @@ def fit_crossed_reml(
     spec: VarCompSpec = VarCompSpec(),
     block: Optional[int] = None,
 ) -> Tuple[Float[Array, 'V 3'], Float[Array, 'V p'], Float[Array, 'V']]:
-    """Batched crossed-RE REML over ``V`` voxels.
+    """Fit crossed random-effects REML over a batch of ``V`` voxels.
 
-    ``oh1`` / ``oh2`` are the one-hot designs of the two crossed factors with
-    ``q1 = oh1.shape[1] >= q2 = oh2.shape[1]`` (the caller orders them so the
-    dense Schur solve is on the smaller factor).  ``theta = [log sigma1^2,
-    log sigma2^2, log sigma_e^2]``.  Returns ``(theta_hat, beta_hat, log_lik)``.
+    Shares the response-independent Grams across the batch and maps the
+    single-voxel crossed REML fit over every voxel, in blocks if requested. The
+    two crossed factors must be ordered so that the dense Schur solve falls on
+    the smaller one.
+
+    Parameters
+    ----------
+    Y : Float[Array, 'V N']
+        Responses for ``V`` voxels, each over the same ``N`` observations.
+    X : Float[Array, 'N p']
+        Fixed-effect design matrix shared across voxels.
+    oh1 : Float[Array, 'N q1']
+        One-hot design of the first (larger) crossed factor, with
+        ``q1 = oh1.shape[1]``.
+    oh2 : Float[Array, 'N q2']
+        One-hot design of the second (smaller) crossed factor, with
+        ``q2 = oh2.shape[1]`` and ``q1 >= q2`` (the caller orders the factors so
+        the dense Schur solve is on the smaller one).
+    theta_init : Float[Array, 'V 3']
+        Per-voxel initial log-variance parameters
+        :math:`[\\log\\sigma_1^2, \\log\\sigma_2^2, \\log\\sigma_e^2]`.
+    spec : VarCompSpec, optional
+        Configuration for the Newton iteration and the fixed-effect ridge floor.
+    block : int, optional
+        Voxel block size for the batched map; ``None`` maps over all voxels at
+        once.
+
+    Returns
+    -------
+    theta_hat : Float[Array, 'V 3']
+        Fitted log-variance parameters per voxel.
+    beta_hat : Float[Array, 'V p']
+        Fixed-effect estimates per voxel.
+    log_lik : Float[Array, 'V']
+        Restricted log-likelihood per voxel.
     """
     p = X.shape[-1]
     stats = crossed_grams(X, oh1, oh2)

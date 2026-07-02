@@ -1,0 +1,53 @@
+---
+title: "cho_solve"
+generated: true
+description: "Solve the SPD system $(a +  lambda I) x = b$ via Cholesky."
+---
+
+[‹ back to `nitrix.linalg.solve`](../nitrix-linalg-solve.qmd)
+
+<!-- nitrix:gen sig:cho_solve -->
+```python
+cho_solve(a: Float[Array, '... n n'], b: Float[Array, '...'], *, l2: float = 0.0) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:cho_solve -->
+Solve the SPD system $(a + \lambda I) x = b$ via Cholesky.
+
+The optional `l2` ridge $\lambda$ is added to the diagonal
+-- the standard Levenberg-Marquardt / Tikhonov damping -- so a
+single call covers both the Gauss-Newton (`l2 = 0`) and
+Levenberg-Marquardt (`l2 > 0`) normal-equation solves.  Batches
+over any leading dimensions and is reverse-mode differentiable.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:cho_solve -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `a` | `Float` | `...` × `n` × `n` | — | Symmetric positive-definite matrix, `(..., n, n)`. Symmetry is assumed, not enforced. |
+| `b` | `Float` | `...` | — | Right-hand side: `(..., n)` (vector) or `(..., n, m)` (matrix of columns). |
+| `l2` | `float` | — | `0.0` | Non-negative diagonal ridge added before factoring. Default `0` (plain SPD solve). |
+
+**Returns** `Float` — shape `...`. Solution $x$ with the same trailing shape as `b`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:cho_solve -->
+::: {.callout-note}
+Returns `NaN` if $a + \lambda I$ is not positive-definite
+(no Cholesky factor); add an `l2 > 0` ridge if the Gram matrix may
+be rank-deficient.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:cho_solve -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

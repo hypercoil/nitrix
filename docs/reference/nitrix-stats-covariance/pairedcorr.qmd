@@ -1,0 +1,46 @@
+---
+title: "pairedcorr"
+generated: true
+description: "Cross-correlation between two sets of variables."
+---
+
+[‹ back to `nitrix.stats.covariance`](../nitrix-stats-covariance.qmd)
+
+<!-- nitrix:gen sig:pairedcorr -->
+```python
+pairedcorr(X: Num[Array, '... c obs'], Y: Num[Array, '... d obs'], **kwargs) -> Num[Array, '... c d']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:pairedcorr -->
+Cross-correlation between two sets of variables.
+
+Normalised version of [`pairedcov`](../nitrix-stats-covariance/pairedcov.qmd): each cross-covariance
+entry is divided by the square root of the product of the
+corresponding variances, i.e. the diagonal entries of
+[`cov`](../nitrix-stats-covariance/cov.qmd) applied to `X` and to `Y` respectively.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:pairedcorr -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X` | `Num` | `...` × `c` × `obs` | — | First variable block; see [`pairedcov`](../nitrix-stats-covariance/pairedcov.qmd). |
+| `Y` | `Num` | `...` × `d` × `obs` | — | Second variable block; see [`pairedcov`](../nitrix-stats-covariance/pairedcov.qmd). |
+| `**kwargs` | `Any` | — | `{}` | — |
+
+**Returns** `Num` — shape `...` × `c` × `d`. Cross-correlation block, `(..., c, d)`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:pairedcorr -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `c` | feature channels (channels-last) |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->

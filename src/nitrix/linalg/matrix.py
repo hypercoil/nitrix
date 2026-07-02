@@ -2,38 +2,29 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Matrix utilities: symmetric / triangular views, diagonal helpers,
-Toeplitz construction, and eigenspace reconditioning.
+Matrix utilities for symmetric matrices, diagonals, and Toeplitz structure.
 
-The bread-and-butter primitives used by downstream consumers that
-work with covariance / connectivity matrices:
+A collection of the bread-and-butter primitives used by downstream
+consumers that work with covariance and connectivity matrices: symmetric
+and antisymmetric views, diagonal masking, Toeplitz construction, and
+eigenspace reconditioning for stable differentiation.
 
-- ``symmetric`` -- symmetrise (or antisymmetrise) any square block.
-- ``sym2vec`` / ``vec2sym`` / ``squareform`` -- bijection between
-  symmetric matrices and the vec of their strict upper triangle.
-  Both carry hand-rolled ``custom_vjp`` rules: ``sym2vec``'s
-  backward sums diagonal entries' gradients only once;
-  ``vec2sym``'s backward accounts for the symmetrising
-  reflection.
-- ``delete_diagonal`` / ``fill_diagonal`` -- standard masked
+The main surfaces are:
+
+- :func:`symmetric` -- symmetrise (or antisymmetrise) any square block.
+- :func:`sym2vec` / :func:`vec2sym` / :func:`squareform` -- bijection
+  between symmetric matrices and the vec of their strict upper triangle.
+  Both carry hand-rolled ``custom_vjp`` rules: the backward of
+  :func:`sym2vec` sums diagonal entries' gradients only once, and the
+  backward of :func:`vec2sym` accounts for the symmetrising reflection.
+- :func:`delete_diagonal` / :func:`fill_diagonal` -- masked diagonal
   operations.
-- ``recondition_eigenspaces`` -- stabilise differentiation
-  through SVD / eigh by perturbing zero / near-degenerate
+- :func:`recondition_eigenspaces` -- stabilise differentiation through SVD
+  and symmetric eigendecomposition by perturbing zero or near-degenerate
   eigenvalues.
-- ``toeplitz`` / ``toeplitz_2d`` -- vmap-over-batch Toeplitz
-  construction following the @mattjj / @blakehechtman 2022
-  recipe (see hypercoil legacy comment).  Faster than scipy on
-  GPU; degrades on TPU per the same reference.
-
-What the legacy ``hypercoil.functional.matrix`` had that we drop:
-
-- ``cholesky_invert`` -- in nearly all cases slower than
-  ``jnp.linalg.inv``.
-- ``spd`` -- the legacy crude PSD enforcement.  Use
-  ``recondition_eigenspaces`` for the differentiable-stability
-  use case; use ``nitrix.linalg.spd`` for SPD-manifold ops
-  proper (matrix log / exp / sqrt).
-- ``expand_outer`` -- just write the ``jnp.einsum`` you want.
+- :func:`toeplitz` / :func:`toeplitz_2d` -- Toeplitz construction using a
+  vmap-over-roll recipe that is faster than scipy on GPU but degrades on
+  TPU.
 """
 
 from __future__ import annotations
@@ -72,15 +63,26 @@ def symmetric(
 ) -> Num[Array, '... i i']:
     """Average ``X`` with its transpose across the named axes.
 
+    Returns the symmetric part :math:`(X + X^{\\top}) / 2` of the square
+    block, or its antisymmetric part :math:`(X - X^{\\top}) / 2` when
+    ``skew`` is set.
+
     Parameters
     ----------
-    X
+    X : Num[Array, '... i i']
         Tensor with a square block at the named axes.
-    skew
-        If ``True``, antisymmetrise (``(X - X.T) / 2``) instead.
-    axes
-        Two axes defining the square block.  Defaults to the
-        trailing two axes.
+    skew : bool
+        If ``True``, antisymmetrise (:math:`(X - X^{\\top}) / 2`) instead
+        of symmetrising.
+    axes : tuple of int
+        The two axes defining the square block.  Defaults to the trailing
+        two axes.
+
+    Returns
+    -------
+    Num[Array, '... i i']
+        The symmetrised (or antisymmetrised) tensor, of the same shape as
+        ``X``.
     """
     if skew:
         return (X - X.swapaxes(*axes)) / 2
@@ -101,30 +103,31 @@ def recondition_eigenspaces(
 ) -> Num[Array, '... i i']:
     r"""Perturb ``A`` so it has no zero or degenerate eigenvalues.
 
-    Stabilises reverse-mode differentiation through
-    ``jnp.linalg.eigh`` / SVD on near-singular inputs.  The
-    transformation is
-
-    ``A := A + (psi - xi / 2) I + diag(x)``
-
-    where ``x ~ Uniform(0, xi)`` is fresh per call.
+    Stabilises reverse-mode differentiation through ``jnp.linalg.eigh``
+    and SVD on near-singular inputs.  The transformation is
+    :math:`A := A + (\psi - \xi) I + \operatorname{diag}(x)`, where
+    :math:`x \sim \operatorname{Uniform}(0, \xi)` is drawn fresh per
+    call.  The additive shift lifts zero eigenvalues away from the origin,
+    while the random diagonal splits any exactly-degenerate eigenvalues so
+    that the eigenvectors are well defined.
 
     Parameters
     ----------
-    A
+    A : Num[Array, '... i i']
         Symmetric matrix block.
-    psi
-        Reconditioning constant for ensuring nonzero eigenvalues.
-        Must satisfy ``psi >= xi``.
-    xi
-        Reconditioning constant for ensuring nondegenerate
-        eigenvalues.  Default ``0`` (no random perturbation).
-    key
+    psi : float
+        Reconditioning constant for ensuring nonzero eigenvalues.  Must
+        satisfy ``psi >= xi``.
+    xi : float
+        Reconditioning constant for ensuring nondegenerate eigenvalues.
+        Default ``0`` (no random perturbation).
+    key : jax.Array, optional
         PRNG key.  Required when ``xi > 0``.
 
     Returns
     -------
-    Reconditioned matrix.
+    Num[Array, '... i i']
+        The reconditioned matrix, of the same shape as ``A``.
     """
     if psi < xi:
         raise ValueError(
@@ -155,7 +158,19 @@ def recondition_eigenspaces(
 
 
 def delete_diagonal(A: Num[Array, '... i i']) -> Num[Array, '... i i']:
-    """Zero out the diagonal of a square matrix block."""
+    """Zero out the main diagonal of a square matrix block.
+
+    Parameters
+    ----------
+    A : Num[Array, '... i i']
+        Square matrix block.
+
+    Returns
+    -------
+    Num[Array, '... i i']
+        A copy of ``A`` with its main diagonal set to zero and all
+        off-diagonal entries unchanged.
+    """
     mask = ~jnp.eye(A.shape[-1], dtype=bool)
     return A * mask
 
@@ -170,13 +185,20 @@ def fill_diagonal(
 
     Parameters
     ----------
-    A
+    A : Num[Array, '... i j']
         Matrix block (need not be square).
-    fill
+    fill : float
         Value to write into the diagonal cells.
-    offset
-        Diagonal offset.  ``0`` is the main diagonal, positive is
-        above, negative is below.
+    offset : int
+        Diagonal offset.  ``0`` is the main diagonal, positive is above,
+        negative is below.
+
+    Returns
+    -------
+    Num[Array, '... i j']
+        A copy of ``A`` with the cells on the named diagonal replaced by
+        ``fill`` and all other entries unchanged.  Diagonal cells that
+        fall outside the matrix are ignored.
     """
     m, n = A.shape[-2], A.shape[-1]
     rows = jnp.arange(m)
@@ -226,6 +248,13 @@ def toeplitz_2d(
         Output ``(m, n)``.  Defaults to ``(len(c), len(r))``.
     fill_value
         Fill for cells outside the support of ``c`` / ``r``.
+
+    Returns
+    -------
+    Float[Array, 'm n']
+        The ``(m, n)`` Toeplitz matrix whose first column is ``c`` and
+        whose first row is ``r``, with cells beyond the support of ``c``
+        and ``r`` set to ``fill_value``.
     """
     if r is None:
         r = c
@@ -271,10 +300,31 @@ def toeplitz(
 ) -> Float[Array, '... m n']:
     """Toeplitz matrix construction with leading batch support.
 
-    Vectorises ``toeplitz_2d`` over any leading axes; both ``c``
-    and ``r`` must share the same leading shape.
+    Vectorises :func:`toeplitz_2d` over any leading axes; both ``c`` and
+    ``r`` must share the same leading batch shape.  See
+    :func:`toeplitz_2d` for the per-sample semantics, including the
+    handling of ``shape`` and ``fill_value``.
 
-    See ``toeplitz_2d`` for the per-sample semantics.
+    Parameters
+    ----------
+    c : Float[Array, '... mc']
+        First column of each Toeplitz matrix, with arbitrary leading
+        batch axes and a trailing length ``mc``.
+    r : Float[Array, '... nr'], optional
+        First row of each Toeplitz matrix, sharing the leading batch axes
+        of ``c`` and with trailing length ``nr``.  If ``None``, defaults
+        to ``c`` (symmetric Toeplitz).
+    shape : tuple of int, optional
+        Output ``(m, n)`` of each Toeplitz block.  Defaults to
+        ``(mc, nr)``.
+    fill_value : float
+        Fill for cells outside the support of ``c`` / ``r``.
+
+    Returns
+    -------
+    Float[Array, '... m n']
+        The batch of ``(m, n)`` Toeplitz matrices, carrying the shared
+        leading batch axes of ``c`` and ``r``.
     """
     if r is None:
         r = c
@@ -301,30 +351,34 @@ def sym2vec(
     sym: Num[Array, '... i i'],
     offset: int = 1,
 ) -> Num[Array, '... n']:
-    """Vec of the upper triangle of a symmetric matrix block.
+    r"""Vec of the upper triangle of a symmetric matrix block.
 
     Output entries follow the row-major order of the upper triangle
-    starting at the diagonal offset by ``offset``.
+    starting at the diagonal offset by ``offset``.  This is the inverse
+    of :func:`vec2sym`.
 
     Parameters
     ----------
-    sym
-        Symmetric matrix block.  (Not checked.)
-    offset
-        Diagonal offset.  Default ``1`` (skip main diagonal,
-        producing ``binom(i, 2) = i (i - 1) / 2`` entries).  Use
+    sym : Num[Array, '... i i']
+        Symmetric matrix block.  (Symmetry is assumed, not checked.)
+    offset : int
+        Diagonal offset.  Default ``1`` (skip the main diagonal,
+        producing :math:`\binom{i}{2} = i (i - 1) / 2` entries).  Use
         ``offset=0`` to include the main diagonal.
 
     Returns
     -------
-    The vec, shape ``(..., n)``.
+    Num[Array, '... n']
+        The vectorised upper triangle, carrying the leading batch axes of
+        ``sym`` and a trailing axis of length ``n`` equal to the number
+        of selected entries.
 
     Notes
     -----
-    The hand-rolled ``custom_vjp``: ``sym2vec`` strictly drops half
-    the matrix, so the backward (``vec2sym``-like) is masked to the
-    upper triangle so the gradient through the dropped half is zero
-    (rather than mirrored).
+    The hand-rolled ``custom_vjp`` reflects that this operation strictly
+    drops half the matrix, so its backward is masked to the upper
+    triangle: the gradient through the dropped lower triangle is zero
+    rather than mirrored.
     """
     idx = jnp.triu_indices(m=sym.shape[-2], n=sym.shape[-1], k=offset)
     vec = sym[..., idx[0], idx[1]]
@@ -336,18 +390,31 @@ def vec2sym(
     vec: Num[Array, '... n'],
     offset: int = 1,
 ) -> Num[Array, '... i i']:
-    """Symmetric matrix from the vec of its upper triangle.
+    r"""Symmetric matrix from the vec of its upper triangle.
 
-    The matrix size ``i`` is recovered from ``n`` by solving
-    ``n = binom(i - offset + 1, 2)`` (the closed-form
-    ``i = ceil((sqrt(8n + 1) + 1) / 2) + (offset - 1)``).
+    The inverse of :func:`sym2vec`.  The matrix side length is recovered
+    from ``n`` in closed form as
+    :math:`\lfloor (\sqrt{8 n + 1} + 1) / 2 \rfloor + (\text{offset} - 1)`,
+    then the vector is written into the upper triangle at the named
+    offset and reflected across it: entries off the named diagonal are
+    duplicated into the lower triangle, while entries on it are left
+    unduplicated.
 
-    The forward symmetrises by mirroring (entries off the named
-    diagonal are duplicated; entries on the diagonal are not).
+    Parameters
+    ----------
+    vec : Num[Array, '... n']
+        Vectorised upper triangle, with arbitrary leading batch axes and
+        a trailing axis of length ``n``.
+    offset : int
+        Diagonal offset at which ``vec`` was extracted.  Default ``1``
+        (the strict upper triangle, excluding the main diagonal).  Use
+        ``offset=0`` if ``vec`` includes the main diagonal.
 
-    Parameters / Returns
-    --------------------
-    See ``sym2vec``.
+    Returns
+    -------
+    Num[Array, '... i i']
+        The reconstructed symmetric matrix block, carrying the leading
+        batch axes of ``vec``.
     """
     n = vec.shape[-1]
     side = int(0.5 * (math.sqrt(8 * n + 1) + 1)) + (offset - 1)
@@ -364,15 +431,28 @@ def vec2sym(
 def squareform(X: Num[Array, '...']) -> Num[Array, '...']:
     """Toggle between vec and square forms of a symmetric matrix.
 
-    A convenience: if ``X`` looks square and symmetric (with rough
-    tolerance), return ``sym2vec(X, offset=1)``; otherwise return
-    ``vec2sym(X, offset=1)``.
+    A convenience wrapper: if ``X`` looks square and symmetric (up to a
+    rough tolerance), return ``sym2vec(X, offset=1)``; otherwise treat it
+    as a vector and return ``vec2sym(X, offset=1)``.
+
+    Parameters
+    ----------
+    X : Num[Array, '...']
+        Either a square symmetric matrix block to vectorise, or the
+        vectorised strict upper triangle to expand into a matrix.
+
+    Returns
+    -------
+    Num[Array, '...']
+        The complementary form: the vectorised strict upper triangle if
+        ``X`` was a symmetric matrix, otherwise the reconstructed
+        symmetric matrix.
 
     Notes
     -----
-    Unlike ``scipy.spatial.distance.squareform``, we do not verify
-    that the input is a strictly conforming form.  When in doubt,
-    call ``sym2vec`` / ``vec2sym`` directly with the explicit
+    Unlike ``scipy.spatial.distance.squareform``, this does not verify
+    that the input is a strictly conforming form.  When in doubt, call
+    :func:`sym2vec` / :func:`vec2sym` directly with the explicit
     ``offset``.
     """
     if (

@@ -2,49 +2,63 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Variance-components REML for voxelwise LMEs.
+Variance-components REML for voxelwise linear mixed-effects models.
 
 The model
 ---------
 
-For each voxel ``v``, the LME is::
+For each voxel :math:`v`, the linear mixed-effects model is
+
+.. code::
 
     y_v = X beta_v + Z b_v + eps_v
-    b_v ~ N(0, sigma_b^2 I_q)
-    eps_v ~ N(0, sigma_e^2 I_N)
-    Cov(y_v) = V = sigma_b^2 ZZ^T + sigma_e^2 I_N
+
+with :math:`b_v \\sim \\mathcal{N}(0, \\sigma_b^2 I_q)`,
+:math:`\\epsilon_v \\sim \\mathcal{N}(0, \\sigma_e^2 I_N)`, so the marginal
+covariance of the response is
+:math:`V = \\sigma_b^2 Z Z^{\\top} + \\sigma_e^2 I_N`.
 
 The fixed-effect design ``X`` and random-effect design ``Z`` are
 **shared** across voxels (the typical fMRI / dMRI case: one
-group-level design, applied to every voxel's response).  Only
-``y_v`` varies per voxel.
+group-level design, applied to every voxel's response).  Only the
+per-voxel response :math:`y_v` varies.
 
 The profile REML (Restricted Maximum Likelihood) negative log-
-likelihood, after profiling out ``beta``, is::
+likelihood, after profiling out :math:`\\beta`, is
 
-    nll(theta) = 0.5 * [log|V| + log|X^T V^{-1} X| + r^T V^{-1} r]
+.. math::
 
-where ``r = y - X beta_hat`` and ``beta_hat = (X^T V^{-1} X)^{-1}
-X^T V^{-1} y``.  We parameterise ``theta = log(sigma^2)`` (log-
-space) so optimisation is unconstrained.
+    \\mathrm{nll}(\\theta) = \\tfrac{1}{2}
+        \\bigl[\\log|V| + \\log|X^{\\top} V^{-1} X|
+        + r^{\\top} V^{-1} r\\bigr]
+
+where :math:`r = y - X \\hat{\\beta}` and
+:math:`\\hat{\\beta} = (X^{\\top} V^{-1} X)^{-1} X^{\\top} V^{-1} y`.  The
+variance components are parameterised as :math:`\\theta = \\log(\\sigma^2)`
+(log-space) so optimisation is unconstrained.
 
 The FaST-LMM spectral trick
 ---------------------------
 
-Lippert et al. 2011 (FaST-LMM): eigendecompose ``ZZ^T = U Lambda
-U^T``.  In the rotated basis ``y_rot = U^T y``, ``X_rot = U^T X``,
-the total covariance is diagonal::
+Following Lippert et al. (2011), eigendecompose
+:math:`Z Z^{\\top} = U \\Lambda U^{\\top}`.  In the rotated basis
+:math:`y_{\\mathrm{rot}} = U^{\\top} y`,
+:math:`X_{\\mathrm{rot}} = U^{\\top} X`, the total covariance is diagonal:
 
-    V_rot = sigma_b^2 Lambda + sigma_e^2 I = diag(d)
-    d_i = sigma_b^2 lambda_i + sigma_e^2
+.. math::
+
+    V_{\\mathrm{rot}} = \\sigma_b^2 \\Lambda + \\sigma_e^2 I
+        = \\operatorname{diag}(d), \\qquad
+    d_i = \\sigma_b^2 \\lambda_i + \\sigma_e^2 .
 
 Every operation in the Newton iteration becomes elementwise on
-``d``: ``log|V| = sum_i log d_i``; ``V^{-1}`` is ``diag(1/d)``;
-``X^T V^{-1} X = sum_i x_i x_i^T / d_i``.  Per-iteration cost
-drops from ``O(N^3)`` (naive) to ``O(N p^2 + N)`` (rotated).
+:math:`d`: :math:`\\log|V| = \\sum_i \\log d_i`; :math:`V^{-1}` is
+:math:`\\operatorname{diag}(1/d)`;
+:math:`X^{\\top} V^{-1} X = \\sum_i x_i x_i^{\\top} / d_i`.  Per-iteration
+cost drops from :math:`O(N^3)` (naive) to :math:`O(N p^2 + N)` (rotated).
 
-The eigendecomposition of ``ZZ^T`` is computed **once** at the
-outer call -- shared across all voxels via vmap closure.
+The eigendecomposition of :math:`Z Z^{\\top}` is computed **once** at the
+outer call -- shared across all voxels via a vmap closure.
 
 Memory regime
 -------------
@@ -52,7 +66,8 @@ Memory regime
 For ``V`` voxels, ``N`` subjects, ``p`` fixed-effect coefficients:
 
 - Shared (computed once):
-  - ``U``, ``Lambda``: ``(N, N)`` + ``(N,)``  --  ``~N^2 * 4`` bytes.
+  - ``U``, :math:`\\Lambda`: ``(N, N)`` + ``(N,)``  --  :math:`\\sim 4 N^2`
+    bytes.
   - ``X_rot``: ``(N, p)``.
 - Per-voxel (vmap):
   - ``y_rot``: ``(N,)``.
@@ -73,12 +88,12 @@ Solver
 ------
 
 The per-voxel inner loop is the shared ``_varcomp`` AI-REML engine:
-size-dispatched fixed-effect algebra (closed-form for ``p <= 2``,
-``LU`` for ``p > 2`` -- no per-voxel cuSOLVER ``potrf`` / ``syevd``)
+size-dispatched fixed-effect algebra (closed-form for :math:`p \\le 2`,
+``LU`` for :math:`p > 2` -- no per-voxel cuSOLVER ``potrf`` / ``syevd``)
 and *analytic* REML score + average-information curvature (no
-second-order autodiff through a Cholesky).  See ``_varcomp.py`` for
-the derivation.  The ``ZZ^T`` eigendecomposition that supplies the
-diagonalising basis is the one shared, one-off ``safe_eigh`` call.
+second-order autodiff through a Cholesky).  See ``_varcomp`` for
+the derivation.  The :math:`Z Z^{\\top}` eigendecomposition that supplies
+the diagonalising basis is the one shared, one-off ``safe_eigh`` call.
 
 Differentiability
 -----------------
@@ -94,10 +109,14 @@ function-theorem VJP follow-up.
 
 References
 ----------
-- Lindstrom, M. J., & Bates, D. M. (1990). Newton-Raphson and
-  EM algorithms for linear mixed-effects models.  JASA 83.
-- Lippert, C., Listgarten, J., et al. (2011). FaST linear mixed
-  models for genome-wide association studies. Nat. Methods 8.
+- Lindstrom, M. J., & Bates, D. M. (1988). Newton-Raphson and
+  EM algorithms for linear mixed-effects models for repeated-measures
+  data.  Journal of the American Statistical Association, 83(404),
+  1014-1022.  https://doi.org/10.1080/01621459.1988.10478693
+- Lippert, C., Listgarten, J., Liu, Y., Kadie, C. M., Davidson, R. I.,
+  & Heckerman, D. (2011). FaST linear mixed models for genome-wide
+  association studies.  Nature Methods, 8(10), 833-835.
+  https://doi.org/10.1038/nmeth.1681
 """
 
 from __future__ import annotations
@@ -132,14 +151,35 @@ _HALF_LOG_2PI = 0.5 * math.log(2.0 * math.pi)
 def _kr_rotated_basis(
     X: Float[Array, 'N p'], Z: Float[Array, 'N q']
 ) -> Tuple[Float[Array, 'N p'], Float[Array, 'N']]:
-    """The shared FaST-LMM rotation ``(X_rot, lambdas)`` from ``ZZ^T`` -- the
-    one-off ``safe_eigh`` Kenward-Roger needs to rebuild the rotated basis."""
+    """Rebuild the shared FaST-LMM rotation from the random-effect design.
+
+    Eigendecomposes :math:`Z Z^{\\top}` (the one-off ``safe_eigh`` call the
+    Kenward-Roger correction needs to rebuild the rotated basis) and returns the
+    fixed-effect design rotated into the diagonalising eigenbasis together with
+    the clamped eigenvalues.
+
+    Parameters
+    ----------
+    X
+        Fixed-effect design, ``(N, p)``.
+    Z
+        Random-effect design, ``(N, q)``.
+
+    Returns
+    -------
+    X_rot : Float[Array, 'N p']
+        The fixed-effect design rotated into the eigenbasis of
+        :math:`Z Z^{\\top}`, :math:`U^{\\top} X`.
+    lambdas : Float[Array, 'N']
+        The eigenvalues of :math:`Z Z^{\\top}`, clamped to be non-negative.
+    """
     from ...linalg._solver import safe_eigh
 
     Xj, Zj = jnp.asarray(X), jnp.asarray(Z)
     ZZt = Zj @ Zj.T
     eigvals, U = safe_eigh(0.5 * (ZZt + ZZt.T))
     return U.T @ Xj, jnp.clip(eigvals, 0.0, None)
+
 
 __all__ = [
     'REMLResult',
@@ -176,21 +216,23 @@ class REMLResult:
     Attributes
     ----------
     theta_hat
-        ``(V, 2)`` -- ``[log(sigma_b^2), log(sigma_e^2)]`` per voxel.
+        ``(V, 2)`` -- :math:`[\\log(\\sigma_b^2), \\log(\\sigma_e^2)]` per voxel.
         Take ``jnp.exp`` for the natural variance scale.
     beta_hat
         ``(V, p)`` -- fixed-effect estimates per voxel.
     log_lik
         ``(V,)`` -- profile REML log-likelihood at the fit.
     fixed_cov
-        ``(V, p, p)`` -- ``Cov(beta_hat) = (X^T V^{-1} X)^{-1}`` at the fit.
-        The fixed-effect covariance for a contrast test (``lme_t_contrast``).
+        ``(V, p, p)`` -- :math:`\\operatorname{Cov}(\\hat{\\beta})
+        = (X^{\\top} V^{-1} X)^{-1}` at the fit.  The fixed-effect covariance for
+        a contrast test (:func:`lme_t_contrast`).
     theta_cov
-        ``(V, 2, 2)`` -- ``Cov(theta_hat)`` (inverse average-information), for
-        the Satterthwaite denominator degrees of freedom.
+        ``(V, 2, 2)`` -- :math:`\\operatorname{Cov}(\\hat{\\theta})` (inverse
+        average-information), for the Satterthwaite denominator degrees of
+        freedom.
     grad_m
         ``(V, 2, p, p)`` -- the contrast-independent Satterthwaite gradient
-        tensors ``M_k`` (see ``_varcomp.varcomp_inference``).
+        tensors :math:`M_k` (see ``_varcomp.varcomp_inference``).
     """
 
     theta_hat: Float[Array, 'V 2']
@@ -248,20 +290,40 @@ def _default_theta_init(
     starting point is closer to the "no random effects" boundary
     than to the "all random" boundary, which makes Newton more
     likely to converge to the true optimum without overshooting
-    when the true ``sigma_b^2`` is small.
+    when the true :math:`\\sigma_b^2` is small.
 
-    Concretely: ``sigma_e^2_init = 0.5 * var(y)``,
-    ``sigma_b^2_init = 0.1 * var(y) / mean(basis)`` (so the
-    contribution to the diagonal is comparable in magnitude to
-    ``sigma_e^2_init``), floored at ``1e-6`` so the log is finite.
+    Concretely, the residual component is initialised at
+    :math:`0.5 \\cdot \\operatorname{var}(y)` and each random component at
+    :math:`0.1 \\cdot \\operatorname{var}(y) / \\operatorname{mean}(\\mathrm{basis})`
+    (so its contribution to the diagonal is comparable in magnitude to the
+    residual initialiser), floored at ``1e-6`` so the log is finite.
 
-    This is the default for ``reml_fit`` only; ``flame_two_level``
-    supplies its own initialiser (``_flame_default_log_init``).
-    Caveat: for a random-effect design whose basis (``ZZ^T`` spectrum)
-    has a large mean, ``sigma_b^2_init`` can hit the ``1e-6`` floor and
-    start Newton near the ``sigma_b^2 -> 0`` boundary; the
-    damped + backtracked iteration still climbs off it given enough
-    iterations, but raise ``n_iter`` for such designs.
+    This is the default for :func:`reml_fit` only;
+    :func:`~nitrix.stats.flame_two_level` supplies its own initialiser.
+
+    Parameters
+    ----------
+    y_rot
+        ``(..., N)`` per-voxel response rotated into the diagonalising basis
+        (leading dimensions broadcast over voxels).
+    V_basis_diag
+        ``(K, N)`` diagonal contribution of each of the ``K`` variance
+        components to the marginal covariance in the rotated basis (rows are the
+        clamped eigenvalues and the residual ones-row).
+
+    Returns
+    -------
+    Float[Array, '... K']
+        The per-component initial log-variances, one entry per variance
+        component.
+
+    Notes
+    -----
+    For a random-effect design whose basis (:math:`Z Z^{\\top}` spectrum) has a
+    large mean, the random-component initialiser can hit the ``1e-6`` floor and
+    start Newton near the :math:`\\sigma_b^2 \\to 0` boundary; the damped and
+    backtracked iteration still climbs off it given enough iterations, but raise
+    ``n_iter`` for such designs.
     """
     y_var = jnp.var(y_rot, axis=-1, keepdims=True)  # (..., 1)
     K = V_basis_diag.shape[0]
@@ -284,12 +346,30 @@ def _lowrank_theta_init(
     s2: Float[Array, 'q'],
     n: int,
 ) -> Float[Array, 'V 2']:
-    """Low-rank counterpart of ``_default_theta_init``.
+    """Low-rank counterpart of :func:`_default_theta_init`.
 
-    Reproduces the dense heuristic's split (10% of ``var(y)`` to the random
-    component, 50% to the residual, normalised) using the *full* basis scale
-    ``mean_N(lambda) = sum(s2) / N`` -- so the low-rank fit starts from the same
-    ``theta`` as the dense path and converges to the same optimum.
+    Reproduces the dense heuristic's split (10% of :math:`\\operatorname{var}(y)`
+    to the random component, 50% to the residual, normalised) using the *full*
+    basis scale :math:`\\operatorname{mean}_N(\\lambda) = \\sum s^2 / N` -- so the
+    low-rank fit starts from the same :math:`\\theta` as the dense path and
+    converges to the same optimum.
+
+    Parameters
+    ----------
+    Y
+        ``(V, N)`` per-voxel responses.
+    s2
+        ``(q,)`` range spectrum -- the non-negative eigenvalues of
+        :math:`Z^{\\top} Z` (equivalently the non-zero eigenvalues of
+        :math:`Z Z^{\\top}`).
+    n
+        The number of observations ``N`` (used to form the full basis scale).
+
+    Returns
+    -------
+    Float[Array, 'V 2']
+        The per-voxel initial log-variances
+        :math:`[\\log \\sigma_b^2, \\log \\sigma_e^2]`.
     """
     y_var = jnp.var(Y, axis=-1, keepdims=True)  # (V, 1)
     basis_scale_b = jnp.maximum(jnp.sum(s2) / n, 1e-12)  # mean_N(lambda)
@@ -309,12 +389,41 @@ def _reml_fit_lowrank(
     damping: float,
     block: Optional[int],
 ) -> REMLResult:
-    """FaST-LMM low-rank REML: ``q x q`` eig of ``Z^T Z`` instead of ``N x N``.
+    """FaST-LMM low-rank REML fit.
 
-    Requires ``q <= N`` with ``Z`` of full column rank (the usual random-effect
-    design).  ``ZZ^T = U_r diag(s2) U_r^T`` with ``U_r = Z W / sqrt(s2)``
-    (``N x q``), and the ``N - q`` null directions enter only through per-voxel
-    Gram aggregates -- never an ``N x N`` factor (see ``_lowrank``).
+    Runs the FaST-LMM spectral fit through the low-rank decomposition: a
+    :math:`q \\times q` eigendecomposition of :math:`Z^{\\top} Z` in place of the
+    dense :math:`N \\times N` eigendecomposition of :math:`Z Z^{\\top}`.  Requires
+    :math:`q \\le N`.  The range factor is
+    :math:`Z Z^{\\top} = U_r \\operatorname{diag}(s^2) U_r^{\\top}` with
+    :math:`U_r = Z W / \\sqrt{s^2}` (shape ``(N, q)``), and the :math:`N - q` null
+    directions enter only through per-voxel Gram aggregates -- never an
+    :math:`N \\times N` factor (see ``_lowrank``).
+
+    Parameters
+    ----------
+    Y
+        ``(V, N)`` per-voxel responses.
+    X
+        Fixed-effect design, ``(N, p)``.  Shared across voxels.
+    Z
+        Random-effect design, ``(N, q)``.  Shared across voxels.
+    theta_init
+        ``(V, 2)`` per-voxel initial log-variances, or ``None`` to use the
+        low-rank heuristic (:func:`_lowrank_theta_init`).
+    n_iter
+        Fixed Newton-scoring iteration count.
+    damping
+        Levenberg-Marquardt-style damping on the average-information matrix.
+    block
+        Optional voxel-block size bounding the number of voxels live at once, or
+        ``None`` for a single ``vmap`` over all voxels.
+
+    Returns
+    -------
+    REMLResult
+        The per-voxel fit, with the fixed-effect / variance-component inference
+        fields populated.
     """
     from ...linalg._solver import safe_eigh
     from ._lowrank import fit_lowrank_reml, lowrank_inference
@@ -395,9 +504,10 @@ class LMEContrast(NamedTuple):
     Attributes
     ----------
     effect
-        ``(V,)`` -- the contrast estimate ``c^T beta_hat``.
+        ``(V,)`` -- the contrast estimate :math:`c^{\\top} \\hat{\\beta}`.
     se
-        ``(V,)`` -- its standard error ``sqrt(c^T Cov(beta_hat) c)``.
+        ``(V,)`` -- its standard error
+        :math:`\\sqrt{c^{\\top} \\operatorname{Cov}(\\hat{\\beta})\\, c}`.
     t
         ``(V,)`` -- the t-statistic ``effect / se``.
     df
@@ -421,43 +531,53 @@ def lme_t_contrast(
     X: Optional[Float[Array, 'N p']] = None,
     Z: Optional[Float[Array, 'N q']] = None,
 ) -> LMEContrast:
-    """Per-voxel t-test of a mixed-model fixed-effect contrast ``c^T beta = 0``.
+    """Per-voxel t-test of a fixed-effect contrast :math:`c^{\\top} \\beta = 0`.
 
-    The standard error is ``sqrt(c^T (X^T V^{-1} X)^{-1} c)`` from the fitted
+    The standard error is
+    :math:`\\sqrt{c^{\\top} (X^{\\top} V^{-1} X)^{-1} c}` from the fitted
     ``result.fixed_cov``; the denominator degrees of freedom are
     **Satterthwaite** (the default, ``dof='satterthwaite'``):
 
-        df = 2 (c^T C c)^2 / (g^T Cov(theta_hat) g),
-        g_k = d(c^T C c)/dtheta_k = w^T M_k w,   w = C c
+    .. math::
 
-    using the per-voxel ``theta_cov`` / ``grad_m`` the fit already formed
-    (``_varcomp.varcomp_inference``).  cuSOLVER-free and differentiable.
+        \\mathrm{df} = \\frac{2 (c^{\\top} C c)^2}
+            {g^{\\top} \\operatorname{Cov}(\\hat{\\theta})\\, g}, \\qquad
+        g_k = \\frac{\\partial (c^{\\top} C c)}{\\partial \\theta_k}
+            = w^{\\top} M_k w, \\quad w = C c
+
+    using the per-voxel ``theta_cov`` / ``grad_m`` the fit already formed.
+    cuSOLVER-free and differentiable.
 
     ``dof='kr'`` instead applies the **Kenward-Roger** small-sample correction:
-    the adjusted covariance ``Phi_A`` (inflated for variance-component
-    uncertainty) and the scaled-``F`` denominator df, with ``t = sign(effect)
-    sqrt(F_KR)`` on ``df = m``.  KR rebuilds the rotated basis, so the original
-    design must be re-passed as ``X=`` / ``Z=`` (the compressed ``REMLResult``
-    does not retain it); see :mod:`._kr`.
+    the adjusted covariance :math:`\\Phi_A` (inflated for variance-component
+    uncertainty) and the scaled-:math:`F` denominator df, with
+    :math:`t = \\operatorname{sign}(\\mathrm{effect}) \\sqrt{F_{\\mathrm{KR}}}`
+    on :math:`\\mathrm{df} = m`.  The Kenward-Roger path rebuilds the rotated
+    basis, so the original design must be re-passed as ``X=`` / ``Z=`` (the
+    compressed :class:`REMLResult` does not retain it).
 
     Parameters
     ----------
     result
-        A :class:`REMLResult` (``reml_fit`` / R1) **or** the R2
-        :class:`LMEResult` (``lme_fit`` with a random slope) -- both carry the
-        ``fixed_cov`` / ``theta_cov`` / ``grad_m`` inference fields the
-        Satterthwaite df consumes (audit D3-R2).  ``dof='kr'`` is R1-only.
+        A :class:`REMLResult` (:func:`reml_fit`, the scalar-intercept tier)
+        **or** an :class:`LMEResult` (:func:`lme_fit` with a random slope) --
+        both carry the ``fixed_cov`` / ``theta_cov`` / ``grad_m`` inference
+        fields the Satterthwaite df consumes.  ``dof='kr'`` accepts only a
+        :class:`REMLResult`.
     contrast
-        ``(p,)`` contrast vector ``c`` over the fixed effects.
+        ``(p,)`` contrast vector :math:`c` over the fixed effects.
     dof
-        ``'satterthwaite'`` (default) or ``'kr'`` (Kenward-Roger, R1-only; pass
-        ``X`` / ``Z``).
+        ``'satterthwaite'`` (default) or ``'kr'`` (Kenward-Roger, accepts only a
+        :class:`REMLResult`; pass ``X`` / ``Z``).
     X, Z
-        The original fixed / random design -- required for ``dof='kr'``.
+        The original fixed ``(N, p)`` / random ``(N, q)`` design -- required for
+        ``dof='kr'``.
 
     Returns
     -------
-    ``LMEContrast`` ``(effect, se, t, df, p_value)``.
+    LMEContrast
+        The per-voxel contrast record :class:`LMEContrast`
+        ``(effect, se, t, df, p_value)``.
     """
     if dof not in ('satterthwaite', 'kr'):
         raise ValueError(
@@ -529,8 +649,8 @@ class LMEFContrast(NamedTuple):
     ----------
     f
         ``(V,)`` -- the Wald F-statistic
-        ``(C beta)^T (C Cov(beta) C^T)^{-1} (C beta) / L`` for the ``L``-row
-        contrast matrix ``C``.
+        :math:`(C \\beta)^{\\top} (C \\operatorname{Cov}(\\beta) C^{\\top})^{-1}
+        (C \\beta) / L` for the :math:`L`-row contrast matrix :math:`C`.
     df1
         ``(V,)`` -- numerator degrees of freedom ``= L`` (the contrast rank;
         constant across voxels, returned per-voxel for a uniform record).
@@ -554,58 +674,70 @@ def lme_f_contrast(
     X: Optional[Float[Array, 'N p']] = None,
     Z: Optional[Float[Array, 'N q']] = None,
 ) -> LMEFContrast:
-    """Per-voxel F-test of a multi-row mixed-model contrast ``C beta = 0``.
+    """Per-voxel F-test of a multi-row mixed-model contrast :math:`C \\beta = 0`.
 
-    For an ``L``-row contrast matrix ``C`` (a single ``(p,)`` row is promoted to
-    ``L = 1``), the Wald F-statistic is
+    For an :math:`L`-row contrast matrix :math:`C` (a single ``(p,)`` row is
+    promoted to :math:`L = 1`), the Wald F-statistic is
 
-        F = (C beta)^T (C Cov(beta) C^T)^{-1} (C beta) / L
+    .. math::
 
-    with ``Cov(beta) = (X^T V^{-1} X)^{-1}`` from ``result.fixed_cov``.  The
-    denominator degrees of freedom use the **Fai-Cornelius / lmerTest**
-    multivariate-Satterthwaite construction (``dof='satterthwaite'``, the
-    default):
+        F = (C \\beta)^{\\top} (C \\operatorname{Cov}(\\beta) C^{\\top})^{-1}
+            (C \\beta) / L
 
-    1. eigendecompose ``M = C Cov(beta) C^T = P diag(d) P^T`` (a small ``L x L``
+    with :math:`\\operatorname{Cov}(\\beta) = (X^{\\top} V^{-1} X)^{-1}` from
+    ``result.fixed_cov``.  The denominator degrees of freedom use the
+    **Fai-Cornelius / lmerTest** multivariate-Satterthwaite construction
+    (``dof='satterthwaite'``, the default):
+
+    1. eigendecompose
+       :math:`M = C \\operatorname{Cov}(\\beta) C^{\\top}
+       = P \\operatorname{diag}(d) P^{\\top}` (a small :math:`L \\times L`
        symmetric solve, cuSOLVER-free ``sym_eig_jacobi``);
-    2. each eigendirection ``l_m = (P^T C)_m`` is an independent 1-df contrast
-       with variance ``d_m`` and a per-direction Satterthwaite
-       ``nu_m = 2 d_m^2 / (g_m^T Cov(theta) g_m)``, ``g_{m,k} = w_m^T M_k w_m``,
-       ``w_m = Cov(beta) l_m`` (the same ``M_k`` / ``Cov(theta)`` the fit formed,
-       ``result.grad_m`` / ``result.theta_cov``);
-    3. combine by the E-method: ``E = sum_m nu_m / (nu_m - 2)`` over
-       ``nu_m > 2``, and ``df2 = 2 E / (E - L)``.
+    2. each eigendirection :math:`l_m = (P^{\\top} C)_m` is an independent 1-df
+       contrast with variance :math:`d_m` and a per-direction Satterthwaite
+       :math:`\\nu_m = 2 d_m^2 / (g_m^{\\top} \\operatorname{Cov}(\\theta)\\, g_m)`,
+       :math:`g_{m,k} = w_m^{\\top} M_k w_m`,
+       :math:`w_m = \\operatorname{Cov}(\\beta)\\, l_m` (the same :math:`M_k` /
+       :math:`\\operatorname{Cov}(\\theta)` the fit formed, ``result.grad_m`` /
+       ``result.theta_cov``);
+    3. combine by the E-method:
+       :math:`E = \\sum_m \\nu_m / (\\nu_m - 2)` over :math:`\\nu_m > 2`, and
+       :math:`\\mathrm{df}_2 = 2 E / (E - L)`.
 
-    For ``L = 1`` this collapses **exactly** to ``lme_t_contrast`` (``F = t^2``,
-    ``df2`` the t-Satterthwaite df, same p-value).  The F-statistic is
-    differentiable; the denominator df is not (the iterative eigensolver feeds it
-    under ``stop_gradient`` -- a model-selection-style scalar, per v3 §1.3).
+    For :math:`L = 1` this collapses **exactly** to :func:`lme_t_contrast`
+    (:math:`F = t^2`, ``df2`` the t-Satterthwaite df, same p-value).  The
+    F-statistic is differentiable; the denominator df is not (the iterative
+    eigensolver feeds it under ``stop_gradient`` -- a model-selection-style
+    scalar).
 
     ``dof='kr'`` instead applies the **Kenward-Roger** small-sample correction:
-    the adjusted covariance ``Phi_A`` and the moment-matched scaled-``F`` (their
-    KR2), referred to ``F(L, m)``.  It rebuilds the rotated basis, so re-pass the
-    original design as ``X=`` / ``Z=`` (the compressed ``REMLResult`` does not
-    retain it); ``F = t^2`` consistency with ``lme_t_contrast(dof='kr')`` holds
-    for ``L = 1``.  See :mod:`._kr`.
+    the adjusted covariance :math:`\\Phi_A` and the moment-matched
+    scaled-:math:`F`, referred to :math:`F(L, m)`.  It rebuilds the rotated
+    basis, so re-pass the original design as ``X=`` / ``Z=`` (the compressed
+    :class:`REMLResult` does not retain it); :math:`F = t^2` consistency with
+    ``lme_t_contrast(dof='kr')`` holds for :math:`L = 1`.
 
     Parameters
     ----------
     result
-        A :class:`REMLResult` (``reml_fit`` / R1) **or** the R2
-        :class:`LMEResult` (``lme_fit`` with a random slope) -- both carry the
-        ``fixed_cov`` / ``theta_cov`` / ``grad_m`` inference fields (audit
-        D3-R2).  ``dof='kr'`` is R1-only.
+        A :class:`REMLResult` (:func:`reml_fit`, the scalar-intercept tier)
+        **or** an :class:`LMEResult` (:func:`lme_fit` with a random slope) --
+        both carry the ``fixed_cov`` / ``theta_cov`` / ``grad_m`` inference
+        fields.  ``dof='kr'`` accepts only a :class:`REMLResult`.
     contrast
         ``(L, p)`` contrast matrix (or a ``(p,)`` single-row contrast).
     dof
         ``'satterthwaite'`` (default) or ``'kr'`` (Kenward-Roger; pass ``X`` /
         ``Z``).
     X, Z
-        The original fixed / random design -- required for ``dof='kr'``.
+        The original fixed ``(N, p)`` / random ``(N, q)`` design -- required for
+        ``dof='kr'``.
 
     Returns
     -------
-    ``LMEFContrast`` ``(f, df1, df2, p_value)``.
+    LMEFContrast
+        The per-voxel F-contrast record :class:`LMEFContrast`
+        ``(f, df1, df2, p_value)``.
     """
     if dof not in ('satterthwaite', 'kr'):
         raise ValueError(
@@ -712,17 +844,17 @@ def reml_fit(
 ) -> REMLResult:
     """Voxelwise variance-components REML fit.
 
-    Fits the LME
+    Fits the linear mixed-effects model
 
-    .. code::
+    .. math::
 
-        y_v = X beta_v + Z b_v + eps_v
-        b_v ~ N(0, sigma_b^2 I_q)
-        eps_v ~ N(0, sigma_e^2 I_N)
+        y_v = X \\beta_v + Z b_v + \\epsilon_v, \\qquad
+        b_v \\sim \\mathcal{N}(0, \\sigma_b^2 I_q), \\quad
+        \\epsilon_v \\sim \\mathcal{N}(0, \\sigma_e^2 I_N)
 
     independently for each voxel, sharing the fixed-effect design
     ``X`` and the random-effect design ``Z`` across voxels.  Uses
-    the FaST-LMM spectral trick: eigendecompose ``ZZ^T`` once,
+    the FaST-LMM spectral trick: eigendecompose :math:`Z Z^{\\top}` once,
     rotate ``y`` and ``X`` into the diagonalising basis, then
     Newton-score on the variance components in log-space.
 
@@ -736,10 +868,10 @@ def reml_fit(
         intercept column (no intercept is added).
     Z
         Random-effect design, ``(N, q)``.  Shared across voxels.
-        The random-effect covariance is ``sigma_b^2 I_q`` (single
+        The random-effect covariance is :math:`\\sigma_b^2 I_q` (single
         variance component); pass each component's design matrix
         column to ``Z`` to model multiple random effects (currently
-        all share ``sigma_b^2``; for separate variance components
+        all share :math:`\\sigma_b^2`; for separate variance components
         per random effect, the lower-level ``_varcomp`` core accepts a
         general ``(K, N)`` basis).
     theta_init
@@ -758,28 +890,31 @@ def reml_fit(
         on brain-scale ``V``.  ``None`` (default) is a single ``vmap``
         over all voxels (identical numerics and HLO to before).
     low_rank
-        Use the FaST-LMM **low-rank** decomposition: a ``q x q`` eig of
-        ``Z^T Z`` (``O(N q^2 + q^3)``) instead of the dense ``N x N`` eig of
-        ``ZZ^T`` (``O(N^3)``).  Requires ``q <= N`` (the usual tall random-effect
-        design); the ``N - q`` null directions enter only through per-voxel Gram
-        aggregates, and a rank-deficient ``Z`` (e.g. phantom one-hot columns from
-        gappy labels) is absorbed by that null space.  **Default ``None``**
-        auto-selects: low-rank when ``q < N`` (the brain-scale case), dense
-        otherwise.  Pass ``True`` / ``False`` to force; the two match to the
-        iterative tolerance.
+        Use the FaST-LMM **low-rank** decomposition: a :math:`q \\times q`
+        eigendecomposition of :math:`Z^{\\top} Z` (:math:`O(N q^2 + q^3)`)
+        instead of the dense :math:`N \\times N` eigendecomposition of
+        :math:`Z Z^{\\top}` (:math:`O(N^3)`).  Requires :math:`q \\le N` (the
+        usual tall random-effect design); the :math:`N - q` null directions
+        enter only through per-voxel Gram aggregates, and a rank-deficient ``Z``
+        (e.g. phantom one-hot columns from gappy labels) is absorbed by that null
+        space.  **Default ``None``** auto-selects: low-rank when :math:`q < N`
+        (the brain-scale case), dense otherwise.  Pass ``True`` / ``False`` to
+        force; the two match to the iterative tolerance.
 
     Returns
     -------
-    ``REMLResult`` with per-voxel ``theta_hat`` (log-variances),
-    ``beta_hat`` (fixed effects), and ``log_lik``.
+    REMLResult
+        The per-voxel fit, with ``theta_hat`` (log-variances), ``beta_hat``
+        (fixed effects), ``log_lik`` and the fixed-effect / variance-component
+        inference fields.
 
     Notes
     -----
-    Eigendecomposition of ``ZZ^T`` uses ``safe_eigh`` (cuSolver-
-    robust fallback) -- the one shared, one-off solver call.  The
-    per-voxel inner loop (``_varcomp``) makes no cuSOLVER call: the
-    fixed-effect algebra is closed-form for ``p <= 2`` and ``LU``-based
-    for ``p > 2``, and the REML derivatives are analytic.
+    Eigendecomposition of :math:`Z Z^{\\top}` uses ``safe_eigh`` (a
+    cuSOLVER-robust fallback) -- the one shared, one-off solver call.  The
+    per-voxel inner loop (``_varcomp``) makes no cuSOLVER call: the fixed-effect
+    algebra is closed-form for :math:`p \\le 2` and ``LU``-based for
+    :math:`p > 2`, and the REML derivatives are analytic.
     """
     from ...linalg._solver import safe_eigh
 
@@ -865,16 +1000,17 @@ def reml_fit(
 )
 @dataclass(frozen=True)
 class NestedLMEResult:
-    """Nested two-level mixed-model fit output (the ``lme_fit`` R3 path).
+    """Nested two-level mixed-model fit output (the :func:`lme_fit` R3 path).
 
     Attributes
     ----------
     beta_hat
         ``(V, p)`` fixed-effect estimates.
     var_outer
-        ``(V,)`` outer random-intercept variance ``sigma1^2`` (``(1 | g1)``).
+        ``(V,)`` outer random-intercept variance :math:`\\sigma_1^2`
+        (``(1 | g1)``).
     var_inner
-        ``(V,)`` inner (nested) random-intercept variance ``sigma2^2``
+        ``(V,)`` inner (nested) random-intercept variance :math:`\\sigma_2^2`
         (``(1 | g1:g2)``).
     sigma_e_sq
         ``(V,)`` residual variance.
@@ -917,7 +1053,7 @@ class NestedLMEResult:
 )
 @dataclass(frozen=True)
 class CrossedLMEResult:
-    """Crossed two-factor mixed-model fit output (the ``lme_fit`` R4 path).
+    """Crossed two-factor mixed-model fit output (the :func:`lme_fit` R4 path).
 
     Attributes
     ----------
@@ -977,17 +1113,18 @@ class CrossedLMEResult:
 )
 @dataclass(frozen=True)
 class LMEResult:
-    """Block-Woodbury (R2) mixed-model fit output -- one correlated / diagonal
-    random slope ``(1 + x | g)`` / ``(x || g)``.
+    """Block-Woodbury (R2) mixed-model fit output for one random slope.
 
-    The ``lme_fit`` dispatcher returns this for the R2 tier; the scalar-intercept
-    R1 tier returns a :class:`REMLResult` (the FaST-LMM path), and the nested /
-    crossed / structured-residual tiers their own result types.
+    The output of the R2 tier -- one correlated or diagonal random slope
+    (``(1 + x | g)`` or ``(x || g)``).  The :func:`lme_fit` dispatcher returns
+    this for the R2 tier; the scalar-intercept R1 tier returns a
+    :class:`REMLResult` (the FaST-LMM path), and the nested / crossed /
+    structured-residual tiers their own result types.
 
     Carries the fixed-effect contrast-inference tensors (``fixed_cov`` /
-    ``theta_cov`` / ``grad_m``, audit D3-R2), so ``lme_t_contrast`` /
-    ``lme_f_contrast`` accept it with the **same** Satterthwaite / Kenward-Roger
-    df machinery as R1.
+    ``theta_cov`` / ``grad_m``), so :func:`lme_t_contrast` /
+    :func:`lme_f_contrast` accept it with the **same** Satterthwaite /
+    Kenward-Roger df machinery as R1.
 
     Attributes
     ----------
@@ -1001,15 +1138,16 @@ class LMEResult:
     log_lik
         ``(V,)`` profile REML log-likelihood.
     fixed_cov
-        ``(V, p, p)`` ``Cov(beta_hat) = (X^T V^{-1} X)^{-1}`` (the contrast
-        numerator covariance).
+        ``(V, p, p)`` :math:`\\operatorname{Cov}(\\hat{\\beta})
+        = (X^{\\top} V^{-1} X)^{-1}` (the contrast numerator covariance).
     theta_cov
-        ``(V, nt, nt)`` ``Cov(theta_hat)`` (inverse average-information; for the
-        Satterthwaite denominator df).  ``nt = r(r+1)/2 + 1`` unstructured, or
-        ``r + 1`` diagonal.
+        ``(V, nt, nt)`` :math:`\\operatorname{Cov}(\\hat{\\theta})` (inverse
+        average-information; for the Satterthwaite denominator df).
+        ``nt = r(r+1)/2 + 1`` unstructured, or ``r + 1`` diagonal.
     grad_m
-        ``(V, nt, p, p)`` the Satterthwaite gradient tensors ``M_k =
-        X^T V^{-1} (dV/dtheta_k) V^{-1} X``.
+        ``(V, nt, p, p)`` the Satterthwaite gradient tensors
+        :math:`M_k = X^{\\top} V^{-1} (\\partial V / \\partial \\theta_k)
+        V^{-1} X`.
     tier
         ``'R2'`` (block-Woodbury, one correlated / diagonal factor).
     """
@@ -1064,18 +1202,18 @@ def lme_fit(
     """Voxelwise mixed model, dispatched to the cheapest exact solver.
 
     A single grouping factor ``group`` with per-observation random covariates
-    ``z`` (``None`` -> a scalar random intercept).  The dispatcher honours the
-    **performance-preserving** invariant (v3 §0.1): it routes to the cheapest
-    solver that is *exact* for the given random structure, so the shipped fast
-    paths stay the realised path for the cases they already serve.
+    ``z`` (``None`` -> a scalar random intercept).  The dispatcher honours a
+    **performance-preserving** invariant: it routes to the cheapest solver that
+    is *exact* for the given random structure, so the shipped fast paths stay the
+    realised path for the cases they already serve.
 
     Dispatch ladder
     ---------------
 
     - **R1** -- one **scalar** random effect (``z`` is ``None`` or a single
-      column): the FaST-LMM spectral ``reml_fit`` (dense, or q-rank via
-      ``low_rank=``).  Returns a :class:`REMLResult` (with the §1.3
-      fixed-effect inference fields).  *Bit-for-bit the shipped path.*
+      column): the FaST-LMM spectral :func:`reml_fit` (dense, or q-rank via
+      ``low_rank=``).  Returns a :class:`REMLResult` (with the fixed-effect
+      inference fields).  *Bit-for-bit the shipped path.*
     - **R2** -- one **correlated / diagonal** random effect (``z`` has ``r >= 2``
       columns, e.g. ``[1, x]`` for ``(1 + x | g)``): the block-Woodbury REML
       (``_blockwoodbury``) -- per-group ``r x r`` Woodbury, no ``N x N``
@@ -1088,24 +1226,26 @@ def lme_fit(
     - **R3** -- a **nested** two-level hierarchy ``(1 | g1/g2)`` (pass the inner
       factor as ``inner``; ``z`` must be ``None``): the telescoping-Woodbury
       nested solver (``_nested``) over the three variance components
-      ``[sigma1^2, sigma2^2, sigma_e^2]`` -- block-diagonal across ``g1``,
-      Sherman-Morrison at each nested level, no ``N x N`` intermediate,
-      cuSOLVER-free.  Returns a :class:`NestedLMEResult`.
+      :math:`[\\sigma_1^2, \\sigma_2^2, \\sigma_e^2]` -- block-diagonal across
+      ``g1``, Sherman-Morrison at each nested level, no :math:`N \\times N`
+      intermediate, cuSOLVER-free.  Returns a :class:`NestedLMEResult`.
     - **R2 + corr** -- a random effect **and** a structured within-group residual
-      ``Cov(eps) = sigma_e^2 R(rho)`` (pass ``corr=`` and, for ``car1``,
-      ``time=``).  Whitening by ``R`` reduces each group to a standard
-      block-Woodbury, so the per-group Woodbury algebra is reused with ``rho``
-      joining the REML ``theta``; cuSOLVER-free.  Returns a
-      :class:`CorrLMEResult`.  ``z=None`` is the random intercept; ``z`` a random
-      slope (``structure='diagonal'`` for ``(x || g)``).
+      :math:`\\operatorname{Cov}(\\epsilon) = \\sigma_e^2 R(\\rho)` (pass
+      ``corr=`` and, for :func:`~nitrix.stats.car1`, ``time=``).  Whitening by
+      :math:`R` reduces each group to a standard block-Woodbury, so the per-group
+      Woodbury algebra is reused with :math:`\\rho` joining the REML
+      :math:`\\theta`; cuSOLVER-free.  Returns a :class:`CorrLMEResult`.
+      ``z=None`` is the random intercept; ``z`` a random slope
+      (``structure='diagonal'`` for ``(x || g)``).
     - **R4** -- two **crossed** scalar random intercepts ``(1 | group) +
       (1 | cross)`` (pass the second factor as ``cross``; ``z`` / ``inner`` /
-      ``corr`` must be unset).  ``V`` is not block-diagonal across either factor,
-      so this is the sparse-MME regime (v3 §1.1, **Tier-2**): a Woodbury with the
-      combined design, whose inner matrix has diagonal blocks (the level counts)
-      and an off-diagonal incidence, so a diagonal Schur eliminates the larger
-      factor and leaves a single dense ``min(q_group, q_cross)^3`` solve per
-      Newton step (``_crossed``).  cuSOLVER-free; **cheap when one factor is small,
+      ``corr`` must be unset).  :math:`V` is not block-diagonal across either
+      factor, so this is the sparse mixed-model-equations regime: a Woodbury with
+      the combined design, whose inner matrix has diagonal blocks (the level
+      counts) and an off-diagonal incidence, so a diagonal Schur eliminates the
+      larger factor and leaves a single dense
+      :math:`\\min(q_{\\mathrm{group}}, q_{\\mathrm{cross}})^3` solve per Newton
+      step (``_crossed``).  cuSOLVER-free; **cheap when one factor is small,
       expensive when both are large.**  Returns a :class:`CrossedLMEResult`.
 
     Parameters
@@ -1133,7 +1273,7 @@ def lme_fit(
         Within-group residual correlation structure (``'ar1'`` / ``'car1'`` /
         ``'cs'`` or a :class:`CorrSpec`).  When given, routes to the R2 + corr
         whitened block-Woodbury (a random effect plus a structured residual);
-        ``None`` (default) is the ``sigma_e^2 I`` residual.
+        ``None`` (default) is the :math:`\\sigma_e^2 I` residual.
     time
         ``(N,)`` observation times for a ``car1`` residual (see ``corr``).
     structure
@@ -1148,11 +1288,21 @@ def lme_fit(
         when ``q < N`` (the brain-scale case; matches the dense fit to tolerance).
         **Ignored on the R2 / R3 / R4 / +corr tiers**, which have no
         dense-vs-low-rank choice -- passing it there is a silent no-op.
+    retain_blups
+        Retain the per-group random-effect modes (BLUPs) on the returned result
+        for later conditional prediction.  ``False`` (default) discards them.
+        Currently supported only on the single-factor R1 (scalar intercept), R2
+        (random slope) and R2 + corr (structured residual) tiers; requesting it
+        alongside ``cross=`` or ``inner=`` raises.  Read the retained modes via
+        :func:`~nitrix.stats.ranef`.
 
     Returns
     -------
-    ``REMLResult`` (R1), ``LMEResult`` (R2), ``NestedLMEResult`` (R3),
-    ``CorrLMEResult`` (R2 + corr), or ``CrossedLMEResult`` (R4 crossed).
+    REMLResult or LMEResult or NestedLMEResult or CorrLMEResult or CrossedLMEResult
+        The fit for the selected tier: a :class:`REMLResult` (R1), an
+        :class:`LMEResult` (R2), a :class:`NestedLMEResult` (R3), a
+        :class:`CorrLMEResult` (R2 + corr), or a :class:`CrossedLMEResult`
+        (R4 crossed).
     """
     group = jnp.asarray(group)
     n_groups = int(jnp.max(group)) + 1
@@ -1296,8 +1446,14 @@ def lme_fit(
                 else jnp.asarray(z, dtype=Y.dtype)
             )
             b = _blups_standard(
-                Y, X, result.beta_hat, z_eff, group,
-                result.cov_re, result.sigma_e_sq, n_groups,
+                Y,
+                X,
+                result.beta_hat,
+                z_eff,
+                group,
+                result.cov_re,
+                result.sigma_e_sq,
+                n_groups,
             )  # (V, q, 1)
             # Scalar intercept -> (V, q); an explicit 1-col slope keeps (V, q, 1).
             result = replace(result, blups=b[..., 0] if z is None else b)

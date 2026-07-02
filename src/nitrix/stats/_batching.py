@@ -4,12 +4,13 @@
 """
 Memory-bounded mass-univariate batching.
 
-``blocked_vmap`` is the shared chunked-``vmap`` spine for the mass-univariate
-fits (LME / GLM-IRLS / GAM): ``vmap`` ``fn`` over the element axis, but in
-blocks so a brain-scale ``V`` need not materialise every element's
-intermediates at once.  Lives here, not under ``lme``, because it is a general
-utility with no LME content -- LME, GLM, and GAM all route their per-element
-fit through it.
+:func:`blocked_vmap` is the shared chunked-``vmap`` spine for the
+mass-univariate fits (LME, GLM-IRLS, GAM): it maps ``fn`` over the element
+axis, but in blocks, so that a brain-scale element count ``V`` need not
+materialise every element's intermediates at once.  It lives here, rather than
+under the linear mixed-effects code, because it is a general utility with no
+mixed-effects content -- the LME, GLM, and GAM routines all route their
+per-element fit through it.
 """
 
 from __future__ import annotations
@@ -29,15 +30,42 @@ def blocked_vmap(
     *,
     block: Optional[int],
 ) -> Any:
-    """``vmap`` ``fn`` over axis 0 of every array in ``batched``, in blocks.
+    """Vectorise ``fn`` over axis 0 of every array in ``batched``, in blocks.
 
-    ``block=None`` (default) is a single ``vmap`` over all ``V`` -- identical to
-    the un-chunked behaviour and HLO.  An integer ``block`` caps the number of
-    elements whose intermediates are live at once: the batch is padded to a
-    multiple of ``block`` (replicating the first row -- discarded), reshaped to
-    ``(n_blocks, block, ...)``, run through ``lax.map`` of the ``vmap``'d
-    ``fn``, then flattened and trimmed back to ``V``.  Peak memory scales with
-    ``block``, not ``V``.
+    This is a memory-bounded variant of ``jax.vmap``.  With ``block=None`` it
+    is a single ``vmap`` over the full element axis of length ``V``, identical
+    to the un-chunked behaviour and HLO.  With an integer ``block`` it caps the
+    number of elements whose intermediates are live at once: the batch is
+    padded up to a multiple of ``block`` (replicating the first row, which is
+    later discarded), reshaped to ``(n_blocks, block, ...)``, run through a
+    ``jax.lax.map`` of the ``vmap``-ped ``fn``, then flattened and trimmed back
+    to the original ``V`` elements.  Peak memory therefore scales with
+    ``block`` rather than with ``V``.
+
+    Parameters
+    ----------
+    fn : callable
+        Per-element function to vectorise.  It is applied via ``jax.vmap`` and
+        receives one leading-axis slice of each array in ``batched`` as its
+        positional arguments.  It may return any PyTree of arrays.
+    batched : sequence of Array
+        Arrays sharing a common leading axis of length ``V`` (the element
+        axis) that are mapped in parallel.  The remaining, trailing dimensions
+        of each array are passed through to ``fn`` unchanged and may differ
+        between arrays.
+    block : int or None
+        Maximum number of elements processed in a single vectorised call. If
+        ``None`` (or greater than or equal to ``V``), all ``V`` elements are
+        mapped in one ``vmap``.  Otherwise the element axis is processed in
+        chunks of at most ``block`` elements to bound peak memory.
+
+    Returns
+    -------
+    Any
+        The result of applying ``fn`` across all ``V`` elements: a PyTree whose
+        leaves each carry a leading axis of length ``V`` in the original
+        element order (any block padding is removed).  The structure and
+        trailing shapes of the leaves are those produced by ``fn``.
     """
     v = batched[0].shape[0]
     vfn = jax.vmap(fn)

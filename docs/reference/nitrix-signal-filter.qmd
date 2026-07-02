@@ -1,0 +1,74 @@
+---
+title: "nitrix.signal.filter"
+generated: true
+signature-hash: e56818f2c4b89e62
+description: "Linear filtering: polynomial detrend and frequency-domain band-pass."
+listing:
+  id: nitrix-signal-filter-symbols
+  contents: "nitrix-signal-filter/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.signal.filter`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Linear filtering: polynomial detrend and frequency-domain band-pass.
+
+**Polynomial detrending** ([`polynomial_detrend`](nitrix-signal-filter/polynomial_detrend.qmd)): fit a polynomial of
+degree $d$ to a time series and subtract the fit.  Used for
+low-frequency drift removal in fMRI BOLD signals.  Built on a rescaled
+Vandermonde basis fed to [`residualise`](nitrix-linalg-residual/residualise.qmd).
+
+**Frequency-domain filtering** ([`bandpass`](nitrix-signal-filter/bandpass.qmd) / [`bandstop`](nitrix-signal-filter/bandstop.qmd) /
+[`lowpass`](nitrix-signal-filter/lowpass.qmd) / [`highpass`](nitrix-signal-filter/highpass.qmd)): a zero-phase filter applied as a real
+magnitude weight over the rfft frequency grid, via
+[`product_filter`](nitrix-signal-fourier/product_filter.qmd) (the low-level FFT-multiply engine).
+[`bandstop`](nitrix-signal-filter/bandstop.qmd) is the notch case -- it *rejects* the `(lo, hi)` band and
+passes outside it; the canonical use is removing a respiratory peak from
+motion-estimate timeseries.  Three response designs:
+
+- `'maxflat'` (default) -- the maximally-flat (Butterworth) *magnitude*
+  shape $1 / \sqrt{1 + (f / f_c)^{2 n}}$ (-3 dB at $f_c$),
+  applied as a zero-phase weight.  Because a real frequency-domain mask is a
+  circular convolution with its inverse DFT, this is a frequency-sampled
+  **FIR** filter that merely *borrows the Butterworth magnitude curve* -- it
+  has no phase response and no poles.  It is **not** a recursive
+  Butterworth; the genuine IIR Butterworth (with poles and real or
+  `filtfilt` phase) is [`iir_filter`](nitrix-signal-filter/iir_filter.qmd) (separate primitive).
+- `'ideal'` -- a brick-wall pass mask (sharpest, but rings in time).
+- `'cosine'` -- raised-cosine transition bands (compact, tunable width).
+
+All operate on a trailing observation/time axis (overridable via `axis`),
+parameterised by a sampling frequency `fs` (pass `fs = 1 / TR`).  They
+filter every channel independently with the same weight, so they are
+per-unit invariant.  Differentiable through the signal and JIT-friendly
+(the weight is data-independent; `fs` / cut-offs / `order` are static).
+
+**Recursive IIR** filtering -- the genuine Butterworth (poles, bilinear
+transform, second-order sections) -- is [`iir_filter`](nitrix-signal-filter/iir_filter.qmd) /
+[`butterworth_sos`](nitrix-signal-filter/butterworth_sos.qmd) / [`sosfilt`](nitrix-signal-filter/sosfilt.qmd) / [`sosfiltfilt`](nitrix-signal-filter/sosfiltfilt.qmd), re-exported
+here.  Unlike the `ftype='maxflat'` magnitude window above, these are real
+recursive filters with the Butterworth phase (or zero-phase via
+`filtfilt`), validated to machine precision against `scipy.signal`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-signal-filter-symbols}
+:::

@@ -1,0 +1,56 @@
+---
+title: "surface_boundary_map"
+generated: true
+description: "Per-vertex functional-connectivity boundary map."
+---
+
+[‹ back to `nitrix.graph.parcellation`](../nitrix-graph-parcellation.qmd)
+
+<!-- nitrix:gen sig:surface_boundary_map -->
+```python
+surface_boundary_map(connectivity_profiles: Float[Array, 'n_vertices d_profile'], adjacency: ELL, *, similarity: Literal['eta_squared', 'pearson'] = 'eta_squared', aggregate: Literal['mean', 'max'] = 'mean', roi: Optional[Bool[Array, 'n_vertices']] = None) -> Float[Array, 'n_vertices']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:surface_boundary_map -->
+Per-vertex functional-connectivity boundary map.
+
+For each vertex, the dissimilarity $1 -
+\operatorname{sim}(\mathrm{profile}_i, \mathrm{profile}_j)$ to each mesh
+neighbour $j$ is aggregated into a scalar boundary value: high where
+adjacent connectivity profiles differ (a putative areal border), low inside
+a homogeneous region.  Composes [`semiring_ell_edge_aggregate`](../nitrix-semiring-ell_edge/semiring_ell_edge_aggregate.qmd) over
+the `adjacency` ELL -- no new kernel -- so it inherits the
+format-agnostic ELL substrate and is differentiable with respect to the
+profiles.  The minima of the resulting map seed [`mesh_watershed`](../nitrix-graph-parcellation/mesh_watershed.qmd).
+
+Connectivity profiles are typically the vertex-wise correlation of the
+`(n_vertices, T)` vertex time-series (so `d_profile = n_vertices`); at
+ico7 that profile is 163 842-dimensional per vertex, so it is generally
+materialised or tiled via a map over the row axis at the call site (a
+memory caveat, not part of the API here).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:surface_boundary_map -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `connectivity_profiles` | `Float` | `n_vertices` × `d_profile` | — | `(n_vertices, d_profile)` per-vertex profile (e.g. a connectivity fingerprint). |
+| `adjacency` | `ELL` | — | — | Mesh adjacency in ELL format (e.g. from [`mesh_k_ring_adjacency`](../nitrix-sparse-mesh/mesh_k_ring_adjacency.qmd)); real edges carry nonzero `values` and padding carries `0` (the standard ELL convention), which is how padding is masked out. |
+| `similarity` | `Literal['eta_squared', 'pearson']` | — | `'eta_squared'` | `'eta_squared'` (default, the measure of Cohen et al., 2008; see [`eta_squared`](../nitrix-graph-parcellation/eta_squared.qmd)) or `'pearson'`. |
+| `aggregate` | `Literal['mean', 'max']` | — | `'mean'` | `'mean'` (default; mean dissimilarity over neighbours) or `'max'` (the strongest neighbour border). |
+| `roi` | `Optional[Bool[Array, 'n_vertices']]` | — | `None` | Optional `(n_vertices,)` boolean cortex mask. Edges to out-of-ROI neighbours (e.g. the medial wall, whose profiles are meaningless) are dropped so they raise no spurious boundary, and out-of-ROI vertices are returned as `0`. |
+
+**Returns** `Float` — shape `n_vertices`. Per-vertex boundary map: the aggregated neighbour dissimilarity at each vertex, or `0` at out-of-ROI vertices when `roi` is given.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:surface_boundary_map -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_vertices` | *(undocumented — add to `_dimensions.yml`)* |
+| `d_profile` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

@@ -1,47 +1,54 @@
 # -*- coding: utf-8 -*-
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
-"""
+r"""
 Low-rank (q-rank) AI-REML for the two-component voxelwise LME.
 
-``reml_fit`` diagonalises the total covariance by an eigendecomposition of
-``ZZ^T`` (``N x N``), an ``O(N^3)`` one-off.  When the random-effect design
-``Z`` is ``N x q`` with ``q < N`` (cohort group analyses: hundreds of subjects,
-a handful of random-effect columns), the FaST-LMM **low-rank** formulation is
-asymptotically cheaper: a ``q x q`` eig of ``Z^T Z`` (``O(N q^2 + q^3)``) gives
-the ``r = rank(Z)`` nonzero eigenvalues ``s^2`` and the range left-singular
-vectors ``U_r = Z W / s`` (``N x r``), so ``ZZ^T = U_r diag(s^2) U_r^T`` without
-ever forming the ``N x N`` factor.
+The dense REML fit diagonalises the total covariance by an eigendecomposition
+of :math:`Z Z^{\top}` (:math:`N \times N`), an :math:`O(N^3)` one-off.  When the
+random-effect design :math:`Z` is :math:`N \times q` with :math:`q < N` (cohort
+group analyses: hundreds of subjects, a handful of random-effect columns), the
+FaST-LMM **low-rank** formulation is asymptotically cheaper: a :math:`q \times q`
+eigendecomposition of :math:`Z^{\top} Z` (:math:`O(N q^2 + q^3)`) gives the
+:math:`r = \operatorname{rank}(Z)` nonzero eigenvalues :math:`s^2` and the range
+left-singular vectors :math:`U_r = Z W / s` (:math:`N \times r`), so
+:math:`Z Z^{\top} = U_r \operatorname{diag}(s^2) U_r^{\top}` without ever forming
+the :math:`N \times N` factor.
 
-The ``N - r`` null-space directions of ``Z`` all carry the same total variance
-``sigma_e^2`` (the random effect is silent there), so they never need to be
-materialised individually: they enter the REML objective only through three
-per-voxel aggregates -- the null-space Gram pieces
+The :math:`N - r` null-space directions of :math:`Z` all carry the same total
+variance :math:`\sigma_e^2` (the random effect is silent there), so they never
+need to be materialised individually: they enter the REML objective only through
+three per-voxel aggregates -- the null-space Gram pieces
 
-    Gxx = X^T X - X_r^T X_r            (p, p, shared)
-    Gxy = X^T y - X_r^T y_r            (p,, per voxel)
-    Gyy = y^T y - y_r^T y_r            (scalar, per voxel)
+- :math:`G_{xx} = X^{\top} X - X_r^{\top} X_r` (``(p, p)``, shared),
+- :math:`G_{xy} = X^{\top} y - X_r^{\top} y_r` (``(p,)``, per voxel),
+- :math:`G_{yy} = y^{\top} y - y_r^{\top} y_r` (scalar, per voxel),
 
-and the multiplicity ``n0 = N - r``.  Everything below is the same analytic
-AI-REML as ``_varcomp`` (closed-form score + average-information curvature, no
-``N x N`` intermediate, no second-order autodiff), specialised to the
-two-component ``theta = [log sigma_b^2, log sigma_e^2]`` model and augmented with
-the null-space aggregate terms.  When ``n0 = 0`` (``Z`` full row rank) the
+and the multiplicity :math:`n_0 = N - r`.  Everything below is the same analytic
+AI-REML as the dense variance-component engine (closed-form score plus
+average-information curvature, no :math:`N \times N` intermediate, no
+second-order autodiff), specialised to the two-component
+:math:`\theta = [\log \sigma_b^2, \log \sigma_e^2]` model and augmented with the
+null-space aggregate terms.  When :math:`n_0 = 0` (:math:`Z` full row rank) the
 aggregates vanish and this reduces exactly to the dense two-component fit.
 
-This is a **separate** engine from ``_varcomp`` deliberately: ``_varcomp`` powers
-both ``reml_fit`` and ``flame_two_level`` and is validated to 50/50 fresh-process
-GPU trials, so the low-rank path is isolated rather than threaded through it.
-Both share ``_small_inv_logdet`` (cuSOLVER-free ``(p, p)`` solve), ``VarCompSpec``
-(Newton/backtracking config), and ``_blocked_vmap`` (memory chunking); the
-per-voxel fit issues no cuSOLVER custom-call.
+This is a **separate** engine from the dense variance-component path
+deliberately, so the low-rank path is isolated rather than threaded through it.
+Both share :func:`~nitrix.linalg._smalllinalg.small_inv_logdet` (a cuSOLVER-free
+``(p, p)`` solve), :class:`~nitrix.stats.lme._varcomp.VarCompSpec` (the
+Newton/backtracking config), and the memory-chunking batched map; the per-voxel
+fit issues no cuSOLVER custom-call.
 
 References
 ----------
-- Lippert, C., Listgarten, J., et al. (2011).  FaST linear mixed models.
-  Nat. Methods 8 (the low-rank diagonalisation).
-- Gilmour, A. R., Thompson, R., & Cullis, B. R. (1995).  Average information
-  REML.  Biometrics 51, 1440-1450.
+Lippert, C., Listgarten, J., Liu, Y., Kadie, C. M., Davidson, R. I., &
+Heckerman, D. (2011).  FaST linear mixed models for genome-wide association
+studies.  *Nature Methods*, 8, 833-835.  https://doi.org/10.1038/nmeth.1681
+(the low-rank diagonalisation).
+
+Gilmour, A. R., Thompson, R., & Cullis, B. R. (1995).  Average information
+REML: an efficient algorithm for variance parameter estimation in linear mixed
+models.  *Biometrics*, 51, 1440-1450.  https://doi.org/10.2307/2533274
 """
 
 from __future__ import annotations
@@ -84,11 +91,47 @@ def _gls(
     Float[Array, 'r'],
     Float[Array, ''],
 ]:
-    """GLS fixed-effect solve in the low-rank diagonal basis.
+    r"""Generalised least-squares fixed-effect solve in the low-rank diagonal
+    basis.
 
-    ``A = X_r^T diag(1/d) X_r + Gxx / d0 + ridge I`` folds the null-space Gram
-    in at the shared residual variance ``d0 = sigma_e^2``.  Returns ``(beta,
-    A_inv, log_det_A, inv_d, d0)``.
+    Forms the normal-equation matrix
+    :math:`A = X_r^{\top} \operatorname{diag}(1/d) X_r + G_{xx} / d_0 + \lambda I`,
+    which folds the null-space Gram in at the shared residual variance
+    :math:`d_0 = \sigma_e^2`, and solves for the fixed-effect coefficients.  Here
+    :math:`d_i = \sigma_b^2 s^2_i + \sigma_e^2` are the range-coordinate total
+    variances and :math:`\lambda` is the ridge.
+
+    Parameters
+    ----------
+    theta
+        ``(2,)`` variance parameters ``[log sigma_b^2, log sigma_e^2]``.
+    y_r
+        ``(r,)`` response projected onto the range of the random-effect design.
+    X_r
+        ``(r, p)`` fixed-effect design projected onto the range.
+    s2
+        ``(r,)`` nonzero eigenvalues of the range spectrum.
+    gxx
+        ``(p, p)`` shared null-space Gram :math:`G_{xx}`.
+    gxy
+        ``(p,)`` per-voxel null-space aggregate :math:`G_{xy}`.
+    p
+        Number of fixed-effect columns (static).
+    ridge
+        Ridge added to the diagonal of :math:`A` for numerical stability.
+
+    Returns
+    -------
+    beta : Float[Array, 'p']
+        ``(p,)`` GLS fixed-effect estimate.
+    A_inv : Float[Array, 'p p']
+        ``(p, p)`` inverse of the normal-equation matrix :math:`A`.
+    log_det_A : Float[Array, '']
+        Scalar log-determinant of :math:`A`.
+    inv_d : Float[Array, 'r']
+        ``(r,)`` reciprocal range variances :math:`1/d_i`.
+    d0 : Float[Array, '']
+        Scalar shared residual variance :math:`d_0 = \sigma_e^2`.
     """
     sb2 = jnp.exp(theta[0])
     se2 = jnp.exp(theta[1])
@@ -115,7 +158,40 @@ def _neg_loglik(
     p: int,
     ridge: float,
 ) -> Float[Array, '']:
-    """Profile REML negative log-likelihood (low-rank)."""
+    """Profile REML negative log-likelihood (low-rank).
+
+    Evaluates the restricted (profile) negative log-likelihood at ``theta`` by
+    solving the GLS problem for the fixed effects, then summing the range and
+    null-space residual and log-determinant contributions.
+
+    Parameters
+    ----------
+    theta
+        ``(2,)`` variance parameters ``[log sigma_b^2, log sigma_e^2]``.
+    y_r
+        ``(r,)`` response projected onto the range.
+    X_r
+        ``(r, p)`` fixed-effect design projected onto the range.
+    s2
+        ``(r,)`` nonzero eigenvalues of the range spectrum.
+    gxx
+        ``(p, p)`` shared null-space Gram :math:`G_{xx}`.
+    gxy
+        ``(p,)`` per-voxel null-space aggregate :math:`G_{xy}`.
+    gyy
+        Scalar per-voxel null-space aggregate :math:`G_{yy}`.
+    n0
+        Null-space multiplicity :math:`n_0 = N - r` (static).
+    p
+        Number of fixed-effect columns (static).
+    ridge
+        Ridge added to the normal-equation diagonal.
+
+    Returns
+    -------
+    Float[Array, '']
+        Scalar profile REML negative log-likelihood at ``theta``.
+    """
     beta, _, log_det_A, inv_d, d0 = _gls(
         theta, y_r, X_r, s2, gxx, gxy, p, ridge
     )
@@ -139,12 +215,48 @@ def _score_and_info(
     p: int,
     ridge: float,
 ) -> Tuple[Float[Array, '2'], Float[Array, '2 2'], Float[Array, '']]:
-    """Analytic REML score, average-information curvature, and nll (low-rank).
+    r"""Analytic REML score, average-information curvature, and negative
+    log-likelihood (low-rank).
 
-    The range terms are the ``_varcomp`` reductions over the ``r`` range
-    coordinates; the null space contributes only through the aggregates
-    ``(Gxx, Gxy, Gyy, n0)`` -- no ``N x N`` (or even ``r``-beyond-range)
-    intermediate.
+    Computes the closed-form gradient of the profile REML negative
+    log-likelihood with respect to ``theta``, the average-information
+    approximation to its curvature, and the objective value itself, in a single
+    pass.  The range terms are reductions over the ``r`` range coordinates
+    (matching the dense variance-component engine); the null space contributes
+    only through the aggregates :math:`(G_{xx}, G_{xy}, G_{yy}, n_0)` -- there is
+    no :math:`N \times N` (or beyond-range) intermediate.
+
+    Parameters
+    ----------
+    theta
+        ``(2,)`` variance parameters ``[log sigma_b^2, log sigma_e^2]``.
+    y_r
+        ``(r,)`` response projected onto the range.
+    X_r
+        ``(r, p)`` fixed-effect design projected onto the range.
+    s2
+        ``(r,)`` nonzero eigenvalues of the range spectrum.
+    gxx
+        ``(p, p)`` shared null-space Gram :math:`G_{xx}`.
+    gxy
+        ``(p,)`` per-voxel null-space aggregate :math:`G_{xy}`.
+    gyy
+        Scalar per-voxel null-space aggregate :math:`G_{yy}`.
+    n0
+        Null-space multiplicity :math:`n_0 = N - r` (static).
+    p
+        Number of fixed-effect columns (static).
+    ridge
+        Ridge added to the normal-equation diagonal.
+
+    Returns
+    -------
+    score : Float[Array, '2']
+        ``(2,)`` REML score (gradient) with respect to ``theta``.
+    info : Float[Array, '2 2']
+        ``(2, 2)`` average-information curvature matrix (PSD by construction).
+    nll : Float[Array, '']
+        Scalar profile REML negative log-likelihood at ``theta``.
     """
     sb2 = jnp.exp(theta[0])
     se2 = jnp.exp(theta[1])
@@ -220,11 +332,46 @@ def _fit_one(
     p: int,
     spec: VarCompSpec,
 ) -> Tuple[Float[Array, '2'], Float[Array, 'p'], Float[Array, '']]:
-    """Single-voxel low-rank AI-REML fit.  Returns ``(theta, beta, log_lik)``.
+    """Single-voxel low-rank AI-REML fit.
 
-    Uses the shared ``_optimise.damped_newton`` analytic-curvature fork
-    (closed-form ``(score, average-information)``, ``step='damped'`` since the AI
-    matrix is PSD by construction) -- the same path as the dense ``_varcomp``.
+    Optimises the profile REML negative log-likelihood for one voxel via the
+    shared damped-Newton analytic-curvature fork (closed-form score and
+    average-information curvature, with ``step='damped'`` since the
+    average-information matrix is positive semi-definite by construction) -- the
+    same optimiser path as the dense variance-component fit -- then recovers the
+    fixed effects at the optimum.
+
+    Parameters
+    ----------
+    y_r
+        ``(r,)`` response projected onto the range.
+    X_r
+        ``(r, p)`` fixed-effect design projected onto the range.
+    s2
+        ``(r,)`` nonzero eigenvalues of the range spectrum.
+    gxx
+        ``(p, p)`` shared null-space Gram :math:`G_{xx}`.
+    gxy
+        ``(p,)`` per-voxel null-space aggregate :math:`G_{xy}`.
+    gyy
+        Scalar per-voxel null-space aggregate :math:`G_{yy}`.
+    theta_init
+        ``(2,)`` initial variance parameters ``[log sigma_b^2, log sigma_e^2]``.
+    n0
+        Null-space multiplicity :math:`n_0 = N - r` (static).
+    p
+        Number of fixed-effect columns (static).
+    spec
+        Newton/backtracking configuration (ridge, damping, Newton kwargs).
+
+    Returns
+    -------
+    theta : Float[Array, '2']
+        ``(2,)`` fitted variance parameters.
+    beta : Float[Array, 'p']
+        ``(p,)`` fitted fixed effects at the optimum.
+    log_lik : Float[Array, '']
+        Scalar profile REML log-likelihood at the optimum.
     """
 
     def nll(theta: Float[Array, '2']) -> Float[Array, '']:
@@ -269,30 +416,42 @@ def fit_lowrank_reml(
     spec: VarCompSpec = VarCompSpec(),
     block: int | None = None,
 ) -> Tuple[Float[Array, 'V 2'], Float[Array, 'V p'], Float[Array, 'V']]:
-    """Batched low-rank two-component REML over ``V`` voxels.
+    r"""Batched low-rank two-component REML over ``V`` voxels.
 
     Parameters
     ----------
     y_range
-        ``(V, r)`` responses projected onto the range ``U_r^T y_v``.
+        ``(V, r)`` responses projected onto the range, :math:`U_r^{\top} y_v`.
     X_range
-        ``(r, p)`` fixed-effect design projected onto the range ``U_r^T X``.
+        ``(r, p)`` fixed-effect design projected onto the range,
+        :math:`U_r^{\top} X`.
     s2
-        ``(r,)`` nonzero eigenvalues of ``ZZ^T`` (the range spectrum).
+        ``(r,)`` nonzero eigenvalues of :math:`Z Z^{\top}` (the range spectrum).
     gxx
-        ``(p, p)`` null-space Gram ``X^T X - X_r^T X_r`` (shared).
+        ``(p, p)`` shared null-space Gram
+        :math:`G_{xx} = X^{\top} X - X_r^{\top} X_r`.
     gxy, gyy
-        ``(V, p)`` / ``(V,)`` per-voxel null-space aggregates.
+        ``(V, p)`` / ``(V,)`` per-voxel null-space aggregates :math:`G_{xy}` and
+        :math:`G_{yy}`.
     theta_init
-        ``(V, 2)`` initial ``[log sigma_b^2, log sigma_e^2]``.
+        ``(V, 2)`` initial variance parameters
+        ``[log sigma_b^2, log sigma_e^2]``.
     n0
-        Null-space multiplicity ``N - r`` (static).
-    spec, block
-        Newton/backtracking config and optional voxel-block chunking.
+        Null-space multiplicity :math:`n_0 = N - r` (static).
+    spec
+        Newton/backtracking configuration.
+    block
+        Optional voxel-block size for memory chunking; ``None`` maps over all
+        voxels at once.
 
     Returns
     -------
-    ``(theta_hat (V, 2), beta_hat (V, p), log_lik (V,))``.
+    theta_hat : Float[Array, 'V 2']
+        ``(V, 2)`` fitted variance parameters per voxel.
+    beta_hat : Float[Array, 'V p']
+        ``(V, p)`` fitted fixed effects per voxel.
+    log_lik : Float[Array, 'V']
+        ``(V,)`` profile REML log-likelihood per voxel.
     """
     p = X_range.shape[-1]
 
@@ -327,13 +486,50 @@ def lowrank_inference(
     p: int,
     spec: VarCompSpec,
 ) -> Tuple[Float[Array, 'p p'], Float[Array, '2 2'], Float[Array, '2 p p']]:
-    """Low-rank counterpart of ``_varcomp.varcomp_inference``.
+    r"""Low-rank counterpart of the dense variance-component inference routine.
 
-    Same ``(fixed_cov, theta_cov, grad_m)`` as the dense path; the Satterthwaite
-    gradient ``M_k = sum_i (g_{k,i}/d_i^2) x_i x_i^T`` is the range reduction plus
-    the null-space term -- which, since only the residual component loads on the
-    null space (``g_e = sigma_e^2``, ``d0 = sigma_e^2``), is exactly
-    ``Gxx / sigma_e^2`` added to the residual-component tensor ``M_e``.
+    Returns the same fixed-effect covariance, variance-parameter covariance, and
+    Satterthwaite gradient tensor as the dense path.  The Satterthwaite gradient
+    :math:`M_k = \sum_i (g_{k,i} / d_i^2)\, x_i x_i^{\top}` is the range reduction
+    plus the null-space term -- which, since only the residual component loads on
+    the null space (:math:`g_e = \sigma_e^2`, :math:`d_0 = \sigma_e^2`), is
+    exactly :math:`G_{xx} / \sigma_e^2` added to the residual-component tensor
+    :math:`M_e`.
+
+    Parameters
+    ----------
+    theta
+        ``(2,)`` fitted variance parameters ``[log sigma_b^2, log sigma_e^2]``.
+    y_r
+        ``(r,)`` response projected onto the range.
+    X_r
+        ``(r, p)`` fixed-effect design projected onto the range.
+    s2
+        ``(r,)`` nonzero eigenvalues of the range spectrum.
+    gxx
+        ``(p, p)`` shared null-space Gram :math:`G_{xx}`.
+    gxy
+        ``(p,)`` per-voxel null-space aggregate :math:`G_{xy}`.
+    gyy
+        Scalar per-voxel null-space aggregate :math:`G_{yy}`.
+    n0
+        Null-space multiplicity :math:`n_0 = N - r` (static).
+    p
+        Number of fixed-effect columns (static).
+    spec
+        Newton/backtracking configuration (supplies ridge and damping).
+
+    Returns
+    -------
+    fixed_cov : Float[Array, 'p p']
+        ``(p, p)`` unscaled fixed-effect covariance (the inverse normal-equation
+        matrix :math:`A^{-1}` at ``theta``).
+    theta_cov : Float[Array, '2 2']
+        ``(2, 2)`` covariance of the variance parameters (inverse damped
+        average-information matrix).
+    grad_m : Float[Array, '2 p p']
+        ``(2, p, p)`` per-component Satterthwaite gradient tensors
+        :math:`M_k`, one ``(p, p)`` slice per variance parameter.
     """
     sb2 = jnp.exp(theta[0])
     se2 = jnp.exp(theta[1])

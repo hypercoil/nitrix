@@ -1,0 +1,48 @@
+---
+title: "gmm_label_to_image"
+generated: true
+description: "Render an image from a label map by per-label Gaussian sampling."
+---
+
+[‹ back to `nitrix.augment.synthesis`](../nitrix-augment-synthesis.qmd)
+
+<!-- nitrix:gen sig:gmm_label_to_image -->
+```python
+gmm_label_to_image(label_map: Int[Array, '*spatial'], means: Float[Array, 'n_labels'], stds: Float[Array, 'n_labels'], key: Array, *, nonneg: bool = True) -> Float[Array, '*spatial']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:gmm_label_to_image -->
+Render an image from a label map by per-label Gaussian sampling.
+
+For each voxel, `image = means[label] + stds[label] * N(0, 1)`,
+a draw from the per-label Gaussian.  Passing per-label statistics
+explicitly (rather than drawing them inside) keeps this a pure render:
+supply fixed `means` / `stds` for a deterministic intensity map,
+or draw them per call (e.g. `means ~ U(...)`, `stds ~ U(...)`) for
+the ever-changing-contrast domain-randomisation augmentation.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:gmm_label_to_image -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `label_map` | `Int` | `*spatial` | — | Integer labels in `[0, n_labels)`. |
+| `means` | `Float` | `n_labels` | — | Per-label mean and within-label standard deviation, `(n_labels,)`. |
+| `stds` | `Float` | `n_labels` | — | Per-label mean and within-label standard deviation, `(n_labels,)`. |
+| `key` | `Array` | — | — | PRNG key for the per-voxel unit-Gaussian draw. |
+| `nonneg` | `bool` | — | `True` | Clamp the output at 0 (default `True`). |
+
+**Returns** `Float` — shape `*spatial`. Intensity image with the shape of `label_map`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:gmm_label_to_image -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `n_labels` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

@@ -10,9 +10,9 @@ Submodules:
 - ``window``     -- windowed-sample extraction utilities.
 - ``filter``     -- linear filtering: polynomial detrend;
   zero-phase frequency-domain band-pass / band-stop / low- /
-  high-pass (``bandpass`` / ``bandstop`` / ``lowpass`` /
-  ``highpass``); and recursive Butterworth IIR (``iir_filter`` /
-  ``butterworth_sos`` / ``sosfilt`` / ``sosfiltfilt``).
+  high-pass (:func:`bandpass` / :func:`bandstop` / :func:`lowpass` /
+  :func:`highpass`); and recursive Butterworth IIR (:func:`iir_filter` /
+  :func:`butterworth_sos` / :func:`sosfilt` / :func:`sosfiltfilt`).
 - ``fourier``    -- spectral utilities: product-filter,
   analytic-signal / Hilbert transform, instantaneous frequency /
   phase, envelope.

@@ -3,15 +3,17 @@
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 # isort: skip_file
 """
-nitrix.nn.ssm -- selective state-space scan (Mamba / S6).
+Selective state-space scan (Mamba / S6).
 
-Public ``selective_scan`` with three-level backend selection.  The ``jax``
-reference is the bit-faithful oracle (and auto-selects the parallel
-``associative_scan`` on GPU); ``pallas-cuda`` is the fused chunked-scan fast
-path (suite P1b), certified ``pallas-cuda ≈ jax`` only inside nitrix.  Until
-the fused kernel lands, a ``pallas-cuda`` request falls back to the reference
-with a loud ``NitrixBackendFallback`` (the GPU parallel-scan speedup still
-applies via the reference).
+This subpackage exposes :func:`selective_scan`, the discretised selective
+recurrence at the heart of the Mamba / S6 state-space model, with three-level
+backend selection.  The ``'jax'`` reference is the bit-faithful oracle (and
+auto-selects the parallel associative scan on GPU); ``'pallas-cuda'`` is the
+fused chunked-scan fast path, certified equivalent to the ``'jax'`` reference
+only within the nitrix tolerance.  Until the fused kernel lands, a
+``'pallas-cuda'`` request falls back to the reference and emits a loud
+``NitrixBackendFallback`` warning (the GPU parallel-scan speedup still applies
+via the reference).
 """
 
 from __future__ import annotations
@@ -82,7 +84,32 @@ def _selective_scan_pallas(
     C: Float[Array, '... l n'],
     D: Optional[Float[Array, 'd']],
 ) -> Optional[Float[Array, '... l d']]:
-    """Pallas dispatch; ``None`` if the kernel rejects the shape / host."""
+    """Dispatch to the fused Pallas selective-scan kernel.
+
+    Attempts to import and run the CUDA Pallas kernel on the given inputs,
+    returning ``None`` when the kernel is unavailable (import failure) or
+    rejects the shape / host tiling, so the caller can fall back to the
+    reference path.
+
+    Parameters
+    ----------
+    x, delta
+        Input sequence and per-step / per-channel :math:`\\Delta`, both
+        ``(..., l, d)``.
+    A
+        State matrix in diagonal-plus form, ``(d, n)``.
+    B, C
+        Selective input / output projections, ``(..., l, n)``.
+    D
+        Optional per-channel skip / residual, ``(d,)`` or ``None``.
+
+    Returns
+    -------
+    Optional[Float[Array, '... l d']]
+        The output sequence ``(..., l, d)`` if the fused kernel ran, or
+        ``None`` if the kernel could not be imported or the shape / host was
+        not tileable.
+    """
     try:
         from ..._kernels.cuda.selective_scan import (
             PallasNotTileable,
@@ -111,9 +138,9 @@ def selective_scan(
 
     Computes the discretised selective recurrence (see
     :func:`reference_selective_scan` for the math).  ``backend`` selects the
-    execution engine: ``'jax'`` (the reference; parallel ``associative_scan`` on
-    GPU), ``'pallas-cuda'`` (the fused chunked-scan fast path, suite P1b;
-    currently falls back to the reference with a loud warning), or ``'auto'``.
+    execution engine: ``'jax'`` (the reference; parallel associative scan on
+    GPU), ``'pallas-cuda'`` (the fused chunked-scan fast path, which currently
+    falls back to the reference with a loud warning), or ``'auto'``.
 
     Parameters
     ----------
@@ -136,11 +163,12 @@ def selective_scan(
     -------
     Output sequence ``(..., l, d)``.
 
-    Differentiability
-    -----------------
-    The reference path is autodiff-native (``jax.grad`` flows through the scan).
-    The fused path will register a recompute-adjoint ``custom_vjp`` in P1b
-    (the SSM analogue of the ``numerics.ode`` recompute-forward adjoint).
+    Notes
+    -----
+    The reference path is autodiff-native (``jax.grad`` flows through the
+    scan).  The fused path will register a recompute-adjoint ``custom_vjp``
+    (the state-space analogue of the recompute-forward adjoint used in
+    :mod:`nitrix.numerics`).
     """
     _validate(x, delta, A, B, C, D)
     if driver != 'auto':

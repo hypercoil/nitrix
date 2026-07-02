@@ -1,0 +1,52 @@
+---
+title: "nitrix.semiring.matmul"
+generated: true
+signature-hash: 94d17a976965e107
+description: "Public [`semiring_matmul`](nitrix-semiring-matmul/semiring_matmul.qmd) with three-level backend selection."
+listing:
+  id: nitrix-semiring-matmul-symbols
+  contents: "nitrix-semiring-matmul/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.semiring.matmul`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Public [`semiring_matmul`](nitrix-semiring-matmul/semiring_matmul.qmd) with three-level backend selection.
+
+The public entry point accepts a left operand of shape `(..., m, k)`
+and a right operand of shape `(..., k, n)`, an optional `semiring`
+algebra, and a `backend` selector, returning the semiring-generalised
+product of shape `(..., m, n)`.
+
+Leading batch dims are broadcast-compatible.  The 2-D core is dispatched
+to either [`reference_semiring_matmul`](nitrix-semiring-matmul/reference_semiring_matmul.qmd) (pure JAX) or the Pallas /
+Triton kernel `semiring_matmul_pallas`.  If the Pallas path cannot
+tile a given shape and algebra combination, the call falls back to JAX
+and emits exactly one `NitrixBackendFallback` warning per
+`(function, shape, dtype, backend)` per process; see
+`nitrix._internal.backend` for the environment-variable knobs.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `m` | rows of a multi-row contrast |
+| `k` | kernel or basis components |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-semiring-matmul-symbols}
+:::

@@ -1,0 +1,48 @@
+---
+title: "params_to_affine_matrix"
+generated: true
+description: "Build an affine matrix from geometric parameters."
+---
+
+[‹ back to `nitrix.geometry.affine`](../nitrix-geometry-affine.qmd)
+
+<!-- nitrix:gen sig:params_to_affine_matrix -->
+```python
+params_to_affine_matrix(par: Float[Array, '... p'], *, ndim: int = 3, deg: bool = True, shift_scale: bool = False) -> Float[Array, '... d d1']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:params_to_affine_matrix -->
+Build an affine matrix from geometric parameters.
+
+Assembles the affine $T\,R\,S\,E$ (translation, rotation,
+anisotropic scale, shear) from a flat parameter vector and returns it in
+`(..., ndim, ndim+1)` form.  Missing trailing parameters default to
+the identity factor (scale to 1, everything else to 0), so a
+translation-plus-rotation prefix yields a rigid transform.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:params_to_affine_matrix -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `par` | `Float` | `...` × `p` | — | Batched parameter vectors. The trailing axis is laid out as translation (`ndim` entries), rotation (`ndim(ndim-1)/2`: 1 in 2-D, 3 in 3-D), scale (`ndim`), and shear (`ndim(ndim-1)/2`). Its length may be anything from 0 up to the full `ndim(ndim+1)`; shorter vectors are padded with identity defaults. |
+| `ndim` | `int` | — | `3` | Spatial dimensionality, 2 or 3 (default 3). An explicit value is required because, for example, a 6-vector is ambiguous between a rigid 3-D transform and a full 2-D transform. |
+| `deg` | `bool` | — | `True` | If `True` (the default), the rotation parameters are interpreted in degrees; if `False`, in radians. |
+| `shift_scale` | `bool` | — | `False` | If `True`, 1 is added to the scale parameters, so an all-zero vector maps to the identity. This is convenient when the parameters are a network-predicted perturbation. Defaults to `False`. |
+
+**Returns** `Float` — shape `...` × `d` × `d1`. Batched affine matrices in `(..., ndim, ndim+1)` form.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:params_to_affine_matrix -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `d` | spatial dimension (2 or 3) |
+| `d1` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

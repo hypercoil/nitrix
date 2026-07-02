@@ -1,0 +1,24 @@
+---
+title: "LOG"
+generated: true
+description: "The log-space algebra: logsumexp combined with addition."
+---
+
+[‹ back to `nitrix.semiring.algebras`](../nitrix-semiring-algebras.qmd)
+
+<!-- nitrix:gen sig:LOG -->
+```python
+LOG: StrictSemiring[Any] = StrictSemiring(monoid=(_LogSumExpMonoid()), binary_op=(_SumSemigroup()), identity=(-jnp.inf), annihilator=(-jnp.inf), name='log', matmul_vjp=log_matmul_vjp, ell_matmul_vjp=log_ell_matmul_vjp)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:LOG -->
+The log-space algebra: logsumexp combined with addition.
+
+Products of ordinary reals become sums in the log domain, and sums
+become numerically-stable logsumexp reductions. The identity and
+annihilator are $-\infty$ (the log of 0), so the contraction
+computes probabilities and partition functions in log space without
+underflow.
+<!-- nitrix:/gen -->
+

@@ -1,0 +1,87 @@
+---
+title: "ell_mask"
+generated: true
+description: "Mask edges out of an ELL by setting their value to a semiring annihilator."
+---
+
+[‹ back to `nitrix.sparse.ell`](../nitrix-sparse-ell.qmd)
+
+<!-- nitrix:gen sig:ell_mask -->
+```python
+ell_mask(ell: ELL, valid: Num[Array, '...'], *, identity: Any = _UNSET, semiring: Optional['Semiring[Any]'] = None) -> ELL
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:ell_mask -->
+Mask edges out of an ELL by setting their value to a semiring annihilator.
+
+Brain geometries are routinely *incomplete*: the cortical-surface
+medial wall is excluded from analysis, and volumetric work is often
+restricted to a grey-matter (or otherwise thresholded) mask.  Edges
+that reach a masked vertex / voxel must contribute the **semiring
+identity** to every reduction -- so no FLOPs and, crucially, no
+*signal* leak in from the uninteresting region.
+
+This helper rewrites the masked positions of `ell.values` to the
+algebra's `(*)`-annihilator and stamps that value onto the
+returned ELL's `identity` field, so the result is a drop-in
+operand for [`semiring_ell_matmul`](../nitrix-semiring.qmd) /
+[`semiring_ell_edge_aggregate`](../nitrix-semiring.qmd).
+
+**Why this is a true no-op (and the one algebra where it is not).**
+An edge with value `z` is a no-op iff `z` is the `(*)`
+*annihilator* of the algebra -- the element with `z (*) b ==
+monoid_identity` for every `b` -- because the reduction computes
+`(+)_p ( values[i, p] (*) B[indices[i, p]] )`.  For most built-in
+algebras the annihilator coincides with `semiring.identity` (the
+*additive* / monoid identity), which is why a bare `identity=`
+historically doubled as the mask value:
+
+===================  ============  ============  ============
+Algebra              `(*)`       identity      annihilator
+===================  ============  ============  ============
+`REAL`             `a * b`     `0`         `0`
+`LOG`              `a + b`     `-inf`      `-inf`
+`TROPICAL_MAX_PLUS``a + b`     `-inf`      `-inf`
+`TROPICAL_MIN_PLUS``a + b`     `+inf`      `+inf`
+`BOOLEAN`          `a and b`   `False`     `False`
+`EUCLIDEAN`        `(a-b)**2`  `0`         **none**
+===================  ============  ============  ============
+
+**Prefer the `semiring=` form.**  Pass `semiring=` and the
+annihilator is read from `semiring.annihilator` -- the correct
+masking value by construction, with no chance of the
+identity-vs-annihilator confusion below.  The explicit
+`identity=` form remains for callers that already hold the scalar.
+Pass exactly one of the two.
+
+`EUCLIDEAN` is the exception: its `(*)` is `(a - b)**2`, which
+has **no** annihilator (`(z - b)**2` cannot be `0` for all
+`b`), so `EUCLIDEAN.annihilator is None` and `semiring=EUCLIDEAN`
+raises here.  Its `identity` of `0` does **not** mask -- it would
+inject `B[idx]**2` instead.  Mask EUCLIDEAN neighbourhoods by
+dropping the columns from the index structure (do not include the
+edge), not via this helper.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:ell_mask -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `ell` | `ELL` | — | — | Adjacency / operator in ELL format. |
+| `valid` | `Num` | `...` | — | Boolean keep-mask. Either: - shape `(n_cols,)` -- a per-column (target vertex / voxel) mask; an edge is masked when `valid[ell.indices[i, p]]` is `False` (the medial-wall / grey-matter case); or - shape `ell.indices.shape` -- an explicit per-edge mask. |
+| `identity` | `Any` | — | `_UNSET` | The scalar written into masked positions. Use `semiring.identity` for the algebra you will reduce under. Mutually exclusive with `semiring=`; pass exactly one. |
+| `semiring` | `Optional['Semiring[Any]']` | — | `None` | The algebra the masked ELL will be reduced under. Its `annihilator` field supplies the mask value; raises if the algebra has no annihilator (`EUCLIDEAN`). Mutually exclusive with `identity=`; pass exactly one. |
+
+**Returns** `ELL`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:ell_mask -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

@@ -43,13 +43,49 @@ def _glmm_few_level(
     lam_ceil: float,
     block: Optional[int],
 ) -> GLMMResult:
-    """Dense GAMM PQL: a ``re_smooth`` block + the GLM family through ``gam_fit``.
+    """Dense GAMM penalised quasi-likelihood for a few-level random intercept.
 
-    The fixed design ``X`` enters as the unpenalised ``parametric`` block (no
-    extra intercept -- ``X`` carries its own); the random intercept is the one
-    penalised ``re_smooth`` block, whose Fellner-Schall smoothing parameter *is*
-    the RE precision ``1 / sigma_b^2``.  This is the optimal solver for a
-    few-level factor and reuses the shipped GAM machinery verbatim.
+    Fits the GLMM as a generalised additive mixed model: a single penalised
+    random-effect smoother from :func:`~nitrix.stats.basis.re_smooth` combined
+    with the GLM family through :func:`~nitrix.stats.gam.gam_fit`.  The fixed
+    design ``X`` enters as the unpenalised parametric block (no extra intercept,
+    since ``X`` carries its own), and the random intercept is the one penalised
+    smoother, whose Fellner-Schall smoothing parameter *is* the random-effect
+    precision :math:`1 / \\sigma_b^2`.  This is the preferred solver for a
+    few-level grouping factor and reuses the shipped GAM machinery verbatim.
+
+    Parameters
+    ----------
+    Y : Float[Array, 'V N']
+        Response, one row per element (voxel/vertex) over ``N`` observations.
+    X : Float[Array, 'N p']
+        Fixed-effect design matrix with ``p`` columns.
+    group : Int[Array, 'N']
+        Group (level) index in ``[0, n_groups)`` for each observation.
+    n_groups : int
+        Number of distinct grouping levels ``q``.
+    family : Family
+        Exponential-family specification providing link, variance and deviance.
+    n_outer : int
+        Number of outer Fellner-Schall smoothing-parameter iterations.
+    n_inner : int
+        Number of inner penalised-IRLS iterations per outer step.
+    ridge : float
+        Ridge stabiliser added to the fixed-effect normal equations.
+    lam_floor : float
+        Lower clamp on the smoothing parameter.
+    lam_ceil : float
+        Upper clamp on the smoothing parameter.
+    block : int or None
+        Element-block size for the batched fit; ``None`` processes all rows at
+        once.
+
+    Returns
+    -------
+    GLMMResult
+        Fitted result with ``beta_hat`` (V, p), ``blups`` (V, q), ``re_var``
+        (V, 1, 1) holding the scalar random-intercept variance, dispersion,
+        deviance and effective degrees of freedom, tagged ``tier='few'``.
     """
     p = X.shape[-1]
     re = re_smooth(group, n_levels=n_groups)
@@ -98,20 +134,58 @@ def _glmm_slope_diagonal(
     lam_ceil: float,
     block: Optional[int],
 ) -> GLMMResult:
-    """Diagonal random-slope GLMM via independent ``re_smooth`` blocks (PQL).
+    """Diagonal (uncorrelated) random-slope GLMM via independent smoothers.
 
-    For a random-effect design ``z`` with ``r`` columns, build ``r`` *independent*
-    random-effect blocks -- one per column, ``re_smooth(group, by=z[:, k])`` -- and
-    fit them through ``gam_fit`` under the GLM family.  Each block carries its own
-    Fellner-Schall smoothing parameter, so the random-effect covariance ``G`` is
-    **diagonal**: the uncorrelated ``(z_0 || g) + ... + (z_{r-1} || g)`` model
-    (lme4's ``||``).  The per-column variance components are ``sigma_{b,k}^2 = phi /
-    lambda_k``; ``re_var`` is ``(V, r)`` and the BLUPs are ``(V, q, r)``.
+    For a random-effect design ``z`` with ``r`` columns, build ``r`` independent
+    random-effect blocks -- one per column, via
+    :func:`~nitrix.stats.basis.re_smooth` applied to each ``z[:, k]`` -- and fit
+    them through :func:`~nitrix.stats.gam.gam_fit` under the GLM family.  Each
+    block carries its own Fellner-Schall smoothing parameter, so the
+    random-effect covariance :math:`G` is diagonal: the uncorrelated
+    :math:`(z_0 \\| g) + \\dots + (z_{r-1} \\| g)` model (lme4's ``||``
+    operator).  The per-column variance components are
+    :math:`\\sigma_{b,k}^2 = \\phi / \\lambda_k`.
 
-    A ones column of ``z`` is the random *intercept* (``by = 1`` -> ``one_hot(g)``);
-    the remaining columns are random *slopes*.  This reuses the dense GAMM machinery
-    verbatim; for a many-level factor it is the structured block-Woodbury PQL that
-    avoids the ``(p + q r)``-wide solve (the unstructured / correlated path).
+    A ones column of ``z`` is the random *intercept* (``by = 1`` reduces to a
+    one-hot encoding of the group), and the remaining columns are random
+    *slopes*.  This reuses the dense GAMM machinery verbatim; for a correlated
+    covariance use the unstructured (joint-Schur) path instead.
+
+    Parameters
+    ----------
+    Y : Float[Array, 'V N']
+        Response, one row per element over ``N`` observations.
+    X : Float[Array, 'N p']
+        Fixed-effect design matrix with ``p`` columns.
+    group : Int[Array, 'N']
+        Group (level) index in ``[0, n_groups)`` for each observation.
+    n_groups : int
+        Number of distinct grouping levels ``q``.
+    z : Float[Array, 'N r']
+        Random-effect design with ``r`` columns (one per random term).
+    family : Family
+        Exponential-family specification providing link, variance and deviance.
+    n_outer : int
+        Number of outer Fellner-Schall smoothing-parameter iterations.
+    n_inner : int
+        Number of inner penalised-IRLS iterations per outer step.
+    ridge : float
+        Ridge stabiliser added to the fixed-effect normal equations.
+    lam_floor : float
+        Lower clamp on each smoothing parameter.
+    lam_ceil : float
+        Upper clamp on each smoothing parameter.
+    block : int or None
+        Element-block size for the batched fit; ``None`` processes all rows at
+        once.
+
+    Returns
+    -------
+    GLMMResult
+        Fitted result with ``beta_hat`` (V, p), ``blups`` (V, q, r), and
+        ``re_var`` (V, r, r) holding the per-column variance components on the
+        diagonal (zero off-diagonals), plus dispersion, deviance and effective
+        degrees of freedom, tagged ``tier='few'``.
     """
     p = X.shape[-1]
     r = z.shape[-1]
@@ -182,17 +256,64 @@ def _slope_solve(
     Float[Array, 'q r r'],
     Float[Array, 'p p'],
 ]:
-    """One penalised-IRLS step for an ``r``-dimensional random slope, Schur-structured.
+    """One penalised-IRLS step for an ``r``-dimensional random slope.
 
-    The ``r x r`` lift of :func:`_structured_solve`: at the current ``(beta, b)`` and
-    fixed ``(G, sigma_e^2)``, form the working response and weights, then solve the
-    penalised normal equations with per-group blocks ``D_g = Z_g^T W Z_g +
-    sigma_e^2 G^{-1}`` (``r x r``) and ``B_g = X_g^T W Z_g`` (``p x r``).  Eliminating
-    ``b`` gives the ``p x p`` Schur system ``S beta = rhs``, ``S = X^T W X - sum_g
-    B_g D_g^{-1} B_g^T`` -- per-group ``r x r`` inverses (``small_inv_logdet``), never
-    the ``(p + q r)``-wide system.  Returns ``(beta, b)`` and the pieces the REML-EM
-    update needs: ``w``, ``z_work``, and the per-group ``Z^T W Z`` / ``X^T W Z`` /
-    ``D^{-1}`` plus ``S^{-1}``.
+    The :math:`r \\times r` lift of :func:`_structured_solve`: at the current
+    ``(beta, b)`` and fixed :math:`(G, \\sigma_e^2)`, form the working response
+    and weights, then solve the penalised normal equations with per-group blocks
+    :math:`D_g = Z_g^{\\top} W Z_g + \\sigma_e^2 G^{-1}` (:math:`r \\times r`)
+    and :math:`B_g = X_g^{\\top} W Z_g` (:math:`p \\times r`).  Eliminating
+    ``b`` gives the :math:`p \\times p` Schur system :math:`S \\beta = \\text{rhs}`,
+    :math:`S = X^{\\top} W X - \\sum_g B_g D_g^{-1} B_g^{\\top}`, formed from
+    per-group :math:`r \\times r` inverses
+    (:func:`~nitrix.linalg._smalllinalg.small_inv_logdet`) rather than the
+    :math:`(p + q r)`-wide system.
+
+    Parameters
+    ----------
+    y : Float[Array, 'N']
+        Response for a single element over ``N`` observations.
+    X : Float[Array, 'N p']
+        Fixed-effect design matrix with ``p`` columns.
+    z : Float[Array, 'N r']
+        Random-slope design with ``r`` columns.
+    group : Int[Array, 'N']
+        Group index in ``[0, n_groups)`` for each observation.
+    n_groups : int
+        Number of distinct grouping levels ``q``.
+    family : Family
+        Exponential-family specification.
+    r : int
+        Random-slope dimension (number of columns of ``z``).
+    g_inv : Float[Array, 'r r']
+        Inverse of the current random-effect covariance :math:`G^{-1}`.
+    se2 : Float[Array, '']
+        Current residual dispersion :math:`\\sigma_e^2`.
+    beta : Float[Array, 'p']
+        Current fixed-effect coefficients.
+    b : Float[Array, 'q r']
+        Current random-effect coefficients (one ``r``-vector per group).
+    ridge_eye : Float[Array, 'p p']
+        Ridge stabiliser (a scaled identity) added to the Schur matrix.
+
+    Returns
+    -------
+    beta_new : Float[Array, 'p']
+        Updated fixed-effect coefficients.
+    b_new : Float[Array, 'q r']
+        Updated random-effect coefficients.
+    w : Float[Array, 'N']
+        Working IRLS weights.
+    z_work : Float[Array, 'N']
+        Working response.
+    ztz : Float[Array, 'q r r']
+        Per-group Gram :math:`Z_g^{\\top} W Z_g`.
+    xtz : Float[Array, 'q p r']
+        Per-group cross term :math:`X_g^{\\top} W Z_g`.
+    dinv : Float[Array, 'q r r']
+        Per-group inverse blocks :math:`D_g^{-1}`.
+    s_inv : Float[Array, 'p p']
+        Inverse of the :math:`p \\times p` Schur matrix :math:`S^{-1}`.
     """
     eta = family.clip_eta(X @ beta + jnp.einsum('nr,nr->n', z, b[group]))
     mu = family.linkinv(eta)
@@ -251,29 +372,69 @@ def _glmm_slope_structured_one(
     Float[Array, ''],
     Float[Array, ''],
 ]:
-    """Single-voxel unstructured (correlated-``G``) random-slope GLMM via PQL.
+    """Single-element unstructured (correlated-:math:`G`) random-slope GLMM.
 
-    A **joint-Schur inner IRLS + monotone REML-EM outer** (FR
-    ``glmm-random-slope-robust-solver``).  Each outer step (a) runs ``n_inner``
-    penalised-IRLS steps for ``(beta, b)`` at fixed ``(G, sigma_e^2)`` through the
-    ``r x r`` Schur solve (:func:`_slope_solve`), then (b) updates the
-    random-effect covariance by EM::
+    Fits a correlated random-slope GLMM for one element by a joint-Schur inner
+    IRLS with a monotone REML-EM outer loop.  Each outer step (a) runs
+    ``n_inner`` penalised-IRLS steps for ``(beta, b)`` at fixed
+    :math:`(G, \\sigma_e^2)` through the :math:`r \\times r` Schur solve
+    (:func:`_slope_solve`), then (b) updates the random-effect covariance by EM::
 
         G <- (1/q) sum_g [ b_g b_g^T + Cov(b_g) ],
         Cov(b_g) = sigma_e^2 (D_g^{-1} + D_g^{-1} B_g^T S^{-1} B_g D_g^{-1}),
 
-    the posterior second moment of the random effects (the ``B_g^T S^{-1} B_g``
-    term is the beta-uncertainty correction that makes this **REML**-EM, not ML-EM
-    -- it is what reproduces ``lme_fit``'s REML for the Gaussian family).  Because
-    the M-step is a sum of PSD matrices it stays positive-definite, and because EM
-    is monotone in the REML objective it cannot over-shoot ``G`` the way the
-    earlier iterated-Newton-REML did -- so the fit no longer depends on the IRLS
-    ``eta`` clamp landing it in the right basin (the clamp reverts to pure overflow
-    safety).  ``sigma_e^2`` is pinned at ``1`` for a fixed-dispersion family
-    (binomial / Poisson / NB) and EM-updated (``(sum_i w_i r_i^2 + sum_g tr(Z_g^T W
-    Z_g Cov(b_g))) / N``) otherwise.
+    the posterior second moment of the random effects.  The
+    :math:`B_g^{\\top} S^{-1} B_g` term is the fixed-effect-uncertainty
+    correction that makes this REML-EM rather than ML-EM; it is what reproduces
+    the REML fit of :func:`~nitrix.stats.lme.reml.lme_fit` for the Gaussian
+    family.  Because the M-step is a sum of positive-semidefinite matrices the
+    covariance stays positive-definite, and because EM is monotone in the REML
+    objective it cannot over-shoot :math:`G`; the fit therefore no longer
+    depends on the IRLS ``eta`` clamp landing it in the right basin (the clamp
+    reverts to pure overflow safety).  The residual dispersion
+    :math:`\\sigma_e^2` is pinned at :math:`1` for a fixed-dispersion family
+    (binomial / Poisson / negative binomial) and otherwise EM-updated as
+    :math:`(\\sum_i w_i r_i^2 + \\sum_g \\operatorname{tr}(Z_g^{\\top} W Z_g \\operatorname{Cov}(b_g))) / N`.
 
-    Returns ``(beta, blups (q, r), G (r, r), dispersion, deviance, edf)``.
+    Parameters
+    ----------
+    y : Float[Array, 'N']
+        Response for a single element over ``N`` observations.
+    X : Float[Array, 'N p']
+        Fixed-effect design matrix with ``p`` columns.
+    z : Float[Array, 'N r']
+        Random-slope design with ``r`` columns.
+    group : Int[Array, 'N']
+        Group index in ``[0, n_groups)`` for each observation.
+    n_groups : int
+        Number of distinct grouping levels ``q``.
+    family : Family
+        Exponential-family specification.
+    p : int
+        Number of fixed-effect columns.
+    r : int
+        Random-slope dimension.
+    n_outer : int
+        Number of outer REML-EM iterations.
+    n_inner : int
+        Number of inner penalised-IRLS iterations per outer step.
+    ridge : float
+        Ridge stabiliser added to the fixed-effect and covariance updates.
+
+    Returns
+    -------
+    beta : Float[Array, 'p']
+        Fixed-effect coefficients.
+    b : Float[Array, 'q r']
+        Random-effect coefficients (BLUPs), one ``r``-vector per group.
+    g_cov : Float[Array, 'r r']
+        Estimated random-effect covariance :math:`G`.
+    se2 : Float[Array, '']
+        Estimated residual dispersion :math:`\\sigma_e^2`.
+    deviance : Float[Array, '']
+        Total deviance at the converged fit.
+    edf : Float[Array, '']
+        Total effective degrees of freedom.
     """
     from .._irls import irls_warm_start
 
@@ -399,7 +560,43 @@ def _glmm_slope_structured(
     ridge: float,
     block: Optional[int],
 ) -> GLMMResult:
-    """Unstructured random-slope GLMM over ``V`` elements (joint-Schur + REML-EM)."""
+    """Unstructured random-slope GLMM over ``V`` elements (joint-Schur + REML-EM).
+
+    Batched wrapper that maps :func:`_glmm_slope_structured_one` over every row
+    of ``Y`` via :func:`~nitrix.stats._batching.blocked_vmap`, fitting a
+    correlated random-slope GLMM independently per element.
+
+    Parameters
+    ----------
+    Y : Float[Array, 'V N']
+        Response, one row per element over ``N`` observations.
+    X : Float[Array, 'N p']
+        Fixed-effect design matrix with ``p`` columns.
+    group : Int[Array, 'N']
+        Group index in ``[0, n_groups)`` for each observation.
+    n_groups : int
+        Number of distinct grouping levels ``q``.
+    z : Float[Array, 'N r']
+        Random-slope design with ``r`` columns.
+    family : Family
+        Exponential-family specification.
+    n_outer : int
+        Number of outer REML-EM iterations.
+    n_inner : int
+        Number of inner penalised-IRLS iterations per outer step.
+    ridge : float
+        Ridge stabiliser added to the fixed-effect and covariance updates.
+    block : int or None
+        Element-block size for the batched fit; ``None`` processes all rows at
+        once.
+
+    Returns
+    -------
+    GLMMResult
+        Fitted result with ``beta_hat`` (V, p), ``blups`` (V, q, r), ``re_var``
+        (V, r, r) holding the estimated random-effect covariance, dispersion,
+        deviance and effective degrees of freedom, tagged ``tier='slope'``.
+    """
     p = X.shape[-1]
     r = z.shape[-1]
 
@@ -464,19 +661,61 @@ def _structured_solve(
 ]:
     """One penalised-IRLS step for a scalar random intercept, Schur-structured.
 
-    The penalised normal equations at smoothing parameter ``lambda`` are::
+    The penalised normal equations at smoothing parameter :math:`\\lambda` are::
 
         [ X^T W X        X^T W Z   ] [beta]   [X^T W z]
         [ Z^T W X   Z^T W Z + lI_q ] [ b  ] = [Z^T W z]
 
-    with ``Z = onehot(group)``, so ``Z^T W Z = diag(sw)`` (``sw_g = sum_{i in g}
-    w_i``) is **diagonal**.  Eliminating ``b`` via its (diagonal) block gives a
-    ``p x p`` Schur system ``S beta = rhs``,  ``S = X^T W X - B D^{-1} B^T``,
-    ``D = diag(sw) + lambda I``, ``B = X^T W Z`` -- all assembled from the
-    per-group weighted sums (segment reductions), never an ``N x N`` or
-    ``q x q`` dense factor.  Returns the updated ``(beta, b)`` plus the pieces the
-    dispersion / Fellner-Schall update needs (``w``, ``sw``, ``swx``, ``Dinv``,
-    ``S_inv``, ``XtWX``).
+    with :math:`Z = \\operatorname{onehot}(\\text{group})`, so
+    :math:`Z^{\\top} W Z = \\operatorname{diag}(sw)` (with
+    :math:`sw_g = \\sum_{i \\in g} w_i`) is diagonal.  Eliminating ``b`` via its
+    (diagonal) block gives a :math:`p \\times p` Schur system
+    :math:`S \\beta = \\text{rhs}`, with
+    :math:`S = X^{\\top} W X - B D^{-1} B^{\\top}`,
+    :math:`D = \\operatorname{diag}(sw) + \\lambda I` and
+    :math:`B = X^{\\top} W Z` -- all assembled from the per-group weighted sums
+    (segment reductions), never an :math:`N \\times N` or :math:`q \\times q`
+    dense factor.
+
+    Parameters
+    ----------
+    y : Float[Array, 'N']
+        Response for a single element over ``N`` observations.
+    X : Float[Array, 'N p']
+        Fixed-effect design matrix with ``p`` columns.
+    group : Int[Array, 'N']
+        Group index in ``[0, n_groups)`` for each observation.
+    n_groups : int
+        Number of distinct grouping levels ``q``.
+    family : Family
+        Exponential-family specification.
+    lam : Float[Array, '']
+        Random-intercept precision (smoothing parameter :math:`\\lambda`).
+    beta : Float[Array, 'p']
+        Current fixed-effect coefficients.
+    b : Float[Array, 'q']
+        Current random-intercept coefficients (one per group).
+    ridge_eye : Float[Array, 'p p']
+        Ridge stabiliser (a scaled identity) added to the Schur matrix.
+
+    Returns
+    -------
+    beta_new : Float[Array, 'p']
+        Updated fixed-effect coefficients.
+    b_new : Float[Array, 'q']
+        Updated random-intercept coefficients.
+    w : Float[Array, 'N']
+        Working IRLS weights.
+    sw : Float[Array, 'q']
+        Per-group summed weights :math:`sw_g = \\sum_{i \\in g} w_i`.
+    swx : Float[Array, 'q p']
+        Per-group weighted design sums :math:`Z^{\\top} W X`.
+    dinv : Float[Array, 'q']
+        Diagonal of :math:`(Z^{\\top} W Z + \\lambda I)^{-1}`.
+    s_inv : Float[Array, 'p p']
+        Inverse of the :math:`p \\times p` Schur matrix :math:`S^{-1}`.
+    xtwx : Float[Array, 'p p']
+        Fixed-effect Gram :math:`X^{\\top} W X`.
     """
     eta = X @ beta + b[group]
     mu = family.linkinv(eta)
@@ -525,11 +764,51 @@ def _glmm_many_one(
 ]:
     """Single-element structured PQL fit (scalar random intercept).
 
-    Returns ``(beta, blups, re_var, dispersion, deviance, edf_total)``.  Mirrors
-    ``gam._gam_fit_one`` -- outer Fellner-Schall loop over the random-effect
-    precision ``lambda``, inner penalised IRLS -- but every solve goes through the
-    ``O(N p^2 + q)`` Schur complement (:func:`_structured_solve`), so it never
-    forms the ``(p + q)``-wide system.
+    Mirrors the single-element GAM fit -- an outer Fellner-Schall loop over the
+    random-intercept precision :math:`\\lambda` wrapping inner penalised IRLS --
+    but every solve goes through the :math:`O(N p^2 + q)` Schur complement
+    (:func:`_structured_solve`), so it never forms the :math:`(p + q)`-wide
+    system.
+
+    Parameters
+    ----------
+    y : Float[Array, 'N']
+        Response for a single element over ``N`` observations.
+    X : Float[Array, 'N p']
+        Fixed-effect design matrix with ``p`` columns.
+    group : Int[Array, 'N']
+        Group index in ``[0, n_groups)`` for each observation.
+    n_groups : int
+        Number of distinct grouping levels ``q``.
+    family : Family
+        Exponential-family specification.
+    p : int
+        Number of fixed-effect columns.
+    n_outer : int
+        Number of outer Fellner-Schall iterations.
+    n_inner : int
+        Number of inner penalised-IRLS iterations per outer step.
+    ridge : float
+        Ridge stabiliser added to the fixed-effect normal equations.
+    lam_floor : float
+        Lower clamp on the precision :math:`\\lambda`.
+    lam_ceil : float
+        Upper clamp on the precision :math:`\\lambda`.
+
+    Returns
+    -------
+    beta : Float[Array, 'p']
+        Fixed-effect coefficients.
+    b : Float[Array, 'q']
+        Random-intercept coefficients (BLUPs).
+    re_var : Float[Array, '']
+        Random-intercept variance :math:`\\phi / \\lambda`.
+    phi : Float[Array, '']
+        Estimated dispersion.
+    deviance : Float[Array, '']
+        Total deviance at the converged fit.
+    edf_total : Float[Array, '']
+        Total effective degrees of freedom.
     """
     n = X.shape[0]
     q = n_groups
@@ -608,14 +887,51 @@ def _dispersion(
     xtwx: Float[Array, 'p p'],
     n: int,
 ) -> Tuple[Float[Array, ''], Float[Array, '']]:
-    """Dispersion ``phi`` and total EDF for the structured fit.
+    """Dispersion :math:`\\phi` and total effective df for the structured fit.
 
-    ``edf = tr(V G)`` with ``V`` the full penalised inverse and ``G`` the
-    unpenalised Gram, assembled blockwise from the Schur pieces (no ``q x q``
-    factor): ``tr(V_bb diag(sw)) = sum_g sw_g (D^{-1}_g + D^{-2}_g x_g^T S^{-1}
-    x_g)``, the fixed block ``tr(S^{-1} X^T W X)``, and the cross term
-    ``-2 tr(S^{-1} B D^{-1} B^T)``.  For a fixed-dispersion family ``phi = 1``;
-    otherwise it is the Pearson estimate ``sum (y - mu)^2 / V(mu) / (n - edf)``.
+    The effective degrees of freedom are
+    :math:`\\operatorname{tr}(V G)` with :math:`V` the full penalised inverse
+    and :math:`G` the unpenalised Gram, assembled blockwise from the Schur
+    pieces (no :math:`q \\times q` factor): the random block
+    :math:`\\operatorname{tr}(V_{bb} \\operatorname{diag}(sw)) = \\sum_g sw_g (D^{-1}_g + D^{-2}_g x_g^{\\top} S^{-1} x_g)`,
+    the fixed block :math:`\\operatorname{tr}(S^{-1} X^{\\top} W X)`, and the
+    cross term :math:`-2 \\operatorname{tr}(S^{-1} B D^{-1} B^{\\top})`.  For a
+    fixed-dispersion family :math:`\\phi = 1`; otherwise it is the Pearson
+    estimate :math:`\\sum (y - \\mu)^2 / V(\\mu) / (n - \\text{edf})`.
+
+    Parameters
+    ----------
+    y : Float[Array, 'N']
+        Response for a single element over ``N`` observations.
+    X : Float[Array, 'N p']
+        Fixed-effect design matrix with ``p`` columns.
+    group : Int[Array, 'N']
+        Group index in ``[0, n_groups)`` for each observation.
+    family : Family
+        Exponential-family specification.
+    beta : Float[Array, 'p']
+        Fixed-effect coefficients.
+    b : Float[Array, 'q']
+        Random-intercept coefficients.
+    sw : Float[Array, 'q']
+        Per-group summed weights.
+    swx : Float[Array, 'q p']
+        Per-group weighted design sums :math:`Z^{\\top} W X`.
+    dinv : Float[Array, 'q']
+        Diagonal of :math:`(Z^{\\top} W Z + \\lambda I)^{-1}`.
+    s_inv : Float[Array, 'p p']
+        Inverse of the Schur matrix :math:`S^{-1}`.
+    xtwx : Float[Array, 'p p']
+        Fixed-effect Gram :math:`X^{\\top} W X`.
+    n : int
+        Number of observations ``N``.
+
+    Returns
+    -------
+    phi : Float[Array, '']
+        Estimated dispersion (:math:`1` for a fixed-dispersion family).
+    edf_total : Float[Array, '']
+        Total effective degrees of freedom.
     """
     bdinvbt = swx.T @ (dinv[:, None] * swx)  # B D^{-1} B^T
     msw = swx.T @ ((sw * dinv * dinv)[:, None] * swx)  # sum_g sw_g D^-2 x x^T
@@ -647,7 +963,46 @@ def _glmm_many_level(
     lam_ceil: float,
     block: Optional[int],
 ) -> GLMMResult:
-    """Structured PQL over ``V`` elements (scalar random intercept)."""
+    """Structured PQL over ``V`` elements (scalar random intercept).
+
+    Batched wrapper that maps :func:`_glmm_many_one` over every row of ``Y`` via
+    :func:`~nitrix.stats._batching.blocked_vmap`, fitting a scalar
+    random-intercept GLMM independently per element through the many-level
+    Schur-complement PQL solver.
+
+    Parameters
+    ----------
+    Y : Float[Array, 'V N']
+        Response, one row per element over ``N`` observations.
+    X : Float[Array, 'N p']
+        Fixed-effect design matrix with ``p`` columns.
+    group : Int[Array, 'N']
+        Group index in ``[0, n_groups)`` for each observation.
+    n_groups : int
+        Number of distinct grouping levels ``q``.
+    family : Family
+        Exponential-family specification.
+    n_outer : int
+        Number of outer Fellner-Schall iterations.
+    n_inner : int
+        Number of inner penalised-IRLS iterations per outer step.
+    ridge : float
+        Ridge stabiliser added to the fixed-effect normal equations.
+    lam_floor : float
+        Lower clamp on the precision.
+    lam_ceil : float
+        Upper clamp on the precision.
+    block : int or None
+        Element-block size for the batched fit; ``None`` processes all rows at
+        once.
+
+    Returns
+    -------
+    GLMMResult
+        Fitted result with ``beta_hat`` (V, p), ``blups`` (V, q), ``re_var``
+        (V, 1, 1) holding the scalar random-intercept variance, dispersion,
+        deviance and effective degrees of freedom, tagged ``tier='many'``.
+    """
     p = X.shape[-1]
 
     def per_voxel(

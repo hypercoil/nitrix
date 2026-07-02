@@ -1,0 +1,126 @@
+---
+title: "nitrix.semiring.ell_edge"
+generated: true
+signature-hash: 2a8a58974e7fa068
+description: "Edge-functional aggregation over ELL adjacencies."
+listing:
+  id: nitrix-semiring-ell_edge-symbols
+  contents: "nitrix-semiring-ell_edge/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.semiring.ell_edge`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Edge-functional aggregation over ELL adjacencies.
+
+Where [`semiring_ell_matmul`](nitrix-semiring-ell/semiring_ell_matmul.qmd) aggregates **stored** edge values
+under a semiring -- $\mathrm{out}_i = \bigoplus_p
+\mathrm{values}_{i,p} \otimes B_{\mathrm{indices}_{i,p}}$ -- this
+module's [`semiring_ell_edge_aggregate`](nitrix-semiring-ell_edge/semiring_ell_edge_aggregate.qmd) aggregates **computed**
+edge messages under the same semiring:
+
+``
+e[i, p] = edge_fn(x[i], x[indices[i, p]], values[i, p], (i, j))
+out[i]  = (+)_p e[i, p]
+``
+
+The crucial distinction is that `edge_fn` is a user-supplied
+callable that runs at forward time, producing a per-edge feature
+vector from the source feature, the neighbour feature, and the stored
+geometric weight.  This is the "edge-functional mesh convolution"
+pattern of DGCNN / EdgeConv (Wang et al. 2019), the graph attention
+network (Veličković et al. 2018), MoNet (Monti et al. 2017), the graph
+convolutional network (Kipf & Welling 2017), and more.
+
+The aggregation half (the $\bigoplus_p$ reduction) is identical
+to [`semiring_ell_matmul`](nitrix-semiring-ell/semiring_ell_matmul.qmd) and uses the same algebra; only the
+"value-of-edge" step is functional rather than stored.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### Padding semantics
+
+The ELL pattern pads rows below `k_max` with $\mathrm{values}_{i,p}
+= \mathrm{identity}$ ($0$ under the real semiring; $\pm\infty$
+under the tropical semirings).  The user's `edge_fn` sees these pad
+positions as ordinary edges -- the `values` argument is the canonical
+signal of padding.  **The user is responsible** for incorporating
+`values` into the edge message in a way that the pad positions contribute
+the semiring identity to the aggregate (typically by multiplying the message
+by `values`, which is $0$ at real-semiring pads).  This module does
+not auto-mask -- doing so would conflate padding with user-supplied
+zero-weight edges, which are sometimes meaningful.
+
+### Memory and cost
+
+For `n` vertices, `k_max` neighbours per row, `d_in` input
+features and `d_out` output features:
+
+- Gathered neighbour features: `(n, k_max, d_in)`.
+- Broadcast source features: `(n, k_max, d_in)` (via
+  `jnp.broadcast_to`, no real allocation).
+- Per-edge message tensor: `(n, k_max, d_out)`.
+- Aggregated output: `(n, d_out)`.
+
+So the peak device memory is $O(n \cdot k_{\max} \cdot
+\max(d_{\mathrm{in}}, d_{\mathrm{out}}))$.  There is no
+$O(n^2)$ materialisation.  This is comparable to a single
+[`semiring_ell_matmul`](nitrix-semiring-ell/semiring_ell_matmul.qmd), but with the extra `edge_fn` evaluation
+inside the inner loop.
+
+### Differentiability
+
+The operator is fully differentiable end-to-end.  `edge_fn` is any
+JAX function; gradients flow back through both the gathered features
+and any parameters captured in `edge_fn`'s closure.
+
+### Backend
+
+The path is pure JAX at first cut.  A Pallas / Triton path is possible
+for fixed-shape `edge_fn` (e.g. a small MLP) but is not currently
+shipped -- the cost of inlining an arbitrary callable into Triton is
+significant.  `edge_fn` runs in the JAX path on Ampere and newer
+hardware via the standard XLA fusion.
+
+### References
+
+- Wang, Y., Sun, Y., Liu, Z., Sarma, S. E., Bronstein, M. M. and
+  Solomon, J. M. (2019). Dynamic Graph CNN for Learning on Point Clouds.
+  *ACM Transactions on Graphics*, 38(5), Article 146.
+  https://doi.org/10.1145/3326362
+- Veličković, P., Cucurull, G., Casanova, A., Romero, A., Liò, P. and
+  Bengio, Y. (2018). Graph Attention Networks. *ICLR*.
+  https://arxiv.org/abs/1710.10903
+- Monti, F., Boscaini, D., Masci, J., Rodolà, E., Svoboda, J. and
+  Bronstein, M. M. (2017). Geometric deep learning on graphs and
+  manifolds using mixture model CNNs. *CVPR*.
+  https://arxiv.org/abs/1611.08402
+- Kipf, T. N. and Welling, M. (2017). Semi-Supervised Classification
+  with Graph Convolutional Networks. *ICLR*.
+  https://arxiv.org/abs/1609.02907
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d_in` | *(undocumented — add to `_dimensions.yml`)* |
+| `d_out` | *(undocumented — add to `_dimensions.yml`)* |
+| `k_max` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-semiring-ell_edge-symbols}
+:::

@@ -1,0 +1,103 @@
+---
+title: "nitrix.semiring.conv"
+generated: true
+signature-hash: ba2c675f833873c3
+description: "Public [`semiring_conv`](nitrix-semiring-conv/semiring_conv.qmd) -- the convolution member of the semiring reduction family alongside [`semiring_matmul`](nitrix-semiring.qmd)."
+listing:
+  id: nitrix-semiring-conv-symbols
+  contents: "nitrix-semiring-conv/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.semiring.conv`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Public [`semiring_conv`](nitrix-semiring-conv/semiring_conv.qmd) -- the convolution member of the semiring
+reduction family alongside [`semiring_matmul`](nitrix-semiring.qmd).
+
+For each output spatial position, the kernel is multiplied with the
+input receptive field via the algebra's `binary_op` and then
+reduced via the algebra's `monoid`:
+    C[..., *spatial_out, c_out]
+        = (+)_{*ks, c_in} (
+            x[..., *spatial_at(spatial_out, ks), c_in]
+              (*)
+            k[*ks, c_in, c_out]
+          )
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### Forward implementation strategy
+
+We reduce the conv to a matmul over patches:
+
+1. Extract patches via `lax.conv_general_dilated_patches` with the
+   requested window strides / padding / dilation.  The result is
+   `(batch, c_in * prod(kspatial), *spatial_out)` with the channel
+   axis ordered `c_in_outer, kspatial_inner`.
+2. Reshape patches to `(batch * prod(spatial_out), c_in * prod(kspatial))`.
+3. Reshape `k` to `(c_in * prod(kspatial), c_out)` with the same
+   axis ordering.
+4. Call [`semiring_matmul`](nitrix-semiring.qmd) -- the existing
+   `custom_vjp` on matmul gives us the backward "for free" via the
+   JAX autograd pipeline.
+
+The patches tensor is materialised (this is the price for re-using
+[`semiring_matmul`](nitrix-semiring.qmd)).  For typical conv shapes
+(~spatial × c_in × kspatial ≲ 64 MB) this is fine; a streaming-Pallas
+conv kernel that avoids materialisation is a future-work item.
+
+### Backward
+
+Composed via JAX autograd from:
+
+- `lax.conv_general_dilated_patches` (XLA-registered VJP)
+- The `reshape` / `moveaxis` glue (trivial VJPs)
+- [`semiring_matmul`](nitrix-semiring.qmd) (our per-algebra
+  `custom_vjp`)
+
+We do *not* need a separate `conv_vjp` field on
+[`Semiring`](nitrix-semiring/Semiring.qmd): the chain rule through the matmul
+VJP already handles all five differentiable algebras correctly.
+
+### Layout
+
+Channel-last (`NHWC`-style) for the public surface: `x` has shape
+`(..., *spatial, c_in)`; `k` has shape `(*kspatial, c_in,
+c_out)`.  This matches Keras / TF convention and is the most natural
+for users who think of channels as features.  Internally we transpose
+to JAX-default `NCHW` for the lax patches call and convert back.
+
+### Backend selection
+
+Three-level resolution as everywhere else.  The Pallas-CUDA path is
+a stub that rejects the request; the dispatcher catches this and falls
+back to JAX with one `NitrixBackendFallback`
+warning per `(shape, dtype, algebra)` signature.  A native Pallas
+conv kernel is a future-work item.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `c_in` | *(undocumented — add to `_dimensions.yml`)* |
+| `*kspatial` | a variadic group of axes (`kspatial`) |
+| `c_out` | *(undocumented — add to `_dimensions.yml`)* |
+| `*spatial_out` | a variadic group of axes (`spatial_out`) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-semiring-conv-symbols}
+:::

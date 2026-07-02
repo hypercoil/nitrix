@@ -4,107 +4,106 @@
 """
 Interpolation-method dispatcher for grid resampling.
 
-``geometry.grid.resample`` and ``spatial_transform`` both reduce to
-"sample an image at a set of continuous coordinates"; they differ only
-in *where* the coordinates come from (an align-corners resize grid vs an
-arbitrary deformation field).  The *kernel* -- how neighbouring voxels
-are weighted into each sampled value -- is an orthogonal axis.  This
-module is that axis: a small ADT of immutable ``Interpolator`` records,
-each a pure ``sample(image, coords)`` function, dispatched by one shared
-``_sample_at_coords`` seam that both grid functions call.
+:func:`resample` and :func:`spatial_transform` both reduce to "sample an
+image at a set of continuous coordinates"; they differ only in *where*
+the coordinates come from (an align-corners resize grid vs an arbitrary
+deformation field).  The *kernel* -- how neighbouring voxels are weighted
+into each sampled value -- is an orthogonal axis.  This module is that
+axis: a small algebraic data type of immutable :class:`Interpolator`
+records, each a pure ``sample(image, coords)`` function, dispatched by
+one shared :func:`_sample_at_coords` seam that both grid functions call.
 
-The factoring mirrors the ``linalg._eigsolve`` dispatcher (forward
-*method* perp backward *format*): here the coordinate *source* (the
-task) is orthogonal to the sampling *kernel* (the method), and -- once a
-Pallas gather lands -- to the *backend* (execution engine).  Adding a
-method is adding one frozen record; the grid functions are untouched.
+Here the coordinate *source* (the task) is orthogonal to the sampling
+*kernel* (the method), and -- once a Pallas gather lands -- to the
+*backend* (execution engine).  Adding a method is adding one frozen
+record; the grid functions are untouched.
 
 Methods:
 
-- ``Linear``           -- (multi-)linear, ``order=1``.  The default;
-  the prior ``resample`` / ``spatial_transform`` behaviour.
-- ``NearestNeighbour`` -- ``order=0`` round-to-nearest.  Exact under
-  label-preserving resampling; the gradient w.r.t. *coordinates* is zero
-  almost everywhere (the round is piecewise-constant), so it is not
-  usable for coordinate-driven registration losses -- hence
-  ``differentiable_in_coords = False``.  It remains differentiable
-  w.r.t. the image *values* (a one-hot gather).
-- ``Lanczos`` -- windowed-sinc interpolation of configurable order
-  ``a`` (default 3): a ``2a``-tap separable kernel
-  ``L_a(x) = sinc(x) sinc(x / a)``, renormalised per axis to a partition
-  of unity (so constants are preserved exactly).  High-fidelity and
-  fully differentiable (smooth weights) in both values and coordinates;
-  the ANTs ``LanczosWindowedSinc`` algorithm class (not bit-exact ITK).
-- ``CubicBSpline`` -- order-3 B-spline (``scipy.ndimage`` ``order=3``):
-  a recursive **prefilter** (samples -> interpolating coefficients) plus
-  a 4-tap cubic basis gather.  Differentiable in values and coordinates;
-  bit-exact with ``scipy`` ``order=3, mode='mirror'``.  The path nnUNet /
-  ``hd_bet`` style preprocessing needs.
-- ``CatmullRomCubic`` -- the cardinal (tension ``-1/2``) cubic-Hermite
-  *interpolating* spline: a 4-tap separable gather with **no prefilter**
-  (it interpolates the raw samples directly), so -- unlike ``CubicBSpline``
-  -- no backend-dependent scan.  Differentiable in values and coordinates;
-  ``C^1`` (vs ``CubicBSpline``'s ``C^2``), a partition of unity (reproduces
-  constants and linear ramps) but *not* a convex combination (small negative
-  side lobes, so it can overshoot/ring near edges).  The OpenCV
+- :class:`Linear` -- (multi-)linear, ``order=1``.  The default; the prior
+  :func:`resample` / :func:`spatial_transform` behaviour.
+- :class:`NearestNeighbour` -- ``order=0`` round-to-nearest.  Exact under
+  label-preserving resampling; the gradient with respect to *coordinates*
+  is zero almost everywhere (the round is piecewise-constant), so it is
+  not usable for coordinate-driven registration losses -- hence
+  ``differentiable_in_coords = False``.  It remains differentiable with
+  respect to the image *values* (a one-hot gather).
+- :class:`Lanczos` -- windowed-sinc interpolation of configurable order
+  :math:`a` (default 3): a :math:`2a`-tap separable kernel
+  :math:`L_a(x) = \\operatorname{sinc}(x)\\,\\operatorname{sinc}(x / a)`,
+  renormalised per axis to a partition of unity (so constants are
+  preserved exactly).  High-fidelity and fully differentiable (smooth
+  weights) in both values and coordinates; the ANTs
+  ``LanczosWindowedSinc`` algorithm class (not bit-exact ITK).
+- :class:`CubicBSpline` -- order-3 B-spline (``scipy.ndimage``
+  ``order=3``): a recursive **prefilter** (samples to interpolating
+  coefficients) plus a 4-tap cubic basis gather.  Differentiable in
+  values and coordinates; bit-exact with ``scipy`` ``order=3,
+  mode='mirror'``.  The path nnUNet / ``hd_bet`` style preprocessing
+  needs.
+- :class:`CatmullRomCubic` -- the cardinal (tension :math:`-1/2`)
+  cubic-Hermite *interpolating* spline: a 4-tap separable gather with
+  **no prefilter** (it interpolates the raw samples directly), so --
+  unlike :class:`CubicBSpline` -- no backend-dependent scan.
+  Differentiable in values and coordinates; :math:`C^1` (vs
+  :class:`CubicBSpline`'s :math:`C^2`), a partition of unity (reproduces
+  constants and linear ramps) but *not* a convex combination (small
+  negative side lobes, so it can overshoot/ring near edges).  The OpenCV
   ``INTER_CUBIC`` / Keras-STN cardinal cubic a parity-locked consumer
   (ilex ``fd_net``) pins against.
-- ``MultiLabel`` -- ANTs-style label resampling for segmentations: each
-  label's indicator mask is resampled with an ``inner`` kernel (default
-  ``Linear``) and the per-voxel arg-max label is returned.  Anti-aliases
-  label boundaries while keeping the output inside the input label set.
-  The label set is **static** (a constructor argument -- ``jnp.unique``
-  would break ``jit``), and the arg-max makes it **non-differentiable**
-  (a hard label output).
+- :class:`MultiLabel` -- ANTs-style label resampling for segmentations:
+  each label's indicator mask is resampled with an ``inner`` kernel
+  (default :class:`Linear`) and the per-voxel arg-max label is returned.
+  Anti-aliases label boundaries while keeping the output inside the input
+  label set.  The label set is **static** (a constructor argument --
+  ``jnp.unique`` would break ``jit``), and the arg-max makes it
+  **non-differentiable** (a hard label output).
 
-Unlike ``smoothing.metric.FeatureMetric`` -- whose array factor is a
-differentiable pytree leaf -- an ``Interpolator``'s configuration
-(spline order, the static label set) is **structural / static**: the
-records are plain frozen, hashable dataclasses with no array leaves, so
-they ride ``jit`` static arguments and ``custom_vjp`` non-diff slots
-directly (the ``SolverSpec`` pattern), and are *not* registered as
+An :class:`Interpolator`'s configuration (spline order, the static label
+set) is **structural / static**: the records are plain frozen, hashable
+dataclasses with no array leaves, so they ride ``jit`` static arguments
+and ``custom_vjp`` non-diff slots directly, and are *not* registered as
 pytrees.
 
 The kernels lower onto one shared **explicit separable gather**
-(``_separable_gather``): each axis contributes a small set of integer
+(:func:`_separable_gather`): each axis contributes a small set of integer
 taps and per-tap weights, the boundary mode folds the taps to in-range
-indices, and the ``T**ndim`` corner values are gathered and contracted
-against the outer product of the per-axis weights.  This is the
-pure-JAX gather of ``docs/feature-requests/pallas-trilinear-resample.md``
-(the "explicit 8-corner gather") and the algorithmic shape a future
-Pallas pointer-load kernel ports onto.
-
-For the orders ``map_coordinates`` supports natively (``Linear`` /
-``NearestNeighbour``) the engine is ``_map_coordinates_sample`` on **both**
-platforms (``_gather_sample``).  The two are parity-equal to a ULP, so the
-choice is pure perf, and (re-measured 2026-06-13 on the pinned JAX
-``cuda12==0.10.1``) the XLA ``map_coordinates`` gather is faster than the
-explicit 8-corner gather on the **GPU** too -- 1.1-1.5x for any image
-``>= 48^3``, across coherent / random coords and 1 / 3 channels; the explicit
-gather only ties it (~0.1 ms, noise) on tiny ``<= 64^3`` single-channel
-volumes.  The earlier GPU-explicit dispatch (the "B7 win") was stale: newer XLA
-tightened the ``map_coordinates`` lowering.  ``_map_coordinates_sample`` is thus
-both the engine *and* the parity **oracle** the tests pin the gather against.
-``Lanczos`` has no ``map_coordinates`` equivalent and always uses the explicit
-gather; ``_separable_gather`` is also the algorithmic shape the parked 5d Pallas
+indices, and the :math:`T^{\\mathrm{ndim}}` corner values are gathered
+and contracted against the outer product of the per-axis weights (the
+"explicit 8-corner gather"), and the algorithmic shape a future Pallas
 pointer-load kernel ports onto.
 
-This cross-backend bit-identity is an order-0/1 property only.  ``CubicBSpline``
-(order 3) runs a recursive **prefilter** whose engine is the ``driver`` axis
-(parallel ``associative_scan`` on GPU / sequential ``scan`` on CPU); those
-reassociate the long pole filter differently, so a cubic resample can differ
-CPU-vs-GPU beyond a ULP.  It is a registered divergent op
-(``geometry.cubic_bspline_prefilter``): force ``CubicBSpline(driver='sequential')``
-or ``nitrix.reproducible()`` for cross-platform stability (see
-``docs/feature-requests/reproducible-dispatch.md``).
+For the orders ``map_coordinates`` supports natively (:class:`Linear` /
+:class:`NearestNeighbour`) the engine is :func:`_map_coordinates_sample`
+on **both** platforms (:func:`_gather_sample`).  The two are parity-equal
+to a ULP, so the choice is pure perf, and (re-measured on the pinned JAX
+``cuda12==0.10.1``) the XLA ``map_coordinates`` gather is faster than the
+explicit 8-corner gather on the **GPU** too -- 1.1-1.5x for any image
+:math:`\\geq 48^3`, across coherent / random coords and 1 / 3 channels;
+the explicit gather only ties it (~0.1 ms, noise) on tiny
+:math:`\\leq 64^3` single-channel volumes.
+:func:`_map_coordinates_sample` is thus both the engine *and* the parity
+**oracle** the tests pin the gather against.  :class:`Lanczos` has no
+``map_coordinates`` equivalent and always uses the explicit gather;
+:func:`_separable_gather` is also the algorithmic shape the parked 5-D
+Pallas pointer-load kernel ports onto.
+
+This cross-backend bit-identity is an order-0/1 property only.
+:class:`CubicBSpline` (order 3) runs a recursive **prefilter** whose
+engine is the ``driver`` axis (parallel ``associative_scan`` on GPU /
+sequential ``scan`` on CPU); those reassociate the long pole filter
+differently, so a cubic resample can differ CPU-vs-GPU beyond a ULP.  It
+is a registered divergent op: force ``CubicBSpline(driver='sequential')``
+or ``nitrix.reproducible()`` for cross-platform stability.
 
 Boundary handling (``mode`` / ``cval``) is a property of the *call*, not
-the kernel, so it stays a keyword on ``sample`` / ``resample`` /
-``spatial_transform`` rather than a field on the record.  The five modes
-match ``map_coordinates`` exactly at the integer-tap level: ``constant``
-fills out-of-range taps with ``cval``, ``nearest`` clamps, ``wrap`` is
-periodic (``i mod n``), ``mirror`` folds with period ``2(n-1)`` (no edge
-repeat), and ``reflect`` folds with period ``2n`` (edge repeat).
+the kernel, so it stays a keyword on ``sample`` / :func:`resample` /
+:func:`spatial_transform` rather than a field on the record.  The five
+modes match ``map_coordinates`` exactly at the integer-tap level:
+``constant`` fills out-of-range taps with ``cval``, ``nearest`` clamps,
+``wrap`` is periodic (:math:`i \\bmod n`), ``mirror`` folds with period
+:math:`2(n - 1)` (no edge repeat), and ``reflect`` folds with period
+:math:`2n` (edge repeat).
 """
 
 from __future__ import annotations
@@ -169,20 +168,20 @@ class Interpolator(Protocol):
     a coordinate field ``(*out_spatial, ndim)`` to the sampled values
     ``(*out_spatial, c)``.  ``coords[..., d]`` is the floating-point
     position along input axis ``d``.  Leading batch axes are composed by
-    callers (``spatial_transform`` vmaps the core); a method only sees
-    the unbatched core shapes.
+    callers (:func:`spatial_transform` vmaps the core); a method only
+    sees the unbatched core shapes.
 
     Attributes
     ----------
     differentiable_in_values
-        Whether the sampled output has a non-trivial gradient w.r.t. the
-        input image values.
+        Whether the sampled output has a non-trivial gradient with
+        respect to the input image values.
     differentiable_in_coords
-        Whether the sampled output has a non-trivial gradient w.r.t. the
-        sample coordinates -- the property a coordinate-driven
-        registration loss needs.  ``False`` for piecewise-constant
-        kernels (nearest neighbour) and hard label selection
-        (multi-label).
+        Whether the sampled output has a non-trivial gradient with
+        respect to the sample coordinates -- the property a
+        coordinate-driven registration loss needs.  ``False`` for
+        piecewise-constant kernels (nearest neighbour) and hard label
+        selection (multi-label).
     """
 
     # ``ClassVar`` (not a plain instance annotation): the flags are
@@ -200,7 +199,30 @@ class Interpolator(Protocol):
         *,
         mode: BoundaryMode,
         cval: float,
-    ) -> Float[Array, '*out_spatial c']: ...
+    ) -> Float[Array, '*out_spatial c']:
+        """Sample the image at continuous coordinates with this kernel.
+
+        Parameters
+        ----------
+        image
+            Unbatched channel-last image of shape ``(*spatial, c)``.
+        coords
+            Coordinate field of shape ``(*out_spatial, ndim)``;
+            ``coords[..., d]`` is the floating-point sample position
+            along input spatial axis ``d``.
+        mode
+            Boundary rule for out-of-range taps -- one of ``'constant'``,
+            ``'nearest'``, ``'wrap'``, ``'mirror'`` or ``'reflect'``,
+            matching ``jax.scipy.ndimage.map_coordinates``.
+        cval
+            Fill value for out-of-range taps under ``mode='constant'``.
+
+        Returns
+        -------
+        Float[Array, '*out_spatial c']
+            The sampled values, one per coordinate and channel.
+        """
+        ...
 
 
 def _map_coordinates_sample(
@@ -217,6 +239,26 @@ def _map_coordinates_sample(
     natively (``0`` nearest, ``1`` linear).  ``coords`` is reshaped to
     the ``(ndim, n_samples)`` layout the routine wants; the trailing
     channel axis is mapped over with ``jax.vmap``.
+
+    Parameters
+    ----------
+    image
+        Unbatched channel-last image of shape ``(*spatial, c)``.
+    coords
+        Coordinate field of shape ``(*out_spatial, ndim)``, with
+        ``coords[..., d]`` the sample position along input axis ``d``.
+    order
+        Spline order passed through to ``map_coordinates``; ``0``
+        (nearest) or ``1`` (linear).
+    mode
+        Boundary rule for out-of-range taps (see ``map_coordinates``).
+    cval
+        Fill value for out-of-range taps under ``mode='constant'``.
+
+    Returns
+    -------
+    Float[Array, '*out_spatial c']
+        The sampled values, one per coordinate and channel.
     """
     ndim = coords.shape[-1]
     # ``map_coordinates`` wants coords as ``(ndim, n_samples)`` -- one
@@ -271,20 +313,39 @@ def _boundary_index(
 ) -> Tuple[Int[Array, 'n t'], Float[Array, 'n t']]:
     """Fold integer taps to in-range gather indices for ``mode``.
 
-    Returns ``(idx, valid)`` where ``idx`` is always a legal index into
-    an axis of length ``size`` (so the gather never reads out of bounds)
-    and ``valid`` is the per-tap mask of taps that were *originally* in
-    range.  Only ``mode='constant'`` uses ``valid`` (out-of-range taps
-    there contribute ``cval`` rather than a folded neighbour); the other
-    modes return an all-ones mask.  The folds reproduce
-    ``jax.scipy.ndimage.map_coordinates`` exactly:
+    The folds reproduce ``jax.scipy.ndimage.map_coordinates`` exactly:
 
     - ``constant`` -- clamp for the (masked-out) gather; ``valid`` marks
       the in-range taps.
-    - ``nearest``  -- clamp to ``[0, size - 1]``.
-    - ``wrap``     -- ``tap mod size`` (period ``size``).
-    - ``mirror``   -- fold with period ``2(size - 1)``, no edge repeat.
-    - ``reflect``  -- fold with period ``2 size``, edge repeat.
+    - ``nearest``  -- clamp to :math:`[0, \\mathrm{size} - 1]`.
+    - ``wrap``     -- :math:`\\mathrm{tap} \\bmod \\mathrm{size}` (period
+      :math:`\\mathrm{size}`).
+    - ``mirror``   -- fold with period :math:`2(\\mathrm{size} - 1)`, no
+      edge repeat.
+    - ``reflect``  -- fold with period :math:`2\\,\\mathrm{size}`, edge
+      repeat.
+
+    Parameters
+    ----------
+    taps
+        Integer sample taps of shape ``(n, t)`` -- ``n`` samples, ``t``
+        taps each -- possibly out of the valid index range.
+    size
+        Length of the input axis being indexed.
+    mode
+        Boundary rule -- one of ``'constant'``, ``'nearest'``, ``'wrap'``,
+        ``'mirror'`` or ``'reflect'``.
+
+    Returns
+    -------
+    idx : Int[Array, 'n t']
+        Taps folded to legal indices into an axis of length ``size`` (so
+        the gather never reads out of bounds).
+    valid : Float[Array, 'n t']
+        Per-tap mask of taps that were *originally* in range.  Only
+        ``mode='constant'`` uses it (out-of-range taps there contribute
+        ``cval`` rather than a folded neighbour); the other modes return
+        an all-ones mask.
     """
     ones = jnp.ones(taps.shape, dtype=bool)
     if mode == 'constant':
@@ -322,14 +383,36 @@ def _separable_gather(
 
     The runtime engine for the gather-based kernels.  Each of the
     ``ndim`` axes contributes ``T`` integer taps and weights via
-    ``tap_rule``; the boundary mode folds the taps; the ``T**ndim``
-    corner values are gathered and contracted against the outer product
-    of the per-axis weights.  Differentiable in the image values (the
-    gather) and -- whenever ``tap_rule`` makes the weights depend
-    smoothly on the coordinate -- in ``coords``.
+    ``tap_rule``; the boundary mode folds the taps; the
+    :math:`T^{\\mathrm{ndim}}` corner values are gathered and contracted
+    against the outer product of the per-axis weights.  Differentiable in
+    the image values (the gather) and -- whenever ``tap_rule`` makes the
+    weights depend smoothly on the coordinate -- in ``coords``.
 
     Operates on the *unbatched* core shapes; leading batch axes are
-    composed by the caller (``spatial_transform`` vmaps the core).
+    composed by the caller (:func:`spatial_transform` vmaps the core).
+
+    Parameters
+    ----------
+    image
+        Unbatched channel-last image of shape ``(*spatial, c)``.
+    coords
+        Coordinate field of shape ``(*out_spatial, ndim)``, with
+        ``coords[..., d]`` the sample position along input axis ``d``.
+    tap_rule
+        Per-axis rule mapping a 1-D coordinate vector ``(n,)`` to integer
+        taps and per-tap weights, each ``(n, t)``.  The kernel is
+        isotropic, so one rule serves every axis.
+    mode
+        Boundary rule for out-of-range taps (see :func:`_boundary_index`).
+    cval
+        Fill value for out-of-range taps under ``mode='constant'``.
+
+    Returns
+    -------
+    Float[Array, '*out_spatial c']
+        The sampled values, one per coordinate and channel, cast back to
+        the input image dtype.
     """
     ndim = coords.shape[-1]
     out_spatial = coords.shape[:-1]
@@ -383,20 +466,41 @@ def _gather_sample(
 ) -> Float[Array, '*out_spatial c']:
     """Sample via the faster engine for a ``map_coordinates`` order (0/1).
 
-    The explicit separable gather and ``map_coordinates`` are parity-equal to a
-    ULP for ``order`` 0/1, so this is pure perf.  **It now uses
-    ``map_coordinates`` on both platforms (re-measured 2026-06-13):** on the
-    pinned JAX `cuda12==0.10.1`, the XLA ``map_coordinates`` gather is **faster
-    than the explicit 8-corner gather on the GPU too**, across coords (coherent
-    id+disp and random), channels (1 and 3) and sizes -- 1.1-1.5x for any image
-    ``>= 48^3``; the explicit gather only edges it (~1.04-1.11x, ~0.1 ms, noise)
-    on tiny ``<= 64^3`` single-channel volumes.  The old GPU-explicit branch
-    (the "B7 win") was stale -- newer XLA tightened the ``map_coordinates``
-    lowering.  Switching cuts the warp + compose (the SyN per-iteration gathers):
-    the mni152 LNCC recipe 26.0 -> 27.9x, MI 16.7 -> 17.7x vs ANTs-CPU.
-    ``_separable_gather`` is retained for ``Lanczos`` (no ``map_coordinates``
-    equivalent) and as the algorithmic shape the parked 5d Pallas gather ports
-    onto (``pallas-trilinear-resample.md``).
+    The explicit separable gather and ``map_coordinates`` are
+    parity-equal to a ULP for ``order`` 0/1, so this is pure perf.  It
+    uses ``map_coordinates`` on both platforms: on the pinned JAX
+    ``cuda12==0.10.1``, the XLA ``map_coordinates`` gather is faster than
+    the explicit 8-corner gather on the GPU too, across coords (coherent
+    id+disp and random), channels (1 and 3) and sizes -- 1.1-1.5x for any
+    image :math:`\\geq 48^3`; the explicit gather only edges it
+    (~1.04-1.11x, ~0.1 ms, noise) on tiny :math:`\\leq 64^3`
+    single-channel volumes.  :func:`_separable_gather` is retained for
+    :class:`Lanczos` (no ``map_coordinates`` equivalent) and as the
+    algorithmic shape the parked 5-D Pallas gather ports onto.
+
+    Parameters
+    ----------
+    image
+        Unbatched channel-last image of shape ``(*spatial, c)``.
+    coords
+        Coordinate field of shape ``(*out_spatial, ndim)``, with
+        ``coords[..., d]`` the sample position along input axis ``d``.
+    order
+        Spline order (``0`` nearest or ``1`` linear) forwarded to
+        ``map_coordinates``.
+    tap_rule
+        Per-axis tap/weight rule.  Accepted for a uniform signature with
+        the explicit-gather kernels but unused on this path (the
+        ``map_coordinates`` engine computes its own weights).
+    mode
+        Boundary rule for out-of-range taps (see ``map_coordinates``).
+    cval
+        Fill value for out-of-range taps under ``mode='constant'``.
+
+    Returns
+    -------
+    Float[Array, '*out_spatial c']
+        The sampled values, one per coordinate and channel.
     """
     return _map_coordinates_sample(
         image,
@@ -411,26 +515,27 @@ def _gather_sample(
 class _SeparableKernel(Protocol):
     """A gather kernel whose weights factor per axis (a tap rule).
 
-    The internal marker that ``resample`` uses to choose its engine.
-    ``Linear`` / ``NearestNeighbour`` / ``Lanczos`` / ``CubicBSpline``
-    conform; ``MultiLabel`` does not (its output is a per-voxel arg-max,
-    not a separable weighted sum), so it falls back to the dense meshgrid
-    gather.
+    The internal marker that :func:`resample` uses to choose its engine.
+    :class:`Linear` / :class:`NearestNeighbour` / :class:`Lanczos` /
+    :class:`CubicBSpline` conform; :class:`MultiLabel` does not (its
+    output is a per-voxel arg-max, not a separable weighted sum), so it
+    falls back to the dense meshgrid gather.
 
     ``prefers_separable_resample`` decides the *resample* engine: ``True``
     routes the resize grid through the cheap per-axis 1-D passes
-    (:func:`_separable_resample`, ``O(N * T * ndim)``) -- the only
-    tractable form for the wide ``Lanczos`` stencil
-    (``T = 2 * order`` -> ``T**ndim`` dense corners).  ``False`` keeps the
-    low-tap kernels (``Linear`` / ``NearestNeighbour``) on the dense
-    per-coordinate path, whose ``map_coordinates`` engine still wins on
-    CPU (the 1-D passes there are a mild regression on the
-    throughput-sensitive CPU interpolation path, B15).
+    (:func:`_separable_resample`, :math:`O(N \\cdot T \\cdot
+    \\mathrm{ndim})`) -- the only tractable form for the wide
+    :class:`Lanczos` stencil (:math:`T = 2\\,\\mathrm{order}` giving
+    :math:`T^{\\mathrm{ndim}}` dense corners).  ``False`` keeps the
+    low-tap kernels (:class:`Linear` / :class:`NearestNeighbour`) on the
+    dense per-coordinate path, whose ``map_coordinates`` engine still wins
+    on CPU (the 1-D passes there are a mild regression on the
+    throughput-sensitive CPU interpolation path).
 
     ``_prepare`` is a per-image preprocessing hook applied once before the
     gather: the identity for the direct kernels, the recursive B-spline
-    prefilter for ``CubicBSpline`` (which gathers *coefficients*, not the
-    raw samples).
+    prefilter for :class:`CubicBSpline` (which gathers *coefficients*, not
+    the raw samples).
     """
 
     prefers_separable_resample: bool
@@ -461,10 +566,32 @@ def _separable_resample(
     axis ``d``.  Because the resize grid is the outer product of these
     vectors, each axis is resampled independently -- one ``T``-tap
     weighted gather along that axis -- so the cost is
-    ``O(N_out * T * ndim)`` rather than the dense
-    ``O(N_out * T**ndim)`` corner gather of :func:`_separable_gather`.
-    The two agree to a ULP; this is the form that keeps high-order
-    kernels (``Lanczos``: ``T = 2 * order``) tractable on 3-D volumes.
+    :math:`O(N_{\\mathrm{out}} \\cdot T \\cdot \\mathrm{ndim})` rather
+    than the dense :math:`O(N_{\\mathrm{out}} \\cdot T^{\\mathrm{ndim}})`
+    corner gather of :func:`_separable_gather`.  The two agree to a ULP;
+    this is the form that keeps high-order kernels (:class:`Lanczos`:
+    :math:`T = 2\\,\\mathrm{order}`) tractable on 3-D volumes.
+
+    Parameters
+    ----------
+    image
+        Unbatched channel-last image of shape ``(*spatial, c)``.
+    axes_coords
+        Per-axis 1-D sample-coordinate vectors of the (outer-product)
+        resize grid; ``axes_coords[d]`` targets input spatial axis ``d``.
+    tap_rule
+        Per-axis rule mapping a 1-D coordinate vector to integer taps and
+        per-tap weights, each of shape ``(out_d, t)``.
+    mode
+        Boundary rule for out-of-range taps (see :func:`_boundary_index`).
+    cval
+        Fill value for out-of-range taps under ``mode='constant'``.
+
+    Returns
+    -------
+    Float[Array, '*out_spatial c']
+        The resampled image on the resize grid, cast back to the input
+        image dtype.
     """
     out = image
     for axis, coord in enumerate(axes_coords):
@@ -512,6 +639,19 @@ def _bspline_initial_causal(
     convention, equal to ``scipy.ndimage`` with ``mode='mirror'``.
     Vectorised (a single dot product), so it is parallel and
     differentiable -- no scan.
+
+    Parameters
+    ----------
+    coeffs
+        The (gain-scaled) 1-D signal of length ``n`` being prefiltered.
+    pole
+        The real pole of the recursive filter (for a cubic B-spline,
+        :math:`\\sqrt{3} - 2`).
+
+    Returns
+    -------
+    Float[Array, '']
+        The scalar initial causal coefficient :math:`y[0]`.
     """
     n = coeffs.shape[0]
     k = jnp.arange(n)
@@ -527,22 +667,39 @@ def _first_order_causal(
     *,
     associative: bool,
 ) -> Float[Array, 'n']:
-    """Resolve ``y[k] = pole * y[k-1] + inputs[k]`` with ``y[0] = init``.
+    """Resolve :math:`y[k] = \\mathrm{pole}\\,y[k-1] + \\mathrm{inputs}[k]`.
 
-    ``inputs[0]`` is ignored (overridden by ``init``).  Two exact engines
-    -- the choice mirrors ``signal._iir`` (a first-order linear recurrence
-    composes associatively):
+    The recurrence is solved with the boundary condition
+    :math:`y[0] = \\mathrm{init}`; ``inputs[0]`` is ignored (overridden by
+    ``init``).  Two exact engines are offered (a first-order linear
+    recurrence composes associatively):
 
     - sequential ``lax.scan`` (CPU; low overhead), and
-    - ``lax.associative_scan`` (GPU; ``O(log n)`` depth, the parallel
-      form that removes the scan's sequential-depth cost).
+    - ``lax.associative_scan`` (GPU; :math:`O(\\log n)` depth, the
+      parallel form that removes the scan's sequential-depth cost).
 
     Both are exact (no truncation), but they **reassociate the recurrence
-    differently**, so over a long pole filter they diverge beyond a ULP -- a
-    cross-platform numerical difference, not bit-equality.  This is governed by
-    the ``driver`` axis (the divergent op ``geometry.cubic_bspline_prefilter``;
-    ``CubicBSpline(driver=...)`` / ``nitrix.reproducible()``); the cross-variant
-    budget is in ``nitrix.divergent_ops()``.
+    differently**, so over a long pole filter they diverge beyond a ULP --
+    a cross-platform numerical difference, not bit-equality.  This is
+    governed by the ``driver`` axis
+    (``CubicBSpline(driver=...)`` / ``nitrix.reproducible()``).
+
+    Parameters
+    ----------
+    inputs
+        The forcing sequence of length ``n``; ``inputs[0]`` is unused.
+    pole
+        The real pole of the recursion.
+    init
+        The scalar value of :math:`y[0]`.
+    associative
+        If ``True`` use the parallel ``lax.associative_scan``; if
+        ``False`` use the sequential ``lax.scan``.
+
+    Returns
+    -------
+    Float[Array, 'n']
+        The resolved sequence :math:`y` of length ``n``.
     """
     n = inputs.shape[0]
     init = jnp.reshape(init, (1,))
@@ -582,7 +739,28 @@ def _bspline_prefilter_1d(
     *,
     associative: bool,
 ) -> Float[Array, 'n']:
-    """B-spline coefficients of a 1-D signal (one causal + one anti-causal)."""
+    """B-spline coefficients of a 1-D signal (one causal + one anti-causal).
+
+    Applies the standard two-pass recursive prefilter: a gain scaling
+    followed by a causal forward recursion and an anti-causal backward
+    recursion, both initialised for the whole-sample mirror boundary.
+
+    Parameters
+    ----------
+    samples
+        The raw 1-D signal of length ``n``.
+    pole
+        The real pole of the B-spline recursion (for cubic,
+        :math:`\\sqrt{3} - 2`).
+    associative
+        Whether the two recursions use the parallel associative scan
+        (``True``) or the sequential scan (``False``).
+
+    Returns
+    -------
+    Float[Array, 'n']
+        The interpolating B-spline coefficients of the signal.
+    """
     n = samples.shape[0]
     gain = (1.0 - pole) * (1.0 - 1.0 / pole)  # = 6 for cubic
     scaled = samples * gain
@@ -623,11 +801,27 @@ def _bspline_prefilter(
     extrapolation -- exact ``scipy`` ``order=3`` parity holds for
     ``mode='mirror'``, interior parity otherwise).
 
-    The recursion engine is the ``driver`` axis: ``'auto'`` runs the parallel
-    ``associative_scan`` on GPU / sequential ``scan`` on CPU (which diverge
-    beyond a ULP over a long filter); ``nitrix.reproducible()`` or
-    ``driver='sequential'`` forces the canonical sequential recurrence on every
-    platform.  See the divergent op ``geometry.cubic_bspline_prefilter``.
+    The recursion engine is the ``driver`` axis: ``'auto'`` runs the
+    parallel ``associative_scan`` on GPU / sequential ``scan`` on CPU
+    (which diverge beyond a ULP over a long filter);
+    ``nitrix.reproducible()`` or ``driver='sequential'`` forces the
+    canonical sequential recurrence on every platform.
+
+    Parameters
+    ----------
+    image
+        Unbatched channel-last image of shape ``(*spatial, c)``.
+    mode
+        Accepted for a uniform signature but unused: the prefilter always
+        initialises with the mirror boundary.
+    driver
+        Recursion engine selector -- ``'auto'`` (platform-dependent),
+        ``'associative'`` or ``'sequential'``.
+
+    Returns
+    -------
+    Float[Array, '*spatial c']
+        The interpolating B-spline coefficients, same shape as ``image``.
     """
     del mode  # prefilter boundary is always mirror (documented)
     ndim = image.ndim - 1
@@ -660,11 +854,11 @@ def _bspline_prefilter(
 class Linear:
     """(Multi-)linear interpolation (``order=1``).
 
-    The default kernel and the prior ``resample`` / ``spatial_transform``
-    behaviour: each sampled value is the multilinear blend of its
-    ``2**ndim`` surrounding voxels.  Smooth in both the image values and
-    the sample coordinates, so it is the kernel for differentiable
-    registration losses.
+    The default kernel and the prior :func:`resample` /
+    :func:`spatial_transform` behaviour: each sampled value is the
+    multilinear blend of its :math:`2^{\\mathrm{ndim}}` surrounding
+    voxels.  Smooth in both the image values and the sample coordinates,
+    so it is the kernel for differentiable registration losses.
     """
 
     differentiable_in_values: ClassVar[bool] = True
@@ -697,6 +891,26 @@ class Linear:
         mode: BoundaryMode,
         cval: float,
     ) -> Float[Array, '*out_spatial c']:
+        """Sample the image at ``coords`` by multilinear interpolation.
+
+        Parameters
+        ----------
+        image
+            Unbatched channel-last image of shape ``(*spatial, c)``.
+        coords
+            Coordinate field of shape ``(*out_spatial, ndim)``, with
+            ``coords[..., d]`` the sample position along input axis ``d``.
+        mode
+            Boundary rule for out-of-range taps -- one of ``'constant'``,
+            ``'nearest'``, ``'wrap'``, ``'mirror'`` or ``'reflect'``.
+        cval
+            Fill value for out-of-range taps under ``mode='constant'``.
+
+        Returns
+        -------
+        Float[Array, '*out_spatial c']
+            The sampled values, one per coordinate and channel.
+        """
         return _gather_sample(
             image,
             coords,
@@ -753,6 +967,26 @@ class NearestNeighbour:
         mode: BoundaryMode,
         cval: float,
     ) -> Float[Array, '*out_spatial c']:
+        """Sample the image at ``coords`` by nearest-neighbour selection.
+
+        Parameters
+        ----------
+        image
+            Unbatched channel-last image of shape ``(*spatial, c)``.
+        coords
+            Coordinate field of shape ``(*out_spatial, ndim)``, with
+            ``coords[..., d]`` the sample position along input axis ``d``.
+        mode
+            Boundary rule for out-of-range taps -- one of ``'constant'``,
+            ``'nearest'``, ``'wrap'``, ``'mirror'`` or ``'reflect'``.
+        cval
+            Fill value for out-of-range taps under ``mode='constant'``.
+
+        Returns
+        -------
+        Float[Array, '*out_spatial c']
+            The nearest input voxel value per coordinate and channel.
+        """
         return _gather_sample(
             image,
             coords,
@@ -767,13 +1001,27 @@ def _lanczos_kernel(
     x: Float[Array, '...'],
     order: int,
 ) -> Float[Array, '...']:
-    """The Lanczos windowed-sinc kernel ``L_a(x) = sinc(x) sinc(x / a)``.
+    """The Lanczos windowed-sinc kernel.
 
-    Zero outside the support ``|x| < a`` (``a = order``).  ``jnp.sinc`` is
-    the *normalised* sinc (``sin(pi x) / (pi x)``, unit at 0), so the
-    kernel is 1 at ``x = 0`` and 0 at every nonzero integer offset --
-    i.e. it reproduces grid samples exactly.  Smooth within the support,
-    so differentiable in ``x``.
+    Evaluates :math:`L_a(x) = \\operatorname{sinc}(x)\\,
+    \\operatorname{sinc}(x / a)`, zero outside the support
+    :math:`|x| < a` (:math:`a = \\mathrm{order}`).  ``jnp.sinc`` is the
+    *normalised* sinc (:math:`\\sin(\\pi x) / (\\pi x)`, unit at 0), so
+    the kernel is 1 at :math:`x = 0` and 0 at every nonzero integer
+    offset -- i.e. it reproduces grid samples exactly.  Smooth within the
+    support, so differentiable in ``x``.
+
+    Parameters
+    ----------
+    x
+        Signed tap distances at which to evaluate the kernel, any shape.
+    order
+        The Lanczos radius :math:`a` (number of sinc lobes per side).
+
+    Returns
+    -------
+    Float[Array, '...']
+        The kernel weights, same shape as ``x``.
     """
     a = float(order)
     kernel = jnp.sinc(x) * jnp.sinc(x / a)
@@ -784,13 +1032,15 @@ def _lanczos_kernel(
 class Lanczos:
     """Lanczos windowed-sinc interpolation of order ``order`` (radius ``a``).
 
-    A separable ``2a``-tap kernel
-    ``L_a(x) = sinc(x) sinc(x / a)`` (``a = order``), the high-fidelity
-    resampler of the ANTs ``LanczosWindowedSinc`` class.  The ``2a`` taps
-    per axis are ``floor(coord) - a + 1 ... floor(coord) + a``; the
-    per-axis weights are **renormalised to sum to 1**, so the separable
-    outer product is a partition of unity and constants are preserved
-    exactly (raw Lanczos weights sum to ~1 but not exactly).
+    A separable :math:`2a`-tap kernel
+    :math:`L_a(x) = \\operatorname{sinc}(x)\\,\\operatorname{sinc}(x / a)`
+    (:math:`a = \\mathrm{order}`), the high-fidelity resampler of the ANTs
+    ``LanczosWindowedSinc`` class.  The :math:`2a` taps per axis are
+    :math:`\\lfloor\\mathrm{coord}\\rfloor - a + 1, \\ldots,
+    \\lfloor\\mathrm{coord}\\rfloor + a`; the per-axis weights are
+    **renormalised to sum to 1**, so the separable outer product is a
+    partition of unity and constants are preserved exactly (raw Lanczos
+    weights sum to ~1 but not exactly).
 
     Smooth in both the image values and the sample coordinates, so it is
     differentiable end-to-end -- the high-quality differentiable
@@ -855,6 +1105,26 @@ class Lanczos:
         mode: BoundaryMode,
         cval: float,
     ) -> Float[Array, '*out_spatial c']:
+        """Sample the image at ``coords`` by windowed-sinc interpolation.
+
+        Parameters
+        ----------
+        image
+            Unbatched channel-last image of shape ``(*spatial, c)``.
+        coords
+            Coordinate field of shape ``(*out_spatial, ndim)``, with
+            ``coords[..., d]`` the sample position along input axis ``d``.
+        mode
+            Boundary rule for out-of-range taps -- one of ``'constant'``,
+            ``'nearest'``, ``'wrap'``, ``'mirror'`` or ``'reflect'``.
+        cval
+            Fill value for out-of-range taps under ``mode='constant'``.
+
+        Returns
+        -------
+        Float[Array, '*out_spatial c']
+            The sampled values, one per coordinate and channel.
+        """
         return _separable_gather(
             image,
             coords,
@@ -867,18 +1137,31 @@ class Lanczos:
 class CubicBSplineBoundaryWarning(UserWarning):
     """Emitted when ``CubicBSpline`` is given a boundary it cannot honour.
 
-    ``CubicBSpline`` always uses the mirror boundary (the only one its
-    prefilter implements), so an explicit non-mirror ``mode`` -- or a
-    non-zero ``cval`` -- is ignored.  Per the "loud fallbacks" tenet
-    (SPEC 2.7) that override is announced rather than silent.  Pass
-    ``mode='mirror'`` (or leave ``mode`` at its default) to silence it, or
-    filter this category.  The default ``mode='constant'`` with ``cval=0``
-    is treated as "unspecified" and does *not* warn.
+    :class:`CubicBSpline` always uses the mirror boundary (the only one
+    its prefilter implements), so an explicit non-mirror ``mode`` -- or a
+    non-zero ``cval`` -- is ignored.  So that this override is not silent,
+    it is announced with this warning.  Pass ``mode='mirror'`` (or leave
+    ``mode`` at its default) to silence it, or filter this category.  The
+    default ``mode='constant'`` with ``cval=0`` is treated as
+    "unspecified" and does *not* warn.
     """
 
 
 def _warn_cubic_boundary_ignored(mode: BoundaryMode, cval: float) -> None:
-    """Announce a CubicBSpline boundary override (deduped by ``warnings``)."""
+    """Announce a CubicBSpline boundary override (deduped by ``warnings``).
+
+    Emits a :class:`CubicBSplineBoundaryWarning` when the requested
+    boundary is not the mirror boundary the kernel actually uses; the
+    bare default (``mode='constant'``, ``cval=0``) is treated as
+    unspecified and stays silent.
+
+    Parameters
+    ----------
+    mode
+        The boundary mode requested on the call.
+    cval
+        The constant fill value requested on the call.
+    """
     if mode not in ('mirror', 'constant') or cval != 0.0:
         warnings.warn(
             f'CubicBSpline always uses the mirror boundary; the supplied '
@@ -900,14 +1183,14 @@ class CubicBSpline:
 
     1. a **prefilter** converts the image samples to interpolating
        B-spline coefficients (a separable recursive filter with the cubic
-       pole ``sqrt(3) - 2``; :func:`_bspline_prefilter`), and
+       pole :math:`\\sqrt{3} - 2`; :func:`_bspline_prefilter`), and
     2. a 4-tap separable **cubic B-spline basis** gathers those
        coefficients.
 
     Without the prefilter the cubic basis only *approximates* (blurs) the
     samples; with it the result passes through the samples exactly -- the
     interpolation property.  The basis is a partition of unity (weights
-    sum to 1; no renormalisation), ``C^2``-smooth, so the kernel is
+    sum to 1; no renormalisation), :math:`C^2`-smooth, so the kernel is
     differentiable in both the values (the prefilter and gather are
     linear) and the coordinates (the basis is smooth).
 
@@ -921,7 +1204,7 @@ class CubicBSpline:
 
     Boundary: this kernel **always uses the mirror (whole-sample-
     symmetric) boundary** for *both* the prefilter and the gather, and
-    **ignores the ``mode`` / ``cval`` call arguments** (like
+    **ignores the ``mode`` / ``cval`` call arguments** (as
     :class:`MultiLabel` ignores ``cval``).  This is deliberate: a B-spline
     is only self-consistent -- the interpolation property (reproducing the
     samples) only holds -- when the prefilter and the gather share a
@@ -991,6 +1274,31 @@ class CubicBSpline:
         mode: BoundaryMode,
         cval: float,
     ) -> Float[Array, '*out_spatial c']:
+        """Sample the image at ``coords`` by cubic B-spline interpolation.
+
+        Prefilters the image to interpolating coefficients and gathers
+        them with the 4-tap cubic basis.  The mirror boundary is forced
+        on both steps, so a non-mirror ``mode`` (or non-zero ``cval``) is
+        ignored and announced via :class:`CubicBSplineBoundaryWarning`.
+
+        Parameters
+        ----------
+        image
+            Unbatched channel-last image of shape ``(*spatial, c)``.
+        coords
+            Coordinate field of shape ``(*out_spatial, ndim)``, with
+            ``coords[..., d]`` the sample position along input axis ``d``.
+        mode
+            Requested boundary rule; ignored (mirror is always used) and
+            a warning is emitted for any non-mirror choice.
+        cval
+            Requested constant fill value; ignored (see ``mode``).
+
+        Returns
+        -------
+        Float[Array, '*out_spatial c']
+            The sampled values, one per coordinate and channel.
+        """
         # mode / cval are ignored: a B-spline forces the mirror boundary on
         # both the prefilter and the gather (see the class docstring).  The
         # override is announced, not silent.
@@ -1009,46 +1317,52 @@ class CubicBSpline:
 class CatmullRomCubic:
     """Catmull-Rom cubic-Hermite interpolation -- the cardinal cubic spline.
 
-    The *interpolating* C^1 cubic Hermite spline whose tangents are centred
-    finite differences (tension ``a = -1/2``): the curve passes through the
-    samples, so -- unlike :class:`CubicBSpline` -- it needs **no prefilter**.
-    The gather is a direct 4-tap separable cubic applied to the raw samples;
-    at integer positions it reproduces them exactly.
+    The *interpolating* :math:`C^1` cubic Hermite spline whose tangents
+    are centred finite differences (tension :math:`a = -1/2`): the curve
+    passes through the samples, so -- unlike :class:`CubicBSpline` -- it
+    needs **no prefilter**.  The gather is a direct 4-tap separable cubic
+    applied to the raw samples; at integer positions it reproduces them
+    exactly.
 
     Coefficients for the 4 taps
-    ``{floor(x) - 1, floor(x), floor(x) + 1, floor(x) + 2}`` at fractional
-    position ``t = x - floor(x)``::
+    :math:`\\{\\lfloor x\\rfloor - 1, \\lfloor x\\rfloor,
+    \\lfloor x\\rfloor + 1, \\lfloor x\\rfloor + 2\\}` at fractional
+    position :math:`t = x - \\lfloor x\\rfloor`::
 
         w_{-1}(t) = -0.5 t^3 +     t^2 - 0.5 t
         w_{ 0}(t) =  1.5 t^3 - 2.5 t^2       + 1
         w_{+1}(t) = -1.5 t^3 + 2.0 t^2 + 0.5 t
         w_{+2}(t) =  0.5 t^3 - 0.5 t^2
 
-    At ``t = 0`` the weights are ``(0, 1, 0, 0)`` (the sample at ``floor(x)``)
-    and at ``t = 1`` they are ``(0, 0, 1, 0)`` (``floor(x) + 1``) -- the
+    At :math:`t = 0` the weights are ``(0, 1, 0, 0)`` (the sample at
+    :math:`\\lfloor x\\rfloor`) and at :math:`t = 1` they are
+    ``(0, 0, 1, 0)`` (:math:`\\lfloor x\\rfloor + 1`) -- the
     interpolation property.
 
-    Distinct from the other cubics: :class:`CubicBSpline` is *approximating*
-    (it needs the recursive prefilter to interpolate, and that prefilter is
-    backend-dependent), and is ``C^2``-smooth with a partition-of-unity basis;
-    :class:`Lanczos` is a windowed sinc.  Catmull-Rom is the cardinal cubic of
+    Distinct from the other cubics: :class:`CubicBSpline` is
+    *approximating* (it needs the recursive prefilter to interpolate, and
+    that prefilter is backend-dependent), and is :math:`C^2`-smooth with a
+    partition-of-unity basis; :class:`Lanczos` is a windowed sinc.
+    Catmull-Rom is the cardinal cubic of
     OpenCV ``INTER_CUBIC`` / Keras image ``cubic`` / the Keras
     "BilinearInterpolation" STN (a misnomer -- it evaluates a 4x4 Catmull-Rom
     stencil), so a consumer parity-locked to that family (e.g. ilex
     ``fd_net``'s spatial transformer) reproduces the upstream bit-for-bit.
 
-    Smooth in both the image values and the sample coordinates (the basis is
-    ``C^1`` -- piecewise cubic, continuous with continuous first derivative
-    across knots), so it is differentiable end-to-end and usable for
-    coordinate-driven registration losses.  Having no ``map_coordinates``
-    equivalent, it always uses the explicit separable gather (no platform
-    branch) -- and, with no prefilter, no backend-dependent scan either.
+    Smooth in both the image values and the sample coordinates (the basis
+    is :math:`C^1` -- piecewise cubic, continuous with continuous first
+    derivative across knots), so it is differentiable end-to-end and
+    usable for coordinate-driven registration losses.  Having no
+    ``map_coordinates`` equivalent, it always uses the explicit separable
+    gather (no platform branch) -- and, with no prefilter, no
+    backend-dependent scan either.
 
     Notes
     -----
-    The cardinal-cubic basis **is** a partition of unity -- the four weights
-    sum to exactly 1 for every ``t`` (the ``t^3``/``t^2``/``t^1`` coefficients
-    cancel across the taps) -- so it reproduces constants *and* linear ramps
+    The cardinal-cubic basis **is** a partition of unity -- the four
+    weights sum to exactly 1 for every :math:`t` (the
+    :math:`t^3`/:math:`t^2`/:math:`t^1` coefficients cancel across the
+    taps) -- so it reproduces constants *and* linear ramps
     exactly (the Keys ``a = -1/2`` kernel has third-order accuracy).  No
     renormalisation is applied (none is needed -- and the raw cardinal weights
     are what the parity-locked consumers pin against).  The kernel is *not*,
@@ -1104,6 +1418,26 @@ class CatmullRomCubic:
         mode: BoundaryMode,
         cval: float,
     ) -> Float[Array, '*out_spatial c']:
+        """Sample the image at ``coords`` by cardinal-cubic interpolation.
+
+        Parameters
+        ----------
+        image
+            Unbatched channel-last image of shape ``(*spatial, c)``.
+        coords
+            Coordinate field of shape ``(*out_spatial, ndim)``, with
+            ``coords[..., d]`` the sample position along input axis ``d``.
+        mode
+            Boundary rule for out-of-range taps -- one of ``'constant'``,
+            ``'nearest'``, ``'wrap'``, ``'mirror'`` or ``'reflect'``.
+        cval
+            Fill value for out-of-range taps under ``mode='constant'``.
+
+        Returns
+        -------
+        Float[Array, '*out_spatial c']
+            The sampled values, one per coordinate and channel.
+        """
         return _separable_gather(
             image,
             coords,
@@ -1144,23 +1478,24 @@ class MultiLabel:
     inner
         The kernel used to resample each indicator mask.  Default
         ``Linear()``.  The *support width* of the inner kernel sets how
-        much anti-aliasing happens: ``Linear`` (2-tap) is a cheap
-        sub-voxel area-weighting that refines ``NearestNeighbour`` at
-        label junctions but, being narrow, still drops sub-pixel
-        structures under heavy downsampling (it coincides with ``NN`` on
-        a 2x decimation).  A **wider** inner -- ``Lanczos`` -- area-
-        weights over a larger neighbourhood, so it preserves thin
-        structures and gives the stronger anti-aliasing the ANTs
-        ``MultiLabel`` (a Gaussian) is known for, at higher cost.
-        ``NearestNeighbour`` as the inner degenerates to plain
-        nearest-neighbour label resampling.
+        much anti-aliasing happens: :class:`Linear` (2-tap) is a cheap
+        sub-voxel area-weighting that refines :class:`NearestNeighbour`
+        at label junctions but, being narrow, still drops sub-pixel
+        structures under heavy downsampling (it coincides with nearest
+        neighbour on a 2x decimation).  A **wider** inner --
+        :class:`Lanczos` -- area-weights over a larger neighbourhood, so
+        it preserves thin structures and gives the stronger anti-aliasing
+        the ANTs ``MultiLabel`` (a Gaussian) is known for, at higher
+        cost.  :class:`NearestNeighbour` as the inner degenerates to
+        plain nearest-neighbour label resampling.
 
     Notes
     -----
     Not differentiable: the arg-max is a hard selection, so the gradient
-    w.r.t. both the image values and the coordinates is zero (the call
-    does not error under ``jax.grad`` -- it returns zeros).  ``cval`` is
-    ignored; out-of-support samples resolve to ``labels[0]`` as above.
+    with respect to both the image values and the coordinates is zero
+    (the call does not error under ``jax.grad`` -- it returns zeros).
+    ``cval`` is ignored; out-of-support samples resolve to ``labels[0]``
+    as above.
     """
 
     labels: Tuple[int, ...]
@@ -1197,6 +1532,32 @@ class MultiLabel:
         mode: BoundaryMode,
         cval: float,
     ) -> Float[Array, '*out_spatial c']:
+        """Sample the label map at ``coords`` by per-label arg-max.
+
+        Resamples each label's indicator mask with the ``inner`` kernel
+        and returns, per voxel, the label with the highest resampled
+        score, keeping the output inside the input label set.
+
+        Parameters
+        ----------
+        image
+            Unbatched channel-last label map of shape ``(*spatial, c)``;
+            entries are drawn from ``labels``.
+        coords
+            Coordinate field of shape ``(*out_spatial, ndim)``, with
+            ``coords[..., d]`` the sample position along input axis ``d``.
+        mode
+            Boundary rule for out-of-range taps, forwarded to the inner
+            kernel.
+        cval
+            Ignored: out-of-support samples resolve to ``labels[0]``, not
+            a fill value.
+
+        Returns
+        -------
+        Float[Array, '*out_spatial c']
+            The per-voxel arg-max label, restricted to ``labels``.
+        """
         # Running arg-max over the static label set: O(K) inner samples,
         # O(1) label channels resident.  ``cval`` is intentionally unused
         # (label outputs come from ``labels``; see the class docstring).
@@ -1231,11 +1592,30 @@ def _sample_at_coords(
 ) -> Float[Array, '*out_spatial c']:
     """Sample ``image`` at continuous ``coords`` with the given method.
 
-    The seam ``spatial_transform`` calls (and ``resample`` falls back to
-    for non-separable methods) -- the one place a ``backend`` axis will
-    branch once a Pallas gather kernel lands.  Operates on the
+    The seam :func:`spatial_transform` calls (and :func:`resample` falls
+    back to for non-separable methods) -- the one place a ``backend`` axis
+    will branch once a Pallas gather kernel lands.  Operates on the
     *unbatched* core shapes; leading batch axes are composed by the
     caller.
+
+    Parameters
+    ----------
+    image
+        Unbatched channel-last image of shape ``(*spatial, c)``.
+    coords
+        Coordinate field of shape ``(*out_spatial, ndim)``, with
+        ``coords[..., d]`` the sample position along input axis ``d``.
+    method
+        The interpolation kernel to sample with.
+    mode
+        Boundary rule for out-of-range taps.
+    cval
+        Fill value for out-of-range taps under ``mode='constant'``.
+
+    Returns
+    -------
+    Float[Array, '*out_spatial c']
+        The sampled values, one per coordinate and channel.
     """
     return method.sample(image, coords, mode=mode, cval=cval)
 
@@ -1250,12 +1630,31 @@ def _resample_on_grid(
 ) -> Float[Array, '*out_spatial c']:
     """Sample a separable resize grid with the given method.
 
-    The seam ``resample`` calls.  ``axes_coords`` are the per-axis 1-D
-    sample-coordinate vectors of the (outer-product) resize grid.  A
+    The seam :func:`resample` calls.  ``axes_coords`` are the per-axis
+    1-D sample-coordinate vectors of the (outer-product) resize grid.  A
     separable gather kernel takes the cheap per-axis 1-D-pass form
-    (:func:`_separable_resample`, ``O(N * T * ndim)``); any other method
-    (e.g. ``MultiLabel``) falls back to the dense meshgrid gather via
-    :func:`_sample_at_coords`.
+    (:func:`_separable_resample`, :math:`O(N \\cdot T \\cdot
+    \\mathrm{ndim})`); any other method (e.g. :class:`MultiLabel`) falls
+    back to the dense meshgrid gather via :func:`_sample_at_coords`.
+
+    Parameters
+    ----------
+    image
+        Unbatched channel-last image of shape ``(*spatial, c)``.
+    axes_coords
+        Per-axis 1-D sample-coordinate vectors of the (outer-product)
+        resize grid; ``axes_coords[d]`` targets input spatial axis ``d``.
+    method
+        The interpolation kernel to sample with.
+    mode
+        Boundary rule for out-of-range taps.
+    cval
+        Fill value for out-of-range taps under ``mode='constant'``.
+
+    Returns
+    -------
+    Float[Array, '*out_spatial c']
+        The resampled image on the resize grid.
     """
     if (
         isinstance(method, _SeparableKernel)
