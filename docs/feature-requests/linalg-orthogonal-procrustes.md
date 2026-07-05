@@ -1,9 +1,10 @@
 # Subspace geometry & orthogonal alignment in `nitrix.linalg`
 
-> **Status (2026-06-30): `orthogonal_procrustes` SHIPPED; subspace angles
-> PROPOSED.** A small coherent linalg vocabulary family of SVD-of-cross-product
-> primitives, migrated from the deprecated `hypercoil-examples` repo. **Lead item
-> `orthogonal_procrustes` is the dependency of
+> **Status (2026-07-02): ALL SHIPPED (`orthogonal_procrustes`, `image_basis`,
+> `subspace_angles`).** A small coherent linalg vocabulary family of
+> SVD-of-cross-product primitives, migrated from the deprecated
+> `hypercoil-examples` repo. **Lead item `orthogonal_procrustes` is the
+> dependency of
 > [`register-functional-alignment`](register-functional-alignment.md)** (the
 > matrix-vMF MAP reduces to a Procrustes solve with an additive prior term) and
 > is now shipped; the subspace-angle siblings come from `atlas/totalangle.py`.
@@ -50,23 +51,44 @@ eigh-VJP for the gradient at degeneracy.
   recovery, orthogonality/optimality, the prior MAP pull, batch/jit/vmap/grad,
   float32. 16 tests; op-matrix catalogued.
 
-### P1 — `image_basis(x, *, rcond=None, rank=None) -> q` (PROPOSED)
+### P1 — `image_basis(x, *, rcond=None, rank=None) -> q` ✅ SHIPPED (2026-07-02)
 
-A numerically-ranked **column-space (range) basis** via SVD with an `rcond`
-singular-value tolerance — a differentiable analogue of `scipy.linalg.orth`
-(scipy is the test-only oracle, not a runtime dep). Provenance:
-`atlas/totalangle.py::image_basis`.
+A numerically-ranked **column-space (range) basis** — the differentiable,
+cuSOLVER-free analogue of `scipy.linalg.orth` (test-only oracle). The leading
+left singular vectors via the smaller-Gram `safe_eigh` (never `svd`/`qr`).
+`rank` (static) is the jit-clean path; `rank=None` infers the numerical rank
+from `rcond` **eagerly** (data-dependent shape). **Correctness note the theory
+forced:** the rank threshold is applied to the *eigenvalues* `s²` (accurate to
+~`eps`), not the singular values `s` — the Gram's null floor sits at ~`eps` on
+`s²` but only ~`√eps` on `s = √(s²)`, so an `s`-scale cutoff over-counts the
+rank. Validated vs `scipy.linalg.orth` (rank + projector) across tall/wide/
+square and a planted rank-deficient case.
 
-### P1 — `subspace_angles(x, y=None, *, rcond=None, rank=None, recondition=0.0) -> angles` (PROPOSED)
+### P1 — `subspace_angles(x, y) -> angles` ✅ SHIPPED (2026-07-02)
 
-**Principal / canonical (Grassmann) angles** between two subspaces, computed
-differentiably with the numerically-stable split — `arcsin` of the
-residual-block singular values for small angles, `arccos` of the cross-Gram
-singular values for large angles (the `σ² ≥ ½` switch) — with explicit ±1
-boundary handling so the `arcsin'`/`arccos'` gradients stay finite, and optional
-eigenspace reconditioning (`recondition`) to keep the SVD gradient defined under
-degeneracy. Provenance: `atlas/totalangle.py::inner_angles`. **Its only real
-dependency, `recondition_eigenspaces`, already lives in `nitrix.linalg`.**
+**Principal / canonical (Grassmann) angles** between two subspaces (descending,
+matching `scipy.linalg.subspace_angles`), via the Knyazev-Argentati (2002)
+stable split — `arccos(σ)` for `σ² < ½` (large angle), `arcsin` of the residual
+singular values for `σ² ≥ ½` (small angle) — with a **double-`where`** feeding
+each branch boundary-safe inputs so the `arcsin'`/`arccos'` gradients stay
+finite at exactly `0` and `π/2`. Validated vs scipy to machine precision across
+the small/large regimes and both boundaries (incl. ~`8e-17` on small angles,
+where a naive `arccos` loses half its digits).
+
+**Stability decision (user, 2026-07-02): stable even for orthonormal inputs.**
+An `eigh`-based orthonormalisation (`image_basis`) NaNs the gradient when the
+input Gram is degenerate (`XᵀX = I` for orthonormal columns — a repeated
+spectrum whose eigenvector VJP blows up). `subspace_angles` therefore forms its
+bases by a matmul-only **Löwdin orthonormalisation** `Q = X (XᵀX)^{-1/2}`
+(Newton-Schulz inverse-sqrt): deterministic, gauge-fixed, and gradient-finite
+even at `XᵀX = I`, accurate for condition numbers up to ~`1e5` (pre-truncate a
+near-rank-deficient basis with `image_basis`). Combined with the
+*eigenvalues-only* angle computation (finite VJP at repeated/degenerate
+principal angles), the op is differentiably stable end-to-end. `nimox`'s
+`sympower` was ruled out here: its `eigh`-reconstruction VJP is *not* stable at a
+repeated spectrum (needs random reconditioning + a key). `rcond`/`rank`/
+`recondition` params were dropped as unnecessary under this design (full-column-
+rank assumption; compose with `image_basis` for rank control).
 
 ## 2. Why (and why a family)
 

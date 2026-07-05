@@ -3613,6 +3613,46 @@ register(
     )
 )
 
+
+def _image_basis_op(x):
+    from nitrix.linalg import image_basis
+
+    return image_basis(x, rank=4)  # static rank -> jit-clean
+
+
+register(
+    OpInfo(
+        'nitrix.linalg.image_basis',
+        fixture=lambda: ((jax.random.normal(_key(), (20, 4)),), {}),
+        fn_override=_image_basis_op,
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=(
+            'orthonormal range (column-space) basis, cuSOLVER-free',
+            'scipy.linalg.orth analogue; projector q q^T is canonical',
+        ),
+        notes='rank detection is eager; static rank= is jit-clean',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.linalg.subspace_angles',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(0), (30, 4)),
+                jax.random.normal(_key(1), (30, 3)),
+            ),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=(
+            'principal (Grassmann) angles, Knyazev-Argentati arcsin/arccos',
+            'Loewdin (matmul) bases + eigenvalues-only: grad-stable, no qr/svd',
+        ),
+    )
+)
+
 # --- metrics (intensity / information / overlap / classification / SSL) -----
 
 
