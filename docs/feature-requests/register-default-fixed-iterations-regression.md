@@ -14,6 +14,20 @@
 > rely on them — every claim below is from a fresh perf-bench A/B on the two
 > pins. The default-policy question should likewise be re-decided from current
 > measurement, not that doc.
+>
+> **Update (2026-07-06): DEFERRED pending a registration perf-bench
+> re-measurement.** The fix mechanism was scoped three ways — (1) an `'auto'`
+> `ConvergenceMode` (the new default) resolving to `early_exit` on single-pair
+> rigid/affine and `fixed` elsewhere, matching nitrix's backend/driver `'auto'`
+> idiom (consequence: `jax.grad(rigid_register)` with the default hits the
+> non-differentiable `while_loop`, so gradients go through `rigid_register_implicit`
+> or an explicit `mode='fixed'`); (2) keep `fixed`, add a one-time hint +
+> `RegistrationSpec.mode` docstring note; (3) global flip to `early_exit` with
+> `fixed` re-pinned on volreg/SyN/Demons. But the go/no-go and *which* recipes
+> should early-exit hinge on the "no early-exit benefit for Demons / SyN /
+> volreg" figures, which are likely **stale** (they predate the current register
+> pins). **Re-measure the registration suite in `nitrix-perf-bench` first, then
+> decide the recipe set + mechanism from current numbers.**
 
 **What.** For the single-pair matrix recipes (`rigid_register` /
 `affine_register`), the *default* optimiser policy changed from early-exiting at
