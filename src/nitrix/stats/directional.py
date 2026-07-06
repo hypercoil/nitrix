@@ -2,13 +2,21 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 r"""
-Directional statistics on the sphere -- the von Mises--Fisher family.
+Directional statistics on the sphere -- the von Mises--Fisher and Watson families.
 
 The spherical analogue of :mod:`nitrix.stats.gaussian`: the von Mises--Fisher
 (vMF) distribution is the canonical law for unit vectors :math:`x \in S^{p-1}`,
 and vMF mixtures are the emission model for surface parcellation.  The
 substrate this subpackage was missing -- nitrix has a rich spherical *geometry*
 stack but had **zero** spherical statistics.
+
+The **Watson** distribution is the *axial* sibling (:math:`x` and :math:`-x`
+identified): rotationally symmetric about an axis :math:`\mu` with concentration
+:math:`\kappa` (bipolar for :math:`\kappa > 0`, girdle for :math:`\kappa < 0`),
+density :math:`\propto \exp(\kappa (\mu^\top x)^2)`, normalised by Kummer's
+confluent hypergeometric :math:`M(\tfrac12, p/2, \kappa)` -- the law for
+undirected orientations / axial data (:func:`log_kummer_m`,
+:func:`watson_log_prob`, :func:`watson_fit`).
 
 For :math:`x \in S^{p-1}`, mean direction :math:`\mu \in S^{p-1}` and
 concentration :math:`\kappa > 0`,
@@ -69,8 +77,19 @@ from jax.scipy.special import gammaln, logsumexp
 from jaxtyping import Array, Bool, Float
 
 from .._internal.reductions import Reduction, reduce
+from ..linalg._solver import safe_eigh
 
-__all__ = ['log_iv', 'vmf_log_prob', 'vmf_fit', 'vmf_sample', 'VMFFit']
+__all__ = [
+    'log_iv',
+    'vmf_log_prob',
+    'vmf_fit',
+    'vmf_sample',
+    'VMFFit',
+    'log_kummer_m',
+    'watson_log_prob',
+    'watson_fit',
+    'WatsonFit',
+]
 
 _AxisArg = Union[int, Tuple[int, ...]]
 
@@ -450,3 +469,304 @@ def vmf_sample(
 
     x = w[:, None] * mu + jnp.sqrt(1.0 - w**2)[:, None] * v
     return cast(Float[Array, '... p'], x.reshape((*shape, p)))
+
+
+# ===========================================================================
+# Watson distribution -- the axial (antipodally symmetric) sibling of vMF.
+#
+# Density on S^{p-1}: f(x; mu, kappa) = M(1/2, p/2, kappa)^{-1} exp(kappa
+# (mu^T x)^2), with axis mu (mu == -mu) and concentration kappa (kappa > 0
+# bipolar / clustered at +-mu; kappa < 0 girdle / equatorial).  The normaliser
+# is the Kummer confluent hypergeometric M(1/2, p/2, kappa) = 1F1(1/2; p/2;
+# kappa).  Regime-split + validated to < 3e-12 vs mpmath over p in [2, 50],
+# |kappa| in [1e-3, 5e3] (both bipolar and girdle).
+# ===========================================================================
+
+_KUMMER_SWITCH = 100.0  # |z| at which series -> large-argument asymptotic
+_N_KUMMER_SERIES = 300  # ascending-series terms (covers |z| <= switch)
+_N_KUMMER_ASYM = 24  # large-argument asymptotic terms
+
+
+def _kummer_series_logcoeffs(a: float, b: float, n: int) -> Tuple[float, ...]:
+    """Static ``log[(a)_k / ((b)_k k!)]`` for the ascending series of M(a,b,z)."""
+    return tuple(
+        (math.lgamma(a + k) - math.lgamma(a))
+        - (math.lgamma(b + k) - math.lgamma(b))
+        - math.lgamma(k + 1)
+        for k in range(n)
+    )
+
+
+def _kummer_asym_coeffs(a: float, b: float, n: int) -> Tuple[float, ...]:
+    """Static (signed) ``(b-a)_k (1-a)_k / k!`` for the large-argument series."""
+    out = []
+    for k in range(n):
+        factors = [b - a + i for i in range(k)] + [
+            1.0 - a + i for i in range(k)
+        ]
+        if any(f == 0.0 for f in factors):
+            out.append(0.0)
+            continue
+        log_mag = sum(math.log(abs(f)) for f in factors) - math.lgamma(k + 1)
+        sign = 1.0
+        for f in factors:
+            sign *= 1.0 if f > 0.0 else -1.0
+        out.append(sign * math.exp(log_mag))
+    return tuple(out)
+
+
+def _log_m_pos(
+    a: float, b: float, y: Float[Array, '...']
+) -> Float[Array, '...']:
+    """``log M(a, b, y)`` for ``y >= 0`` (static ``a``, ``b``); regime-split.
+
+    Ascending series (DLMF 13.2.2) for ``y <= _KUMMER_SWITCH``, else the
+    large-argument asymptotic (DLMF 13.7.1).  Each branch is fed a clamped
+    argument so the unused branch cannot inject a ``NaN`` (the ``log_iv``
+    pattern).
+    """
+    dtype = y.dtype
+    cn = jnp.asarray(
+        _kummer_series_logcoeffs(a, b, _N_KUMMER_SERIES), dtype=dtype
+    )
+    dk = jnp.asarray(_kummer_asym_coeffs(a, b, _N_KUMMER_ASYM), dtype=dtype)
+    n = jnp.arange(_N_KUMMER_SERIES, dtype=dtype)
+    k = jnp.arange(_N_KUMMER_ASYM, dtype=dtype)
+    eps = jnp.finfo(dtype).eps
+
+    # Additive (not clamping) floor: keeps ``log`` finite at ``y = 0`` *and*
+    # preserves the gradient there -- the ``1/(y+eps)`` blow-up is exactly
+    # cancelled by the vanishing softmax weight of the ``n >= 1`` terms, so
+    # ``d/dy log M|_0 = a/b`` (whereas ``maximum(y, tiny)`` would zero it, and a
+    # denormal-edge ``tiny`` floor would underflow the cancellation).
+    y_small = jnp.where(y <= _KUMMER_SWITCH, y + eps, 1.0)
+    log_series = logsumexp(cn + n * jnp.log(y_small)[..., None], axis=-1)
+
+    y_large = jnp.where(y > _KUMMER_SWITCH, y, _KUMMER_SWITCH + 1.0)
+    asym_sum = jnp.sum(dk * (1.0 / y_large)[..., None] ** k, axis=-1)
+    log_asym = (
+        y_large
+        + (a - b) * jnp.log(y_large)
+        + (math.lgamma(b) - math.lgamma(a))
+        + jnp.log(asym_sum)
+    )
+    return jnp.where(y <= _KUMMER_SWITCH, log_series, log_asym)
+
+
+def log_kummer_m(
+    a: float, b: float, z: Float[Array, '...']
+) -> Float[Array, '...']:
+    r"""Log of Kummer's confluent hypergeometric function :math:`\log M(a, b, z)`.
+
+    :math:`M(a, b, z) = {}_1F_1(a; b; z) = \sum_{k \ge 0} \frac{(a)_k}{(b)_k}
+    \frac{z^k}{k!}`, the normaliser of the Watson family (at :math:`a =
+    \tfrac12`, :math:`b = p/2`).  Static ``a``, ``b`` select the regime at trace
+    time; the argument ``z`` is an array of either sign.  For ``z < 0`` Kummer's
+    transformation :math:`M(a, b, z) = e^{z} M(b - a, b, -z)` is used, so the
+    all-positive-term series/asymptotic always run on a non-negative argument
+    (the girdle branch).  Differentiable in ``z``.
+
+    Parameters
+    ----------
+    a, b : float
+        Static parameters (``b > 0``); ``a = 1/2``, ``b = p/2`` for Watson.
+    z : Float[Array, '...']
+        Argument (the Watson concentration :math:`\kappa`), any sign.
+
+    Returns
+    -------
+    Float[Array, '...']
+        :math:`\log M(a, b, z)`, elementwise.
+    """
+    # Branch-safe arguments (the double-``where`` trick): the bipolar branch
+    # sees ``z >= 0`` and the girdle branch ``-z > 0``, with the *unused* branch
+    # fed ``0`` -- so neither a ``NaN`` nor the ``|z|`` chain-rule (which would
+    # zero the gradient at ``z = 0``) can leak through :func:`jax.grad`.
+    z_pos = jnp.where(z >= 0.0, z, 0.0)
+    z_neg = jnp.where(z < 0.0, -z, 0.0)
+    bipolar = _log_m_pos(a, b, z_pos)
+    girdle = z + _log_m_pos(b - a, b, z_neg)
+    return jnp.where(z >= 0.0, bipolar, girdle)
+
+
+def watson_log_prob(
+    x: Float[Array, '... p'],
+    mu: Float[Array, '... p'],
+    kappa: Float[Array, '...'],
+    *,
+    axis: Optional[_AxisArg] = None,
+    reduction: Reduction = 'none',
+) -> Float[Array, '...']:
+    r"""Watson log-density of axial unit vectors.
+
+    :math:`\log f(x; \mu, \kappa) = \kappa (\mu^\top x)^2 - \log M(\tfrac12,
+    p/2, \kappa)` for :math:`x \in S^{p-1}`, with :math:`p` from the trailing
+    axis.  Antipodally symmetric (:math:`x` and :math:`-x`, :math:`\mu` and
+    :math:`-\mu`, give the same density): the axial score kernel.  ``kappa > 0``
+    is bipolar (mass at :math:`\pm\mu`), ``kappa < 0`` girdle (mass on the
+    equator :math:`\perp \mu`).  Differentiable in ``mu`` and ``kappa``; the
+    apply half of the Watson fit/apply seam.
+
+    ``x`` and ``mu`` are assumed unit-norm along the trailing axis.
+
+    Parameters
+    ----------
+    x : Float[Array, '... p']
+        Observations on :math:`S^{p-1}` (unit vectors, sign-agnostic).
+    mu : Float[Array, '... p']
+        Axis :math:`\mu \in S^{p-1}` (sign-agnostic), broadcastable to ``x``.
+    kappa : Float[Array, '...']
+        Concentration (real; sign selects bipolar/girdle), broadcastable to
+        ``x``'s batch shape.
+    axis : int or tuple of int, optional
+        Axes to reduce over when ``reduction != "none"``.
+    reduction : {'none', 'sum', 'mean'}, optional
+        Reduction of the per-observation log-density (default ``"none"``).
+
+    Returns
+    -------
+    Float[Array, '...']
+        The per-observation Watson log-density (``reduction="none"``) or its
+        reduction.
+    """
+    p = x.shape[-1]
+    # Surface-measure normalisation (as for :func:`vmf_log_prob`): divide by the
+    # area of S^{p-1}, omega = 2 pi^{p/2} / Gamma(p/2), so the density integrates
+    # to one against the sphere's Lebesgue measure.
+    log_area = (
+        math.log(2.0) + (p / 2.0) * math.log(math.pi) - math.lgamma(p / 2.0)
+    )
+    dot = jnp.sum(mu * x, axis=-1)
+    per_obs = kappa * dot**2 - log_kummer_m(0.5, p / 2.0, kappa) - log_area
+    return reduce(per_obs, axis=axis, reduction=reduction)
+
+
+class WatsonFit(NamedTuple):
+    """A fitted Watson distribution: the MLE state.
+
+    State only (plain arrays; the fit/apply seam), consumed by
+    :func:`watson_log_prob`.
+
+    Attributes
+    ----------
+    mu
+        The maximum-likelihood axis :math:`\\hat\\mu \\in S^{p-1}` (an
+        eigenvector of the scatter matrix; sign-agnostic), shape ``(..., p)``.
+    kappa
+        The maximum-likelihood concentration :math:`\\hat\\kappa` (positive
+        bipolar / negative girdle), shape ``(...)``.
+    """
+
+    mu: Float[Array, '... p']
+    kappa: Float[Array, '...']
+
+
+def _watson_g(b: float, kappa: Float[Array, '...']) -> Float[Array, '...']:
+    """:math:`g(\\kappa) = \\partial_\\kappa \\log M(\\tfrac12, b, \\kappa) =
+    \\mathbb{E}[(\\mu^\\top x)^2]`, elementwise (via autodiff of the normaliser).
+    """
+    g = jax.grad(lambda k: log_kummer_m(0.5, b, k).sum())(kappa)
+    return cast(Float[Array, '...'], g)
+
+
+def _solve_watson_kappa(
+    b: float,
+    r: Float[Array, '...'],
+    n_bisect: int,
+    k_max: float = 1.0e4,
+) -> Float[Array, '...']:
+    """Solve :math:`g(\\kappa) = r` for :math:`\\kappa` by bisection.
+
+    :math:`g` increases monotonically from ``0`` (:math:`\\kappa \\to -\\infty`)
+    through ``1/p`` (:math:`\\kappa = 0`) to ``1`` (:math:`\\kappa \\to
+    +\\infty`), so the bracket ``[-k_max, k_max]`` contains the unique root for
+    any ``r`` in ``(0, 1)`` (bipolar ``r > 1/p`` gives ``kappa > 0``, girdle
+    ``r < 1/p`` gives ``kappa < 0``).
+    """
+    lo = jnp.full_like(r, -k_max)
+    hi = jnp.full_like(r, k_max)
+
+    def body(_: Array, state: Tuple[Array, Array]) -> Tuple[Array, Array]:
+        lo, hi = state
+        mid = 0.5 * (lo + hi)
+        below = _watson_g(b, mid) < r
+        return jnp.where(below, mid, lo), jnp.where(below, hi, mid)
+
+    lo, hi = jax.lax.fori_loop(0, n_bisect, body, (lo, hi))
+    return cast(Float[Array, '...'], 0.5 * (lo + hi))
+
+
+def watson_fit(
+    x: Float[Array, '... n p'],
+    *,
+    weights: Optional[Float[Array, '... n']] = None,
+    axis: int = -2,
+    n_bisect: int = 60,
+) -> WatsonFit:
+    r"""Maximum-likelihood fit of a Watson distribution.
+
+    The *fit* half of the seam (:func:`watson_log_prob` is the apply).  Forms
+    the (weighted) scatter matrix :math:`S = \sum_i w_i x_i x_i^\top / \sum_i
+    w_i` and eigendecomposes it.  The MLE axis is an eigenvector of ``S`` and
+    the concentration solves :math:`g(\hat\kappa) = \hat\mu^\top S \hat\mu`,
+    where :math:`g(\kappa) = \partial_\kappa \log M(\tfrac12, p/2, \kappa)`.
+    Both candidates are evaluated -- **bipolar** (leading eigenvector,
+    :math:`\bar\lambda = \lambda_{\max} \ge 1/p`, :math:`\kappa \ge 0`) and
+    **girdle** (trailing eigenvector, :math:`\lambda_{\min} \le 1/p`,
+    :math:`\kappa \le 0`) -- and the higher-likelihood one is returned, so both
+    axial regimes are recovered.  The root is found by bisection on the
+    monotone :math:`g`.
+
+    Because it eigendecomposes the scatter, the fit shares the ``safe_eigh``
+    contract (jit-clean on healthy backends; eager CPU fallback on the
+    cuSolver-affected GPU stacks, like :func:`nitrix.stats.pca_fit`).
+
+    Parameters
+    ----------
+    x : Float[Array, '... n p']
+        Axial observations on :math:`S^{p-1}` (unit vectors, sign-agnostic);
+        ``n`` along ``axis``.
+    weights : Float[Array, '... n'], optional
+        Per-observation non-negative weights (e.g. soft responsibilities).
+        ``None`` (default) weights observations equally.
+    axis : int, optional
+        The observation axis. Default ``-2`` (features last).
+    n_bisect : int, optional
+        Bisection steps for the concentration root (default 60 -> machine
+        precision over the ``[-1e4, 1e4]`` bracket).
+
+    Returns
+    -------
+    WatsonFit
+        The fitted ``(mu, kappa)``.
+    """
+    p = x.shape[-1]
+    b = p / 2.0
+    xm = jnp.moveaxis(x, axis, -2)  # (..., n, p)
+    if weights is None:
+        scatter = jnp.einsum('...np,...nq->...pq', xm, xm) / xm.shape[-2]
+    else:
+        w_axis = axis if axis >= 0 else axis + 1
+        wm = jnp.moveaxis(weights, w_axis, -1)  # (..., n)
+        wx = wm[..., :, None] * xm
+        scatter = (
+            jnp.einsum('...np,...nq->...pq', wx, xm)
+            / jnp.sum(wm, axis=-1)[..., None, None]
+        )
+    scatter = 0.5 * (scatter + jnp.swapaxes(scatter, -1, -2))
+
+    evals, evecs = safe_eigh(scatter)  # ascending eigenvalues
+    lam_max = evals[..., -1]
+    lam_min = evals[..., 0]
+    v_max = evecs[..., :, -1]
+    v_min = evecs[..., :, 0]
+
+    kappa_bip = _solve_watson_kappa(b, lam_max, n_bisect)
+    kappa_gir = _solve_watson_kappa(b, lam_min, n_bisect)
+    ll_bip = kappa_bip * lam_max - log_kummer_m(0.5, b, kappa_bip)
+    ll_gir = kappa_gir * lam_min - log_kummer_m(0.5, b, kappa_gir)
+    use_bip = ll_bip >= ll_gir
+
+    mu = jnp.where(use_bip[..., None], v_max, v_min)
+    kappa = jnp.where(use_bip, kappa_bip, kappa_gir)
+    return WatsonFit(mu=mu, kappa=kappa)

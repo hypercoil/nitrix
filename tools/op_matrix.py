@@ -3205,6 +3205,63 @@ register(
         notes='sampling; non-differentiable',
     )
 )
+
+
+def _log_kummer_op(z):
+    from nitrix.stats import log_kummer_m
+
+    return log_kummer_m(0.5, 1.5, z)  # a, b static (a=1/2, b=p/2)
+
+
+def _watson_fit_op(x):
+    from nitrix.stats import watson_fit
+
+    return watson_fit(x).kappa
+
+
+register(
+    OpInfo(
+        'nitrix.stats.log_kummer_m',
+        fixture=lambda: (
+            (jax.random.uniform(_key(), (16,), minval=-40.0, maxval=40.0),),
+            {},
+        ),
+        fn_override=_log_kummer_op,
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=(
+            'log M(1/2, p/2, kappa) Kummer normaliser; bipolar + girdle',
+        ),
+        notes='pure elementwise; jit-clean (no eigh/svd); grad-safe at kappa=0',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.stats.watson_log_prob',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(0), (8, 3)),
+                jax.random.normal(_key(1), (3,)),
+                4.0,
+            ),
+            {},
+        ),
+        diff_arg=1,
+        vmap_arg=0,
+        invariants=('Watson (axial) log-density: kappa (mu^T x)^2 - log M',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.stats.watson_fit',
+        fixture=lambda: ((jax.random.normal(_key(), (32, 3)),), {}),
+        fn_override=_watson_fit_op,
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('Watson MLE: scatter eigenvector + bisection on g(kappa)=r',),
+        notes='eigh-based (safe_eigh fallback), like pca_fit',
+    )
+)
 register(
     OpInfo(
         'nitrix.stats.pca_fit',

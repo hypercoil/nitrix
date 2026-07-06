@@ -16,9 +16,10 @@ Submodules
   / correlation over time series, with JIT-friendly batch handling.
 - ``gaussian`` -- closed-form diagonal-Gaussian KL divergence and
   negative log-likelihood (log-variance parameterised).
-- ``directional`` -- von Mises-Fisher directional statistics on the sphere
-  (full-range :func:`log_iv` normaliser, :func:`vmf_log_prob`, MLE
-  :func:`vmf_fit`, Wood-1994 :func:`vmf_sample`).
+- ``directional`` -- von Mises-Fisher + Watson directional statistics on
+  the sphere (full-range :func:`log_iv` / :func:`log_kummer_m` normalisers,
+  :func:`vmf_log_prob` / :func:`watson_log_prob`, MLE :func:`vmf_fit` /
+  :func:`watson_fit`, Wood-1994 :func:`vmf_sample`).
 - ``glm`` -- mass-univariate generalised linear models (OLS / WLS /
   exponential-family IRLS) with t / F contrasts and goodness-of-fit.
 - ``betareg`` / ``ordinal`` / ``gaulss`` -- additional response models: beta
@@ -138,10 +139,14 @@ from .lme import (
 )
 from .directional import (
     VMFFit,
+    WatsonFit,
     log_iv,
+    log_kummer_m,
     vmf_fit,
     vmf_log_prob,
     vmf_sample,
+    watson_fit,
+    watson_log_prob,
 )
 from .gaussian import gaussian_nll, kl_diagonal_gaussian
 from .glm import (
@@ -211,12 +216,16 @@ __all__ = [
     # gaussian
     'kl_diagonal_gaussian',
     'gaussian_nll',
-    # directional (von Mises-Fisher)
+    # directional (von Mises-Fisher + Watson)
     'log_iv',
     'vmf_log_prob',
     'vmf_fit',
     'vmf_sample',
     'VMFFit',
+    'log_kummer_m',
+    'watson_log_prob',
+    'watson_fit',
+    'WatsonFit',
     # glm
     'Family',
     'Link',
