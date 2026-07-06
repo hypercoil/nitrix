@@ -1,14 +1,22 @@
 # Synthetic connectivity & time-series generators in `nitrix.augment`
 
-> **Status (2026-06-30): PROPOSED — weakest of the migration batch; admit a clean
-> parameterised core only.** From the
-> [`hypercoil-examples` migration](hypercoil-examples-migration.md)
-> (`synthetic/scripts/{mix,sylo,corr,filter,denoise}.py`). Keyed forward models
-> that synthesise fMRI-like signals / connectomes with **known ground-truth
-> structure** — the substrate for testing/benchmarking the whole ecosystem
-> (and nitrix's own suites + `nitrix-perf-bench`) against a known answer.
-> Proposed home: `nitrix.augment`, beside the existing keyed synthesis atoms
-> (`gmm_label_to_image`, `simulate_bias_field`).
+> **Status (2026-07-06): SHIPPED.** `nitrix.augment.simulate` lands the keyed
+> generator family — each a pure function of a PRNG key, statically shaped,
+> jit/vmap-clean, and shipping a **planted-structure recovery test** (the
+> correctness mandate, not legacy parity). Members: `band_limited_signals`
+> (smooth spectral window, no brick-wall), **`color_signals`** (the covariance
+> **colouring** transform — see below), `sparse_mixture_matrix` + `mix_signals`
+> (the ICA-style forward model), `lowrank_block_connectome` (parameterised block
+> layout), `markov_state_sequence` (`lax.scan`). 16 tests + op-matrix green.
+>
+> **The colouring/whitening kinship (why this sat near the whitening work).** The
+> legacy planted a covariance by a **colouring transform** on white signals —
+> `Σ^{1/2} @ white` — which is the exact inverse of ZCA whitening (`Σ^{-1/2}`).
+> Shipped as `color_signals`, reusing the **cuSOLVER-free Newton-Schulz `Σ^{1/2}`**
+> from the whitening work (`linalg.symsqrt(driver='newton_schulz')`): it plants an
+> *exact* target covariance (recoverable by empirical `cov`, and whitened back to
+> `I` by `stats.whiten`) and is differentiable w.r.t. the covariance. This is the
+> covariance-planting primitive alongside the FR's mixing route (`M Mᵀ`).
 >
 > **Correctness mandate — theory over legacy.** The migrated functions are
 > experiment scripts; the legacy is a starting point, not a spec. The defining
@@ -71,13 +79,24 @@ they stay downstream; only the reusable core moves.
 - Augmentation *policy* (compose, registries, multi-crop) stays in
   `ilex`/`bitsjax` (SPEC §4.14); these are leaf generators only.
 
-## 4. Acceptance
+## 4. Acceptance — met
 
-- Each generator's planted structure is recovered from its output within CI
-  (covariance / community / transition-matrix recovery tests).
-- jit + vmap clean (no data-dependent shapes); deterministic given `key`.
-- Band-limited sources have the specified spectral support without brick-wall
-  ringing artefacts.
+- ✅ Each generator's planted structure is recovered from its output in CI:
+  `color_signals` empirical `cov ≈ target` (and whitens to `I`); `mix_signals`
+  `cov ≈ M cov(src) Mᵀ` (1e-10); `sparse_mixture_matrix` rows `L1`-normalised /
+  Binomial cardinality; `lowrank_block_connectome` within > between + community
+  recovery; `markov_state_sequence` empirical transition + stationary
+  distribution recovery.
+- ✅ jit + vmap clean (no data-dependent shapes — Bernoulli-mask mixing,
+  `lax.scan` Markov); deterministic given `key`.
+- ✅ Band-limited sources have the specified spectral support (out/in-band power
+  < 1e-6) without brick-wall ringing.
+
+**Names as shipped** (clarity over the legacy script names): `band_limited_signals`
+(was `synth_slow_signals`), `sparse_mixture_matrix` (`create_mixture_matrix`),
+`mix_signals` (`mix_data`), `lowrank_block_connectome` (`synthesise_lowrank_block`),
+`markov_state_sequence` (`simulate_markov_transitions`), plus the new
+`color_signals`. Home: `nitrix.augment.simulate`.
 
 ## 5. Cross-references
 
