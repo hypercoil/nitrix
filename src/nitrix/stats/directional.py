@@ -29,6 +29,12 @@ Each ``*_log_prob`` takes ``normalize=False`` to return the **unnormalised**
 log-density (energy) -- the normaliser is dropped *and never computed*, so it is
 tractable in high dimensions and composes additively as a per-site potential in
 a Gibbs / Markov-random-field energy (the parcellation setting).
+:func:`fisher_bingham_energy` is the *general* such energy, :math:`\kappa
+\gamma_1^\top x + \sum_j \beta_j (\gamma_j^\top x)^2` on any :math:`S^{p-1}`
+(orthonormal frame + coefficient vector) -- the quadratic-exponential family that
+**subsumes** vMF (:math:`\beta = 0`), Watson (rank-one quadratic), Bingham
+(:math:`\kappa = 0`), and Kent (:math:`p = 3`); its normaliser is intractable in
+general, so only the energy is provided.
 
 For :math:`x \in S^{p-1}`, mean direction :math:`\mu \in S^{p-1}` and
 concentration :math:`\kappa > 0`,
@@ -105,6 +111,7 @@ __all__ = [
     'kent_log_prob',
     'kent_fit',
     'KentFit',
+    'fisher_bingham_energy',
 ]
 
 _AxisArg = Union[int, Tuple[int, ...]]
@@ -1051,3 +1058,76 @@ def kent_fit(
     return KentFit(
         gamma1=gamma1, gamma2=gamma2, gamma3=gamma3, kappa=kappa, beta=beta
     )
+
+
+def fisher_bingham_energy(
+    x: Float[Array, '... p'],
+    gamma: Float[Array, '... p p'],
+    kappa: Float[Array, '...'],
+    beta: Float[Array, '... p'],
+    *,
+    axis: Optional[_AxisArg] = None,
+    reduction: Reduction = 'none',
+) -> Float[Array, '...']:
+    r"""Unnormalised log-density (energy) of the Fisher--Bingham distribution.
+
+    On :math:`S^{p-1}`,
+
+    .. math::
+
+        E(x) = \kappa\, \gamma_1^\top x + \sum_{j=1}^{p} \beta_j\,
+        (\gamma_j^\top x)^2,
+
+    the **general quadratic-exponential family on the sphere** (Fisher--Bingham,
+    :math:`\exp(\kappa \mu^\top x + x^\top A x)` with :math:`A = \Gamma
+    \operatorname{diag}(\beta) \Gamma^\top`) in the Kent (diagonalised)
+    parametrisation: an orthonormal frame ``gamma`` (columns :math:`\gamma_1,
+    \dots, \gamma_p`, with :math:`\gamma_1` the mean direction) and a per-axis
+    coefficient vector ``beta``.  It **subsumes** the classical spherical laws:
+
+    - **von Mises--Fisher** -- :math:`\beta = 0` (linear only);
+    - **Bingham** -- :math:`\kappa = 0` (the pure quadratic :math:`x^\top A x`);
+    - **Watson** -- :math:`\kappa = 0` with a single non-zero :math:`\beta_j`
+      (a rank-one quadratic on one axis);
+    - **Kent (FB5)** -- :math:`p = 3`, :math:`\beta = (0, \beta, -\beta)`.
+
+    Only the **energy** is provided: the Fisher--Bingham normaliser is
+    intractable in general (a hypergeometric function of matrix argument), so
+    this is the tractable-at-any-:math:`p` quantity.  Its negative is the Gibbs
+    energy (:math:`p \propto e^{-E}`): a per-site clique **potential** that
+    composes additively into a Gibbs/Markov-random-field energy.  (The
+    fully-normalised densities: :math:`S^2` Kent :func:`kent_log_prob`; vMF /
+    Watson :func:`vmf_log_prob` / :func:`watson_log_prob`.)
+
+    For a *proper* density the frame is orthonormal, :math:`\beta` is fixed only
+    up to a common additive shift (the :math:`\beta_1 = 0` gauge is conventional
+    -- no quadratic on the mean axis), and the concentration dominates the
+    ovalness; none is enforced -- the energy is well defined for any parameters.
+
+    Parameters
+    ----------
+    x : Float[Array, '... p']
+        Observations on :math:`S^{p-1}`.
+    gamma : Float[Array, '... p p']
+        Orthonormal frame; column ``j`` is the axis :math:`\gamma_j` (column 0
+        the mean direction).  Assumed orthonormal (not enforced).
+    kappa : Float[Array, '...']
+        Concentration of the linear (mean-direction) term.
+    beta : Float[Array, '... p']
+        Per-axis quadratic (ovalness) coefficients; ``beta[..., 0]`` is the
+        mean-axis coefficient (conventionally ``0``).
+    axis : int or tuple of int, optional
+        Axes to reduce over when ``reduction != "none"``.
+    reduction : {'none', 'sum', 'mean'}, optional
+        Reduction of the per-observation energy (default ``"none"``).
+
+    Returns
+    -------
+    Float[Array, '...']
+        The per-observation energy (``reduction="none"``) or its reduction.
+    """
+    proj = jnp.einsum(
+        '...jk,...j->...k', gamma, x
+    )  # gamma_k^T x, shape (..., p)
+    per_obs = kappa * proj[..., 0] + jnp.sum(beta * proj**2, axis=-1)
+    return reduce(per_obs, axis=axis, reduction=reduction)

@@ -3321,6 +3321,27 @@ register(
 )
 register(
     OpInfo(
+        'nitrix.stats.fisher_bingham_energy',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(0), (12, 5)),
+                jax.random.normal(_key(1), (5, 5)),
+                6.0,
+                jax.random.normal(_key(2), (5,)),
+            ),
+            {},
+        ),
+        diff_arg=1,
+        vmap_arg=0,
+        invariants=(
+            'higher-dim Kent (FB_p) energy: k g1^T x + sum_j b_j (g_j^T x)^2',
+            'subsumes Bingham (k=0) / vMF (b=0); normaliser-free, any p',
+        ),
+        notes='unnormalised Gibbs/MRF potential; tractable at any dimension',
+    )
+)
+register(
+    OpInfo(
         'nitrix.stats.pca_fit',
         fixture=lambda: (
             (jax.random.normal(_key(), (20, 8)),),

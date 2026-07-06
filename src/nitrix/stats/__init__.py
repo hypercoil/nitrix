@@ -141,6 +141,7 @@ from .directional import (
     KentFit,
     VMFFit,
     WatsonFit,
+    fisher_bingham_energy,
     kent_fit,
     kent_log_prob,
     log_iv,
@@ -234,6 +235,7 @@ __all__ = [
     'kent_log_prob',
     'kent_fit',
     'KentFit',
+    'fisher_bingham_energy',
     # glm
     'Family',
     'Link',

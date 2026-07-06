@@ -214,3 +214,93 @@ def test_kent_grad_and_jit():
         lambda b: kent_log_prob(x[0, 0], _E1, _E2, _E3, jnp.asarray(6.0), b)
     )(jnp.asarray(2.0))
     assert bool(jnp.isfinite(g))
+
+
+# ---------------------------------------------------------------------------
+# Fisher--Bingham energy (the general quadratic-exponential family, any p)
+# ---------------------------------------------------------------------------
+
+
+def _orthonormal_frame(p, seed):
+    a = np.random.default_rng(seed).standard_normal((p, p))
+    q, _ = np.linalg.qr(a)
+    return jnp.asarray(q)
+
+
+def _unit(n, p, seed):
+    x = np.random.default_rng(seed).standard_normal((n, p))
+    return jnp.asarray(x / np.linalg.norm(x, axis=1, keepdims=True))
+
+
+def test_fb_energy_matches_s2_kent_energy():
+    """At p=3 with beta=(0, b, -b) it equals kent_log_prob(normalize=False)."""
+    from nitrix.stats import fisher_bingham_energy
+
+    frame = _orthonormal_frame(3, 0)
+    g1, g2, g3 = frame[:, 0], frame[:, 1], frame[:, 2]
+    x = _unit(20, 3, 1)
+    b = jnp.asarray(3.0)
+    fb = fisher_bingham_energy(
+        x, frame, jnp.asarray(8.0), jnp.asarray([0.0, 3.0, -3.0])
+    )
+    s2 = kent_log_prob(x, g1, g2, g3, jnp.asarray(8.0), b, normalize=False)
+    np.testing.assert_allclose(fb, s2, atol=1e-12)
+
+
+def test_fb_energy_subsumes_vmf():
+    """beta = 0 gives the vMF energy kappa * (mu^T x)."""
+    from nitrix.stats import fisher_bingham_energy
+
+    frame = _orthonormal_frame(4, 2)
+    x = _unit(30, 4, 3)
+    e = fisher_bingham_energy(x, frame, jnp.asarray(5.0), jnp.zeros(4))
+    np.testing.assert_allclose(e, 5.0 * (x @ frame[:, 0]), atol=1e-12)
+
+
+def test_fb_energy_subsumes_bingham():
+    """kappa = 0 gives the Bingham energy x^T A x, A = frame diag(beta) frame^T."""
+    from nitrix.stats import fisher_bingham_energy
+
+    frame = _orthonormal_frame(5, 4)
+    beta = jnp.asarray([0.5, -0.2, -0.3, 0.1, -0.1])
+    a = np.asarray(frame) @ np.diag(np.asarray(beta)) @ np.asarray(frame).T
+    x = _unit(24, 5, 5)
+    e = fisher_bingham_energy(x, frame, jnp.asarray(0.0), beta)
+    xtax = jnp.einsum('ni,ij,nj->n', x, jnp.asarray(a), x)
+    np.testing.assert_allclose(e, xtax, atol=1e-12)
+
+
+def test_fb_energy_subsumes_watson():
+    """kappa = 0 with a single non-zero beta_j is the Watson energy."""
+    from nitrix.stats import fisher_bingham_energy
+
+    frame = _orthonormal_frame(6, 6)
+    axis = frame[:, 2]  # the Watson axis
+    beta = jnp.zeros(6).at[2].set(4.0)
+    x = _unit(20, 6, 7)
+    e = fisher_bingham_energy(x, frame, jnp.asarray(0.0), beta)
+    np.testing.assert_allclose(
+        e,
+        watson_log_prob(x, axis, jnp.asarray(4.0), normalize=False),
+        atol=1e-12,
+    )
+
+
+def test_fb_energy_high_dim_jit_vmap_grad():
+    from nitrix.stats import fisher_bingham_energy
+
+    p = 8
+    frame = _orthonormal_frame(p, 8)
+    x = _unit(32, p, 9)
+    kappa = jnp.asarray(6.0)
+    beta = jnp.asarray([0.0, 2.0, 1.0, 0.5, -0.5, -1.0, -1.0, -1.0])
+    e = fisher_bingham_energy(x, frame, kappa, beta)
+    assert e.shape == (32,)
+    ej = jax.jit(lambda xx: fisher_bingham_energy(xx, frame, kappa, beta))(x)
+    np.testing.assert_allclose(e, ej, atol=1e-12)
+    ev = jax.vmap(lambda xi: fisher_bingham_energy(xi, frame, kappa, beta))(x)
+    np.testing.assert_allclose(e, ev, atol=1e-12)
+    g = jax.grad(lambda b: fisher_bingham_energy(x[0], frame, kappa, b).sum())(
+        beta
+    )
+    assert bool(jnp.all(jnp.isfinite(g)))
