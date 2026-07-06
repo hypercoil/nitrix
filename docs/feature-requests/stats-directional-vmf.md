@@ -128,10 +128,35 @@ are resolved from the theory, not ported:
 
 51 tests green; ruff + mypy clean. Downstream (`nimox`): the
 `VonMisesFisher(numpyro.Distribution)` wrapper, `NormSphereParameter`, and the
-parcellation emission model. Follow-ups (family growth): Watson / Bingham /
-Kent; the coordinate-kernel spatial prior construction. `docs/op_matrix.json`
-render regen deferred (ungated generated artifact; full run flakes on
-single-process XLA-CPU).
+parcellation emission model. `docs/op_matrix.json` render regen deferred (ungated
+generated artifact; full run flakes on single-process XLA-CPU).
+
+### Family growth — Watson SHIPPED (2026-07-06); Kent / Bingham next
+
+**Watson** (the *axial* distribution, `x ≡ -x`) is built and validated on branch
+`feat/stats-directional-watson`: `log_kummer_m` (the Kummer confluent-
+hypergeometric normaliser `M(½, p/2, κ) = ₁F₁(½; p/2; κ)` — regime-split
+series/large-argument asymptotic, Kummer's transform `M(a,b,z)=eᶻM(b−a,b,−z)` for
+the girdle `κ<0`, validated **< 2e-13 vs mpmath** including `κ=0`), `watson_log_prob`
+(surface-measure density, consistent with `vmf_log_prob`), and `watson_fit` /
+`WatsonFit` (MLE = scatter eigenvector + bisection on the monotone `g(κ)=∂_κ log M
+= r̄`, recovering **both** bipolar `κ>0` and girdle `κ<0`, likelihood-selected).
+Two gradient-boundary fixes were load-bearing: the `|z|→z` double-`where` and an
+**additive-`eps`** series floor (a clamping/denormal floor zeroes or underflows
+`g(0)=1/p`, which then misroutes every girdle root-find). 18 tests + op-matrix.
+
+Still to build (sequenced by tractability + reuse):
+
+1. **`watson_sample`** — the guaranteed-acceptance axial rejection sampler (the
+   remaining half of the vMF-parity triad; the efficient envelope across `κ` is
+   the non-trivial part). Deliberately deferred over shipping an unvalidated one.
+2. **Kent (FB5)** — the S² *elliptical* vMF; normaliser is a series in
+   half-integer Bessel functions (**reuses `log_iv`**), moment-estimator fit.
+3. **Bingham** — the general axial law; normaliser is the confluent
+   hypergeometric of *matrix* argument (a saddlepoint approximation, Kume–Wood) —
+   a genuine sub-project.
+
+Plus the coordinate-kernel spatial-prior construction (independent).
 
 ## 5. Cross-references
 
