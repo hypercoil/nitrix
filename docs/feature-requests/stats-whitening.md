@@ -1,15 +1,19 @@
 # Whitening in `nitrix.stats` — findability wrapper + implementation-strategy research
 
-> **Status (2026-06-30): PROPOSED — reframed (NOT a missing-estimator gap).**
-> From the [`hypercoil-examples` migration](hypercoil-examples-migration.md)
-> (`atlas/vmf.py::generalised_whitening`). **Duplication check (2026-06-30):** the
-> whitening *estimator* already exists at the correct §6.5 seam —
-> `nimox.estimators.whitening` (`Whitening` / `ShrunkWhitening` /
-> `SparseConnectivity`) composes `nitrix.linalg.sympower(Σ, power=-0.5)`, and PCA
-> whitening is `nimox.estimators.pca.PCA(whiten=True)`. We must **not** duplicate
-> that container. Two narrower nitrix-side reasons nonetheless justify a small
-> addition: **(A) findability** and **(B) an implementation-strategy research
-> question** (a faster / more stable inverse-sqrt path than `sympower`-of-cov).
+> **Status (2026-07-06): SHIPPED (both (A) and (B)).** `nitrix.stats.whiten` /
+> `whiten_fit` / `whiten_apply` / `whiten_inverse_apply` + `WhiteningState` land
+> the (A) findable ZCA vocabulary on the §6.5 seam, and (B) resolves the
+> inverse-sqrt question to the **cuSOLVER-free Newton-Schulz** driver
+> (`nitrix.linalg.symsqrt(…, driver='newton_schulz')`, matmul-only, GPU-clean,
+> gradient-stable at a repeated spectrum) as the full-sphering default — certified
+> `≈ sympower(cov, -0.5)` to ~1e-9 and `cov(whiten(x)) ≈ I`. Partial sphering
+> keeps the eigenvalue map (`sympower`); PCA whitening is **not** duplicated (it
+> stays `nimox.estimators.pca.PCA(whiten=True)`, needing the eigenbasis). The
+> nimox estimator re-point is filed as
+> [`whitening-backend-nitrix-newton-schulz`](../../../nimox/docs/feature-requests/whitening-backend-nitrix-newton-schulz.md).
+> `WhiteningState` fields (`mean` / `matrix` / `inverse_matrix`) match
+> `FittedWhitening` so the swap is mechanical. The `cummax` "repair" was rejected
+> as predicted (§4).
 >
 > **Correctness mandate — theory over legacy.** Clean-room from the
 > matrix-fractional-power theory; the legacy is the recovery oracle. The
@@ -81,27 +85,38 @@ never a silent perturbation of the fractional-power result. **Other edge cases t
 own:** zero/near-zero eigenvalues (`rcond`/ridge floor, loud); fp32-negative
 eigenvalues (clamp, loud); `n < p` rank deficiency.
 
-## 5. Surface & boundaries
+## 5. Surface & boundaries — as shipped
 
-- `stats.whiten(x, *, reference=None, mode='zca'|'pca', sphering=1.0, rcond=None)`
-  — a thin findable wrapper (`reference=None` ⇒ self-whiten); the fitted form is
-  `whiten_fit`/`whiten_apply` (state = the whitening matrix, plain arrays) so
-  nimox's `Whitening` re-uses *this* rather than re-deriving the convention.
-- Pure `jax`/`jaxtyping`/`numpy`; differentiable (the SPD VJP; repeated
-  eigenvalues documented). The eqx estimator + learnable `AdaptiveSphering`
-  schedule stay in `nimox`.
+- `stats.whiten(x, *, reference=None, sphering=1.0, eps=0.0, assume_centered=False)`
+  — the thin findable wrapper (`reference=None` ⇒ self-whiten); fitted form
+  `whiten_fit` → `WhiteningState(mean, matrix, inverse_matrix)` /
+  `whiten_apply` / `whiten_inverse_apply`. The single-call is *defined as*
+  `whiten_apply(x, whiten_fit(reference))` (§6.5 invariant 2, byte-identical).
+- **`eps` ridge, not `rcond`.** The conditioner is a Tikhonov ridge on the
+  covariance (`cov(l2=eps)`) — the SPD-preserving floor the matmul-only
+  Newton-Schulz path wants (it cannot truncate small eigenvalues), and it
+  matches nimox's `Whitening(eps=…)` for a mechanical swap. Eigenvalue
+  *truncation* (`rcond`) is a PCA-whitening concept and stays with PCA (nimox).
+- **`mode` dropped (ZCA only).** PCA whitening reintroduces the raw eigenbasis
+  (there is no eigh-free PCA) and already lives at
+  `nimox.estimators.pca.PCA(whiten=True)`, so `whiten` is the symmetric (ZCA)
+  map only — no duplication, cuSOLVER-free by default.
+- Pure `jax`/`jaxtyping`/`numpy`; jit/vmap/grad-clean. The eqx estimator +
+  learnable `AdaptiveSphering` schedule stay in `nimox`.
 
-## 6. Acceptance
+## 6. Acceptance — met
 
-- `stats.whiten(x, mode='zca')` equals `x @ sympower(cov(x), −0.5)` to tolerance
-  (proves no behavioural divergence from the existing seam); `cov(whiten(x)) ≈ I`.
-- `sphering=s` matches `Σ^{−s/2}`; `s=0` identity, `s=1` full — **without** the
-  `cummax` repair.
-- (B) the chosen production path is certified `≈ sympower` within the pinned
-  tolerance and shown more stable (fp32 conditioning) and/or faster (GPU,
-  cuSOLVER-free) — else default stays `sympower` and the FR ships (A) only.
-- nimox `Whitening` re-points to the nitrix wrapper with its tests green (no
-  convention drift).
+- ✅ `stats.whiten(x)` equals `x_centred @ sympower(cov(x), −0.5)` to ~1e-9
+  (no behavioural divergence from the existing seam); `cov(whiten(x)) ≈ I`.
+- ✅ `sphering=s` matches `Σ^{−s/2}` (exact vs `sympower(−s/2)`); `s=0` centring
+  only, `s=1` full — **without** the `cummax` repair.
+- ✅ (B) the production path (Newton-Schulz) is certified `≈ sympower` within
+  tolerance and is cuSOLVER-free / jit-clean (the eigh path falls back to eager
+  CPU on the affected GPU stacks); grad-stable at a repeated spectrum. 20 stats
+  tests + 9 `symsqrt` driver tests + op-matrix, green.
+- ⏳ nimox `Whitening` re-point — filed as
+  [`whitening-backend-nitrix-newton-schulz`](../../../nimox/docs/feature-requests/whitening-backend-nitrix-newton-schulz.md)
+  (nimox-side change; certify ≈ + tests green, no convention drift).
 
 ## 7. Cross-references
 

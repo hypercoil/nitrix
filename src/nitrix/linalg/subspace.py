@@ -60,6 +60,7 @@ from jaxtyping import Array, Float
 
 from ._solver import safe_eigh
 from .matrix import recondition_eigenspaces, symmetric
+from .spd import _newton_schulz_isqrt
 
 __all__ = ['orthogonal_procrustes', 'image_basis', 'subspace_angles']
 
@@ -279,45 +280,24 @@ def _svdvals_desc(mat: Float[Array, '... a b']) -> Float[Array, '... s']:
     return jnp.sqrt(jnp.maximum(s2_asc[..., ::-1], 0.0))
 
 
-# Newton-Schulz inverse-sqrt iterations for the Loewdin orthonormalisation
-# below; 30 covers condition numbers up to ~1e5 (well past where a subspace is
-# numerically well-defined) at double precision.
-_LOEWDIN_ITERS = 30
-
-
 def _loewdin_orthonormalize(
     x: Float[Array, '... m p'],
 ) -> Float[Array, '... m p']:
     r"""Symmetric (Loewdin) orthonormalisation ``Q = x (x^T x)^{-1/2}``.
 
-    The inverse square root is computed by a Newton-Schulz iteration (matmuls
-    only), so -- unlike an ``eigh``-based orthonormalisation -- the reverse-mode
-    VJP is finite even when ``x`` already has orthonormal columns (``x^T x = I``,
-    a repeated spectrum that makes the eigenvector VJP blow up).  The Loewdin
-    factor is the *unique* symmetric orthonormaliser (no eigenvector gauge), so
-    ``Q`` is a smooth function of ``x`` wherever ``x`` has full column rank.
-    Assumes ``x`` is reasonably well-conditioned (the iteration is accurate for
-    condition numbers up to ~1e5); pre-truncate a near-rank-deficient basis with
+    The inverse square root is computed by the matmul-only Newton-Schulz
+    iteration (:func:`nitrix.linalg.spd._newton_schulz_isqrt`), so -- unlike an
+    ``eigh``-based orthonormalisation -- the reverse-mode VJP is finite even
+    when ``x`` already has orthonormal columns (``x^T x = I``, a repeated
+    spectrum that makes the eigenvector VJP blow up).  The Loewdin factor is the
+    *unique* symmetric orthonormaliser (no eigenvector gauge), so ``Q`` is a
+    smooth function of ``x`` wherever ``x`` has full column rank.  Assumes ``x``
+    is reasonably well-conditioned (the iteration is accurate for condition
+    numbers up to ~1e5); pre-truncate a near-rank-deficient basis with
     :func:`image_basis`.
     """
     gram = symmetric(_mT(x) @ x)  # (..., p, p) SPD
-    p = gram.shape[-1]
-    eye = jnp.eye(p, dtype=x.dtype)
-    # Upper bound on the largest eigenvalue (a few power iterations) to scale the
-    # spectrum into the Newton-Schulz convergence region.
-    v = jnp.ones((*gram.shape[:-1], 1), x.dtype)
-    for _ in range(5):
-        v = gram @ v
-        v = v / jnp.linalg.norm(v, axis=-2, keepdims=True)
-    lam = jnp.sum(v * (gram @ v), axis=-2, keepdims=True)  # (..., 1, 1)
-    scaled = gram / lam
-    y = scaled
-    z = jnp.broadcast_to(eye, scaled.shape)
-    for _ in range(_LOEWDIN_ITERS):
-        t = 1.5 * eye - 0.5 * (z @ y)
-        y = y @ t
-        z = t @ z
-    inv_sqrt = z / jnp.sqrt(lam)  # (x^T x)^{-1/2}
+    _, inv_sqrt = _newton_schulz_isqrt(gram)  # (x^T x)^{-1/2}
     return x @ inv_sqrt
 
 

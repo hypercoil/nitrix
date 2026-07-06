@@ -3253,6 +3253,60 @@ register(
     )
 )
 
+
+def _whiten_data() -> jax.Array:
+    return jax.random.normal(_key(0), (40, 6)) @ jax.random.normal(
+        _key(1), (6, 6)
+    )
+
+
+def _whiten_state():
+    from nitrix.stats import whiten_fit
+
+    return whiten_fit(_whiten_data())
+
+
+register(
+    OpInfo(
+        'nitrix.stats.whiten',
+        fixture=lambda: ((_whiten_data(),), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=(
+            'ZCA whitening; cov(whiten(x)) ~ I',
+            'Newton-Schulz inverse sqrt (cuSOLVER-free) at sphering=1',
+        ),
+        notes='whiten == apply(fit); NS driver, no eigh at full sphering',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.stats.whiten_fit',
+        fixture=lambda: ((_whiten_data(),), {}),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('the fit half: returns the WhiteningState maps',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.stats.whiten_apply',
+        fixture=lambda: ((_whiten_data(), _whiten_state()), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('the apply half: (x - mean) @ Sigma^-1/2',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.stats.whiten_inverse_apply',
+        fixture=lambda: ((_whiten_data(), _whiten_state()), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('un-whiten: z @ Sigma^1/2 + mean',),
+    )
+)
+
 # --- stats: modelling suite (GLM / GAM / connectivity) + randomized SVD ------
 
 

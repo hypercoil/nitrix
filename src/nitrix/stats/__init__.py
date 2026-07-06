@@ -47,6 +47,8 @@ Submodules
   ``randomise`` engine) plus FDR / Bonferroni.
 - ``pca`` -- principal-component analysis (fit / transform /
   inverse) via the covariance eigendecomposition.
+- ``whitening`` -- zero-phase (ZCA) whitening on the fit/apply seam,
+  with the cuSOLVER-free Newton-Schulz inverse square root.
 """
 
 from .covariance import (
@@ -182,6 +184,13 @@ from .pca import (
     pca_fit,
     pca_inverse_transform,
     pca_transform,
+)
+from .whitening import (
+    WhiteningState,
+    whiten,
+    whiten_apply,
+    whiten_fit,
+    whiten_inverse_apply,
 )
 
 __all__ = [
@@ -340,4 +349,10 @@ __all__ = [
     'pca_fit',
     'pca_transform',
     'pca_inverse_transform',
+    # whitening (ZCA)
+    'WhiteningState',
+    'whiten',
+    'whiten_fit',
+    'whiten_apply',
+    'whiten_inverse_apply',
 ]

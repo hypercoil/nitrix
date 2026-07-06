@@ -280,3 +280,106 @@ def test_symmap_generic_with_custom_fn():
     ref = Q @ jnp.diag(jnp.exp(-L)) @ Q.T
     ref = 0.5 * (ref + ref.T)
     np.testing.assert_allclose(out, ref, atol=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# Newton-Schulz driver: cuSOLVER-free SPD square root / inverse square root
+# ---------------------------------------------------------------------------
+
+
+def test_symsqrt_newton_schulz_matches_eigh():
+    """The matmul-only driver reproduces the eigh sqrt / inverse sqrt."""
+    X = _spd_matrix(n=6, seed=3)
+    np.testing.assert_allclose(
+        symsqrt(X, driver='newton_schulz'),
+        symsqrt(X, driver='eigh'),
+        atol=1e-10,
+    )
+    np.testing.assert_allclose(
+        symsqrt(X, inverse=True, driver='newton_schulz'),
+        sympower(X, power=-0.5),
+        atol=1e-10,
+    )
+
+
+def test_symsqrt_inverse_flag_matches_sympower():
+    """``inverse=True`` on the eigh driver is ``sympower(-0.5)``; the
+    forward is the plain square root."""
+    X = _spd_matrix(n=5, seed=4)
+    np.testing.assert_allclose(
+        symsqrt(X, inverse=True, driver='eigh'),
+        sympower(X, power=-0.5),
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        symsqrt(X, driver='eigh'), symsqrt(X), atol=1e-12
+    )
+
+
+def test_symsqrt_newton_schulz_reconstruction():
+    """``A^{1/2} A^{1/2} == A`` and ``A^{-1/2} A A^{-1/2} == I``."""
+    X = _spd_matrix(n=7, seed=5)
+    sq = symsqrt(X, driver='newton_schulz')
+    isq = symsqrt(X, inverse=True, driver='newton_schulz')
+    np.testing.assert_allclose(sq @ sq, X, atol=1e-10)
+    np.testing.assert_allclose(isq @ X @ isq, jnp.eye(7), atol=1e-10)
+
+
+def test_symsqrt_newton_schulz_symmetric():
+    """The Newton-Schulz maps are (numerically) exactly symmetric."""
+    X = _spd_matrix(n=6, seed=6)
+    for kw in ({}, {'inverse': True}):
+        out = symsqrt(X, driver='newton_schulz', **kw)
+        np.testing.assert_allclose(out, out.T, atol=0.0)
+
+
+def test_symsqrt_newton_schulz_batched_equals_loop():
+    """Batched inputs match the per-matrix loop."""
+    Xs = jnp.stack([_spd_matrix(n=5, seed=s) for s in range(4)])
+    batched = symsqrt(Xs, inverse=True, driver='newton_schulz')
+    loop = jnp.stack(
+        [symsqrt(X, inverse=True, driver='newton_schulz') for X in Xs]
+    )
+    np.testing.assert_allclose(batched, loop, atol=1e-12)
+
+
+def test_symsqrt_newton_schulz_grad_finite_at_repeated_spectrum():
+    """At a repeated spectrum (``A = c I``) the eigenvector VJP of an
+    eigh sqrt is undefined; the matmul-only driver stays finite."""
+
+    def loss(c):
+        A = c * jnp.eye(5)
+        return symsqrt(A, inverse=True, driver='newton_schulz').sum()
+
+    g = jax.grad(loss)(3.0)
+    assert bool(jnp.isfinite(g))
+
+    # Also finite w.r.t. a full SPD matrix argument.
+    X = _spd_matrix(n=5, seed=7)
+
+    def loss_mat(M):
+        A = M @ M.T + jnp.eye(5)
+        return symsqrt(A, inverse=True, driver='newton_schulz').sum()
+
+    gm = jax.grad(loss_mat)(X)
+    assert bool(jnp.all(jnp.isfinite(gm)))
+
+
+def test_symsqrt_newton_schulz_ill_conditioned():
+    """Accurate for condition numbers into the 1e4 range."""
+    n = 5
+    U = _orthogonal_via_safe_eigh(n=n, seed=8)
+    ev = jnp.asarray([1e4, 1e2, 1.0, 1e-1, 1e-2])
+    X = U @ jnp.diag(ev) @ U.T
+    X = 0.5 * (X + X.T)
+    isq = symsqrt(X, inverse=True, driver='newton_schulz')
+    np.testing.assert_allclose(isq @ X @ isq, jnp.eye(n), atol=1e-6)
+
+
+def test_symsqrt_newton_schulz_jit():
+    """The matmul-only driver is jit-clean (no cuSOLVER lowering)."""
+    X = _spd_matrix(n=6, seed=9)
+    out = jax.jit(lambda A: symsqrt(A, inverse=True, driver='newton_schulz'))(
+        X
+    )
+    assert bool(jnp.all(jnp.isfinite(out)))
