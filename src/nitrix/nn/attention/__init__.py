@@ -12,9 +12,10 @@ fused flash path, certified equivalent to the reference (:math:`\\text{pallas-cu
 \\approx \\text{jax}`) only inside nitrix; downstream consumers pin their own
 forward-parity oracle to ``backend='jax'``.
 
-Until the fused kernel lands, an explicit or auto-resolved ``'pallas-cuda'``
-request falls back to the reference with a loud ``NitrixBackendFallback``
-warning.
+On Ampere+ NVIDIA hardware the fused flash kernel runs; a shape it cannot
+tile -- non-float32, ``d_v != d``, a non-power-of-two head dimension, or
+non-power-of-two query / key lengths -- declines and falls back to the
+reference with a loud ``NitrixBackendFallback`` warning.
 """
 
 from __future__ import annotations
@@ -142,8 +143,8 @@ def scaled_dot_product_attention(
     The ``backend`` argument selects the implementation:
 
     - ``'jax'`` -- the pure-JAX reference (the bit-faithful oracle).
-    - ``'pallas-cuda'`` -- the fused flash path on Ampere+; currently falls
-      back to the reference with a loud warning until the kernel lands.
+    - ``'pallas-cuda'`` -- the fused flash path on Ampere+; a shape it cannot
+      tile falls back to the reference with a loud warning.
     - ``'auto'`` (default) -- ``'pallas-cuda'`` on Ampere+ NVIDIA hardware,
       else ``'jax'``.
 
@@ -210,8 +211,9 @@ def scaled_dot_product_attention(
             requested='pallas-cuda',
             resolved='jax',
             reason=(
-                'no fused attention kernel available for this shape/host '
-                '(the fused path lands in suite Phase 2)'
+                'the fused attention kernel does not support this shape/host '
+                '(needs Ampere+, float32, d_v == d, and power-of-two head / '
+                'token dimensions)'
             ),
             shapes=(tuple(q.shape), tuple(k.shape), tuple(v.shape)),
             dtype=q.dtype,

@@ -10,10 +10,11 @@ recurrence at the heart of the Mamba / S6 state-space model, with three-level
 backend selection.  The ``'jax'`` reference is the bit-faithful oracle (and
 auto-selects the parallel associative scan on GPU); ``'pallas-cuda'`` is the
 fused chunked-scan fast path, certified equivalent to the ``'jax'`` reference
-only within the nitrix tolerance.  Until the fused kernel lands, a
-``'pallas-cuda'`` request falls back to the reference and emits a loud
-``NitrixBackendFallback`` warning (the GPU parallel-scan speedup still applies
-via the reference).
+only within the nitrix tolerance.  On Ampere+ NVIDIA hardware the fused
+chunked-scan kernel runs; a shape it cannot tile -- non-float32, or a
+non-power-of-two state dimension / chunk count -- declines and falls back to
+the reference, emitting a loud ``NitrixBackendFallback`` warning (the GPU
+parallel-scan speedup still applies via the reference).
 """
 
 from __future__ import annotations
@@ -191,8 +192,9 @@ def selective_scan(
             requested='pallas-cuda',
             resolved='jax',
             reason=(
-                'no fused selective-scan kernel available for this shape/host '
-                '(the fused path lands in suite P1b)'
+                'the fused selective-scan kernel does not support this '
+                'shape/host (needs Ampere+, float32, and a power-of-two state '
+                'dimension / chunk count)'
             ),
             shapes=(tuple(x.shape), tuple(A.shape)),
             dtype=x.dtype,
