@@ -282,7 +282,7 @@ lowers to the same HLO as `reml_fit(Y,X,Z)` (R1 no-regression proof).
 > exactly; r=1 Laplace == the scalar Laplace; r=2 matches a scipy Laplace
 > reference. The correlated-slope solver is now the monotone, clamp-insensitive
 > **joint-Schur + REML-EM** (✅ shipped, see
-> [`glmm-random-slope-robust-solver.md`](glmm-random-slope-robust-solver.md)).
+> [`glmm-random-slope-robust-solver.md`](resolved/glmm-random-slope-robust-solver.md)).
 > Adaptive Gauss-Hermite quadrature beyond Laplace is ✅ shipped
 > (``method='agq'``, ``n_quad`` nodes; ``n_quad=1`` is Laplace, converges to the
 > exact marginal). The analytic Laplace gradient was investigated and **deferred

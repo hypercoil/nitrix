@@ -260,7 +260,7 @@ DE-suite relevance + current status. **Add to the linked doc, not here.**
 | Item | FR | Status (2026-06-25) | Suite role |
 |---|---|---|---|
 | Fixed-step ODE + adaptive/adjoint roadmap | [`ode-integrators.md`](ode-integrators.md) | euler/midpoint/rk4 ✅ shipped; adaptive dopri5/8/tsit5 + continuous adjoint deferred | the **seed** of this suite; owns DS-6 (adaptive) and DS-7 (adjoint) |
-| Fixed-point / implicit combinators | [`fixed-point-combinators.md`](fixed-point-combinators.md) | ✅ `fixed_point_solve` shipped | backbone for an **implicit ODE step** and the **continuous-adjoint** fixed-point solve |
+| Fixed-point / implicit combinators | [`fixed-point-combinators.md`](resolved/fixed-point-combinators.md) | ✅ `fixed_point_solve` shipped | backbone for an **implicit ODE step** and the **continuous-adjoint** fixed-point solve |
 | Krylov solvers (CG ✅; MINRES/GMRES/BiCGStab deferred) | [`krylov-solvers.md`](krylov-solvers.md) | CG shipped; non-symmetric family deferred | the **non-symmetric resolvent** `(iωI − J)⁻¹` for spectral DCM transfer functions |
 | Matrix functions | [`matrix-functions.md`](matrix-functions.md) | `matrix_exp`/`matrix_log` ✅; `expm_multiply` action open | exponential integrator (DS-3) + large-graph `expm(A)·v` (network diffusion) |
 | Heat-kernel diffusion | [`heat-kernel-diffusion.md`](heat-kernel-diffusion.md) | partial (`diffusion_embedding` shipped) | `exp(−tL)` on the connectome = **linear network-diffusion spreading** |
@@ -494,7 +494,7 @@ a TVB/Hopf/digital-twin module is filed.
 - **Seed FR.** [`ode-integrators.md`](ode-integrators.md) — the shipped fixed-step
   family + the deferred adaptive (DS-6) and adjoint (DS-7) roadmap this suite
   extends.
-- **Inversion / solve dependencies.** [`fixed-point-combinators.md`](fixed-point-combinators.md)
+- **Inversion / solve dependencies.** [`fixed-point-combinators.md`](resolved/fixed-point-combinators.md)
   (implicit step + continuous-adjoint solve), [`krylov-solvers.md`](krylov-solvers.md)
   (non-symmetric resolvent for spectral DCM), [`matrix-functions.md`](matrix-functions.md)
   (`expm` action), [`heat-kernel-diffusion.md`](heat-kernel-diffusion.md)

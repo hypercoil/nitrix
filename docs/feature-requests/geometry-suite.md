@@ -34,7 +34,7 @@
 3. **GS-4's dependency was mis-stated.** It needs a **point-to-triangle**
    (unsigned) distance + a sign test — a new clean-room host-side primitive,
    *not* the morphology mask-EDT in
-   [distance-transform-anisotropic-sampling](distance-transform-anisotropic-sampling.md).
+   [distance-transform-anisotropic-sampling](resolved/distance-transform-anisotropic-sampling.md).
 4. **GS-10 cannot call GS-8 in-loop.** GS-8 (BVH / Möller) is host-side and
    un-jittable; GS-10's `fori_loop` uses only jittable regularisation
    (Laplacian fraction + step clamp). GS-8 is a **post-hoc** cleanup pass.
@@ -210,16 +210,16 @@ here.**
 |---|---|---|---|---|
 | Mesh curvature (mean / Gaussian / principal) | [mesh-curvature](mesh-curvature.md) | 12.6 | not started — substrate shipped | curv/sulc features for `sugar`/`josa`; gyrification |
 | Discrete exterior calculus | [discrete-exterior-calculus](discrete-exterior-calculus.md) | 12.5 | partial (cotangent LBO shipped) | unifying operator for smoothing / parameterisation |
-| Vertex normals | [compute-vertex-normals](compute-vertex-normals.md) | — | ✅ shipped (`compute_vertex_normals`) | normals for deformation / mapping |
-| Uniform Laplacian smoothing | [mesh-laplacian-smoothing](mesh-laplacian-smoothing.md) | — | ✅ shipped (`mesh_laplacian_smooth`) | `mris_smooth` analogue |
+| Vertex normals | [compute-vertex-normals](resolved/compute-vertex-normals.md) | — | ✅ shipped (`compute_vertex_normals`) | normals for deformation / mapping |
+| Uniform Laplacian smoothing | [mesh-laplacian-smoothing](resolved/mesh-laplacian-smoothing.md) | — | ✅ shipped (`mesh_laplacian_smooth`) | `mris_smooth` analogue |
 | Adaptive area-weighted bary resample | [surface-resample-adap-bary](surface-resample-adap-bary.md) | 12.15 | partial (icosphere bary shipped; arbitrary-mesh `ADAP_BARY_AREA` missing) | **HCP** `fs_LR_32k` downsampling; `fsaverage`↔`fs_LR` |
 | Heat-kernel diffusion | [heat-kernel-diffusion](heat-kernel-diffusion.md) | 12.3 | partial (`diffusion_embedding` shipped) | geodesic surface smoothing substrate (**GS-12**) |
 | Spherical harmonic transform | [spherical-harmonic-transform](spherical-harmonic-transform.md) | 12.9 | not started | spectral surface analysis; atlas bases |
 | Surface boundary map | [surface-boundary-map](surface-boundary-map.md) | 12.16 | not started (composes shipped prims) | functional parcellation (aparc-adjacent) |
 | Mesh watershed | [mesh-watershed](mesh-watershed.md) | 12.17 | not started | parcellation from boundary map |
-| Field regularisers (bending / strain energy) | [field-regularisers](field-regularisers.md) | — | filed (ENABLING) | inflation & distortion energies (**GS-1**, **GS-6**) |
-| Distance transform (anisotropic) | [distance-transform-anisotropic-sampling](distance-transform-anisotropic-sampling.md) | — | filed | SDF generation substrate (**GS-4**) |
-| Point sampling | [point-sample](point-sample.md) | — | partial (`sample_at_points` core) | surface→volume sampling (**GS-11**) |
+| Field regularisers (bending / strain energy) | [field-regularisers](resolved/field-regularisers.md) | — | filed (ENABLING) | inflation & distortion energies (**GS-1**, **GS-6**) |
+| Distance transform (anisotropic) | [distance-transform-anisotropic-sampling](resolved/distance-transform-anisotropic-sampling.md) | — | filed | SDF generation substrate (**GS-4**) |
+| Point sampling | [point-sample](resolved/point-sample.md) | — | partial (`sample_at_points` core) | surface→volume sampling (**GS-11**) |
 
 ## 5. New gaps — numerical primitives not yet owned by any FR
 
@@ -259,7 +259,7 @@ without it (they consume the inflated-surface curvature features).
 **Home.** New `geometry.surface` (sits beside `geometry.sphere`; the
 folded-surface energies are distinct from the `S²`-grid helpers). **Effort
 M.** **Live-code status.** No `inflate`/`sulc` symbol; energies compose on
-shipped smoothing + adjacency. See [field-regularisers](field-regularisers.md).
+shipped smoothing + adjacency. See [field-regularisers](resolved/field-regularisers.md).
 
 ---
 
@@ -354,7 +354,7 @@ def mesh_to_sdf(
 
 **Composition.** Unsigned **point-to-triangle** distance (a new clean-room
 host-side primitive, uniform-grid accelerated — *not* the morphology mask-EDT
-in [distance-transform-anisotropic-sampling](distance-transform-anisotropic-sampling.md),
+in [distance-transform-anisotropic-sampling](resolved/distance-transform-anisotropic-sampling.md),
 which measures distance to a binary mask, §0 correction 3) + sign from
 generalised winding number / normal test. `scipy.spatial` is banned at runtime
 (SPEC §6.2), so the broad-phase is a clean-room uniform-grid hash, not
@@ -411,7 +411,7 @@ def strain_distortion(source: Mesh, warped: Mesh) -> Float[Array, 'n_faces 2']: 
 fundamental forms + `eigh` for the strain tensor. Pure JAX. **Home.**
 `sparse.mesh`. **Effort S.** **Live-code status.** Volumetric Jacobian
 shipped; no surface/sphere distortion. Pairs with
-[field-regularisers](field-regularisers.md) (strain energy as a *loss*).
+[field-regularisers](resolved/field-regularisers.md) (strain energy as a *loss*).
 
 ---
 

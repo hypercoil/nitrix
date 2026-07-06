@@ -38,5 +38,5 @@ and resolves to `'fft'` on GPU / `'scan'` on CPU (mirror the function docstring
 
 - `signal/_iir.py:~22` (module docstring), vs `:60` (`_resolve_iir_backend`)
   and `:571` (`sosfilt` docstring, correct).
-- [`iir-filter-gpu-backend.md`](iir-filter-gpu-backend.md) (B12 — the shipped
+- [`iir-filter-gpu-backend.md`](resolved/iir-filter-gpu-backend.md) (B12 — the shipped
   FFT engine + auto default).

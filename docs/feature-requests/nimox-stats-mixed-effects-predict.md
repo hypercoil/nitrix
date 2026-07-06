@@ -34,7 +34,7 @@
 > still works for both).
 >
 > **Original request (2026-06-25): nimox-estimators Tier-3 → nitrix.** The mixed-model
-> sibling of [`nimox-stats-response-predict.md`](nimox-stats-response-predict.md),
+> sibling of [`nimox-stats-response-predict.md`](resolved/nimox-stats-response-predict.md),
 > filed separately because its apply contract is materially different. The
 > mass-univariate **mixed-effects** fitters — `lme_fit` (REML / FaST-LMM,
 > dispatching `REMLResult` / `LMEResult` / nested / crossed tiers) and
@@ -127,7 +127,7 @@ predict is the only thing missing.
 
 - nimox `docs/feature-requests/nimox-estimators.md` §14 (Tier-3, rank 7) — the
   origin.
-- [`nimox-stats-response-predict.md`](nimox-stats-response-predict.md) — the
+- [`nimox-stats-response-predict.md`](resolved/nimox-stats-response-predict.md) — the
   fixed-effects sibling (Beta / Ordinal / GauLSS / GAM); split from this because
   their predict is a one-line link-inverse, not a group-aware BLUP.
 - `nitrix.stats.glmm` `GLMMResult.blups` / `re_var` — the BLUPs already on the

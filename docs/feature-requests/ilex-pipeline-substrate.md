@@ -56,7 +56,7 @@ So the phase-1 lift does not over-reach:
   explicitly rejected from `nitrix` (SPEC §6.2).
 - **Sliding-window inference orchestration** (tiling, scheduling) → `nimox.inference`
   / `thrux`; only the per-window weighting kernel + overlap-add reduction is
-  `nitrix`-shaped ([`sliding-window-weighting.md`](sliding-window-weighting.md)).
+  `nitrix`-shaped ([`sliding-window-weighting.md`](resolved/sliding-window-weighting.md)).
 
 ## Atomised items
 
@@ -68,12 +68,12 @@ duplication; **MISMATCH** = a documented parity deviation.
 
 | Item | Doc | Severity | Home |
 |---|---|---|---|
-| Connected-components / largest-CC | [connected-components](connected-components.md) | ENABLING (highest recurrence) | `morphology` |
-| `pad_to_multiple` / `crop_to_multiple` | [pad-to-multiple](pad-to-multiple.md) | ENABLING | `numerics` |
-| `crop_to_nonzero` / bbox | [crop-to-nonzero](crop-to-nonzero.md) | ENABLING | `numerics` |
-| Cubic (order-3) resample | [cubic-resample](cubic-resample.md) | MISMATCH | `geometry.grid` |
-| Intensity-normalize variants | [intensity-normalize-variants](intensity-normalize-variants.md) | CONVENIENCE | `numerics.normalize` |
-| Sliding-window weighting + overlap-add | [sliding-window-weighting](sliding-window-weighting.md) | CONVENIENCE | `numerics` |
+| Connected-components / largest-CC | [connected-components](resolved/connected-components.md) | ENABLING (highest recurrence) | `morphology` |
+| `pad_to_multiple` / `crop_to_multiple` | [pad-to-multiple](resolved/pad-to-multiple.md) | ENABLING | `numerics` |
+| `crop_to_nonzero` / bbox | [crop-to-nonzero](resolved/crop-to-nonzero.md) | ENABLING | `numerics` |
+| Cubic (order-3) resample | [cubic-resample](resolved/cubic-resample.md) | MISMATCH | `geometry.grid` |
+| Intensity-normalize variants | [intensity-normalize-variants](resolved/intensity-normalize-variants.md) | CONVENIENCE | `numerics.normalize` |
+| Sliding-window weighting + overlap-add | [sliding-window-weighting](resolved/sliding-window-weighting.md) | CONVENIENCE | `numerics` |
 
 ### Residual phase-1 primitives (mesh / UNet ports)
 
@@ -82,21 +82,21 @@ Small primitives the surface and neurite-UNet ports still vendor; all flagged
 
 | Item | Doc | Severity | Home |
 |---|---|---|---|
-| `point_sample` (zero-fill) | [point-sample](point-sample.md) | CONVENIENCE | `geometry.grid` |
-| `compute_vertex_normals` | [compute-vertex-normals](compute-vertex-normals.md) | CONVENIENCE | `sparse.mesh` |
-| `upsample_nearest_nd` | [upsample-nearest-nd](upsample-nearest-nd.md) | CONVENIENCE | `numerics` / `geometry` |
-| `spatial_transform_batched` | [spatial-transform-batched](spatial-transform-batched.md) | CONVENIENCE (low blast) | `geometry.grid` |
+| `point_sample` (zero-fill) | [point-sample](resolved/point-sample.md) | CONVENIENCE | `geometry.grid` |
+| `compute_vertex_normals` | [compute-vertex-normals](resolved/compute-vertex-normals.md) | CONVENIENCE | `sparse.mesh` |
+| `upsample_nearest_nd` | [upsample-nearest-nd](resolved/upsample-nearest-nd.md) | CONVENIENCE | `numerics` / `geometry` |
+| `spatial_transform_batched` | [spatial-transform-batched](resolved/spatial-transform-batched.md) | CONVENIENCE (low blast) | `geometry.grid` |
 | `LOG` / `EUCLIDEAN` `edge_aggregate` | [edge-aggregate-log-euclidean](edge-aggregate-log-euclidean.md) (B4, canonical) | CONVENIENCE | `semiring` |
 
 ## Resolved
 
 Shipped 2026-06-02 (see `IMPLEMENTATION_PLAN.md §10.3`, 2026-06-02 entry):
 
-- **Intensity-normalize variants** ([intensity-normalize-variants](intensity-normalize-variants.md))
+- **Intensity-normalize variants** ([intensity-normalize-variants](resolved/intensity-normalize-variants.md))
   — `percentile_rescale` (min–p99–clip) + `zscore_normalize(nonzero_mask=)`.
-- **`spatial_transform_batched`** ([spatial-transform-batched](spatial-transform-batched.md))
+- **`spatial_transform_batched`** ([spatial-transform-batched](resolved/spatial-transform-batched.md))
   — leading-batch `vmap` with shared-operand broadcast.
-- **Cubic resample — docstring deviation flagged** ([cubic-resample](cubic-resample.md));
+- **Cubic resample — docstring deviation flagged** ([cubic-resample](resolved/cubic-resample.md));
   the full order-3 B-spline path stays deferred (a new sampling path, not a fix).
 
 The large mesh/surface/warp tier these ports needed is already shipped; its

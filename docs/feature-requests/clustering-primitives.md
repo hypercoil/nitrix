@@ -20,7 +20,7 @@ def nmf(X, k, *, max_iter): ...                         # Lee–Seung NMF
 
 - `kmeans` — Lloyd's algorithm (vmap over centroid update +
   nearest-centroid assignment). Pure JAX; differentiable via implicit-VJP at
-  convergence (composes [`fixed-point-combinators.md`](fixed-point-combinators.md),
+  convergence (composes [`fixed-point-combinators.md`](resolved/fixed-point-combinators.md),
   §12.8).
 - `ward_linkage` — host-side (heap priority queue), JAX-array output.
 - `nmf` — Lee–Seung multiplicative updates. Pure JAX; differentiable via
@@ -47,6 +47,6 @@ shipped (`stats.corr` / `cov`, `linalg.linear_kernel` / `cosine_kernel`).
 - `docs/feature-requests catalogue §12.18` — origin entry; `§13` — acceptance protocol;
   `§12.20` — strategy survey (Yeo / Bellec / Eickhoff rows).
 - [`normalised-cut.md`](normalised-cut.md) — downstream (kmeans on eigvecs).
-- [`fixed-point-combinators.md`](fixed-point-combinators.md) — convergence
+- [`fixed-point-combinators.md`](resolved/fixed-point-combinators.md) — convergence
   gradients.
 - `src/nitrix/linalg/kernel.py` — the similarity kernels.

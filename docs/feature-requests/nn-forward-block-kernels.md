@@ -111,9 +111,9 @@ perf-only follow-up, reference path already adequate.
 |---|---|---|---|---|---|
 | **P0** | Scaled dot-product / flash attention (dense + windowed-bias + causal + cross) | [attention-kernels](attention-kernels.md) | ENABLING | `nitrix.nn.attention` | planned ([suite](nn-forward-kernels-suite.md) §7.1) |
 | **P1** | Selective state-space scan (Mamba/S6) | [selective-scan](selective-scan.md) | ENABLING | `nitrix.nn.ssm` | planned ([suite](nn-forward-kernels-suite.md) §7.2) |
-| **P2** | Affine param↔matrix algebra (unblocks nimox affine vendor) | [affine-matrix-algebra](affine-matrix-algebra.md) *(existing)* | ENABLING | `geometry.transform` | filed 2026-06-08 |
+| **P2** | Affine param↔matrix algebra (unblocks nimox affine vendor) | [affine-matrix-algebra](resolved/affine-matrix-algebra.md) *(existing)* | ENABLING | `geometry.transform` | filed 2026-06-08 |
 | **P2** | Spherical parameterisation (JOSA) | [spherical-parameterisation](spherical-parameterisation.md) *(existing)* | ENABLING | `geometry.sphere` | filed |
-| **P2** | Jacobian-determinant / field regularisers (JOSA jacobian) | [field-regularisers](field-regularisers.md) *(existing)* | ENABLING | `register.regulariser` | partly shipped |
+| **P2** | Jacobian-determinant / field regularisers (JOSA jacobian) | [field-regularisers](resolved/field-regularisers.md) *(existing)* | ENABLING | `register.regulariser` | partly shipped |
 | **P3** | Fused LayerNorm / GroupNorm / InstanceNorm (forward+backward) | [fused-norm-kernels](fused-norm-kernels.md) | CONVENIENCE (perf) | `nitrix.nn.norm` | planned ([suite](nn-forward-kernels-suite.md) §7.3) |
 
 **P2 note.** The affine / spherical / jacobian gaps are already filed under

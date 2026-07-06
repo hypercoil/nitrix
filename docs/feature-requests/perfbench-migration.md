@@ -50,7 +50,7 @@ three shipping public ops have **no `op_matrix.json` entry** —
 `nitrix.bias.n4_bias_field_correction` — so perf-bench benchmarks for them
 cannot be credited by `coverage_report.py` (the join is keyed on the
 inventory). Mechanical add of one entry each (capabilities verified) — see
-[`doc-op-matrix-inventory-gaps`](doc-op-matrix-inventory-gaps.md). Re-running
+[`doc-op-matrix-inventory-gaps`](resolved/doc-op-matrix-inventory-gaps.md). Re-running
 the public-surface inventory would catch any other omissions.
 
 ## Cross-references

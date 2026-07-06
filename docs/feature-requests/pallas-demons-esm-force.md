@@ -83,7 +83,7 @@ sizes; speedup vs CPU 43× → 28× across 48³→160³.
   gather kernel (the ELL gather-lowering blocker this one avoids).
 - [`pallas-gaussian-blur.md`](pallas-gaussian-blur.md) — the separable-Gaussian
   kernel (steps 5,7 here would reuse it).
-- [`registration-recipe-cold-compile.md`](registration-recipe-cold-compile.md)
+- [`registration-recipe-cold-compile.md`](resolved/registration-recipe-cold-compile.md)
   — the (now-resolved) loop-roll finding that exposed this steady-state regime.
 - `src/nitrix/register/diffeomorphic.py` (`_demons_level` — the inner `lax.scan`
   step); `src/nitrix/geometry/differential.py` (`spatial_gradient`).

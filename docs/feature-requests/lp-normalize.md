@@ -12,7 +12,7 @@
 1. **`l2_normalize` / `unit_normalize`** — `x / max(‖x‖_p, eps)` along an
    axis (torch `F.normalize` eps semantics). `ilex/models/krakencoder/
    _krakencoder.py:59` (`_l2_normalise`); also implicit in `nt_xent` /
-   `koleo` (see [`contrastive-ssl-losses.md`](contrastive-ssl-losses.md)),
+   `koleo` (see [`contrastive-ssl-losses.md`](resolved/contrastive-ssl-losses.md)),
    which L2-normalise before the cosine-sim matrix.
 2. **`instance_norm`** — per-sample/per-channel zero-mean/unit-(biased)var
    over a configurable set of spatial axes, `(x−μ)·rsqrt(var+eps)` (the
@@ -49,6 +49,6 @@ training-loop utilities — keep upstream unless a generic `numerics.ema` /
 ## Cross-references
 
 - [`ilex-training-substrate.md`](ilex-training-substrate.md) — survey context.
-- [`contrastive-ssl-losses.md`](contrastive-ssl-losses.md) — L2-normalize
+- [`contrastive-ssl-losses.md`](resolved/contrastive-ssl-losses.md) — L2-normalize
   consumer.
 - `src/nitrix/numerics/normalize.py` — the normalisation family this joins.

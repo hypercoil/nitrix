@@ -32,14 +32,14 @@ in *Resolved* below.
 | B7 | [pallas-trilinear-resample](pallas-trilinear-resample.md) | Pallas kernel (interim JAX gather **shipped** 2026-06-07; kernel parked) | — |
 | B10 | [retune-pallas-log-matmul](retune-pallas-log-matmul.md) | kernel tuning | M |
 | B11 | [perfbench-migration](perfbench-migration.md) | tooling migration (in progress) | L (sliceable) |
-| B12 | [iir-filter-gpu-backend](iir-filter-gpu-backend.md) | perf / API-default (IIR GPU backend) | S + M |
+| B12 | [iir-filter-gpu-backend](resolved/iir-filter-gpu-backend.md) | perf / API-default (IIR GPU backend) | S + M |
 | B13 | [boundary-mode-parity](boundary-mode-parity.md) | API refinement (scipy/ITK boundary parity) | M |
-| B14 | [spectral-embedding-gpu-solver](spectral-embedding-gpu-solver.md) | perf + robustness (lobpcg / eigh on GPU) | M |
+| B14 | [spectral-embedding-gpu-solver](resolved/spectral-embedding-gpu-solver.md) | perf + robustness (lobpcg / eigh on GPU) | M |
 | B15 | [interpolation-backend-cpu-gpu-gap](interpolation-backend-cpu-gpu-gap.md) | perf characterisation (map_coordinates CPU/GPU) | S char / M-L fix |
 | B16 | [alternative-interp-backends-xla](alternative-interp-backends-xla.md) | research note (scipy/cupy backends in XLA) | M-L |
 | B17 | [median-percentile-cpu-sort-cliff](median-percentile-cpu-sort-cliff.md) | perf characterisation (jnp.median/percentile CPU sort) | M |
 | B18 | [perf-bench-case-hardening](perf-bench-case-hardening.md) | benchmark-integrity report (gameable hard-path branches) | S (report) |
-| B20 | [distance-transform-anisotropic-sampling](distance-transform-anisotropic-sampling.md) | feature gap (euclidean EDT has no sampling=) | S |
+| B20 | [distance-transform-anisotropic-sampling](resolved/distance-transform-anisotropic-sampling.md) | feature gap (euclidean EDT has no sampling=) | S |
 | B21 | [morphology-explicit-se-im2col-cost](morphology-explicit-se-im2col-cost.md) | perf characterisation (explicit-SE/disk-footprint im2col cost, measured) | M |
 | B22 | [register-sparse-dataclasses-as-pytrees](register-sparse-dataclasses-as-pytrees.md) | API/ergonomics (ELL/SectionedELL/Mesh not registered pytrees) | S-M |
 | B23 | [perf-wins-must-certify-at-scale](perf-wins-must-certify-at-scale.md) | benchmark-integrity principle (a win must certify at brain scale, not the benched size) | S (principle) |
@@ -48,7 +48,7 @@ in *Resolved* below.
 
 (B1, B8, B9, and B19 are resolved — see below. `spatial_transform_batched`, JOSA §3,
 shipped 2026-06-02 — see `IMPLEMENTATION_PLAN.md §10.3`;
-[`spatial-transform-batched.md`](spatial-transform-batched.md) is its home doc.)
+[`spatial-transform-batched.md`](resolved/spatial-transform-batched.md) is its home doc.)
 
 ## Closed by design (recorded so the decision isn't lost on file deletion)
 
@@ -95,7 +95,7 @@ in **`IMPLEMENTATION_PLAN.md §10.3`** (shipped-deviation log) and
   int/bool → `float32` promotion (`_to_float`) for a `float-in → float-out`
   contract across both paths. Gated by three new `test_flat_path_*` tests; the
   four `jit_of_grad` op-matrix cells flip `ValueError → pass`. See
-  [`morphology-reduce-window-jitgrad.md`](morphology-reduce-window-jitgrad.md)
+  [`morphology-reduce-window-jitgrad.md`](resolved/morphology-reduce-window-jitgrad.md)
   (Resolution) and `docs/design/morphology.md` (flat-path section).
 - **B7 (interim win) + `upsample-nearest-nd` — partially resolved 2026-06-07.**
   The interpolation-method dispatcher (`geometry/_interpolate.py`) shipped the

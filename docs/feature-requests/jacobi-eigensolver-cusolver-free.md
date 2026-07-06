@@ -76,7 +76,7 @@ def jacobi_eigh(
   `lobpcg` / `shift_invert` / `poly` — the dispatcher already separates
   `forward(method)` from `backward(format)`, so the jittable forward composes
   with the shared subspace VJP. Sibling of **B14**
-  [`spectral-embedding-gpu-solver`](spectral-embedding-gpu-solver.md) (lobpcg /
+  [`spectral-embedding-gpu-solver`](resolved/spectral-embedding-gpu-solver.md) (lobpcg /
   eigh on the broken GPU).
 - Could back a future `stats.pca` `solver='jacobi'` and an aCompCor path that
   need a GPU-resident, batchable decomposition.
@@ -106,7 +106,7 @@ none is a cuSOLVER-free dense symmetric eig.
   `'jacobi'` method would join (`docs/design/eigsolve-dispatcher.md`).
 - [`gpu-cusolver-first-call-handle-failure.md`](gpu-cusolver-first-call-handle-failure.md)
   — the broken-cuSOLVER reality that motivates a solver-free eig.
-- [`spectral-embedding-gpu-solver.md`](spectral-embedding-gpu-solver.md) (B14) —
+- [`spectral-embedding-gpu-solver.md`](resolved/spectral-embedding-gpu-solver.md) (B14) —
   sibling GPU-eig robustness item.
 - `docs/feature-requests/stats-modelling-suite-v2.md` — the v2 suite whose
   `randomized_svd` decomposition primitive raised this.

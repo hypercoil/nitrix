@@ -325,8 +325,8 @@ ships-with-a-case SLA), so the fast path can never land without its bar.
 
 - `../../nitrix-perf-bench/COVERAGE_MANDATE.md` §1.1 (four-axis gap), §2.4
   (per-op targets), §2.5 (precision), §5 (separation of concerns), §7 (SLA).
-- Shipped optimisations: [`iir-filter-gpu-backend`](iir-filter-gpu-backend.md)
-  (B12), [`spectral-embedding-gpu-solver`](spectral-embedding-gpu-solver.md)
+- Shipped optimisations: [`iir-filter-gpu-backend`](resolved/iir-filter-gpu-backend.md)
+  (B12), [`spectral-embedding-gpu-solver`](resolved/spectral-embedding-gpu-solver.md)
   (B14), and the EDT / morphology perf work on the `perf/*` branches.
 - Related open contracts: [`boundary-mode-parity`](boundary-mode-parity.md)
   (B13), [`interpolation-backend-cpu-gpu-gap`](interpolation-backend-cpu-gpu-gap.md)

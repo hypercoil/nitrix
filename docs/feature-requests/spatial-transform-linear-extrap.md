@@ -28,7 +28,7 @@ take the gather engine for that mode).
 
 - [`internal-backlog.md`](internal-backlog.md) — the engineering-backlog
   ledger.
-- [`spatial-transform-batched.md`](spatial-transform-batched.md) — the other
+- [`spatial-transform-batched.md`](resolved/spatial-transform-batched.md) — the other
   open `spatial_transform` extension (leading-batch convenience).
 - `src/nitrix/geometry/_interpolate.py` — `_boundary_index` (the five
   boundary folds a sixth would join); `src/nitrix/geometry/grid.py` —

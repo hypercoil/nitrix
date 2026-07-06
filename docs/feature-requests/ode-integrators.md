@@ -29,7 +29,7 @@ def implicit_midpoint(f, y0, t): ...
 **Composition.** Generalises `geometry.integrate_velocity_field`
 (scaling-and-squaring). Differentiable via the adjoint-equation pattern
 (Chen et al. 2018), which is itself a fixed-point + Krylov solve — composes
-[`fixed-point-combinators.md`](fixed-point-combinators.md) (§12.8) +
+[`fixed-point-combinators.md`](resolved/fixed-point-combinators.md) (§12.8) +
 [`krylov-solvers.md`](krylov-solvers.md) (§12.1).
 
 **Likely consumer.** Neural-ODE-style continuous-time models,
@@ -130,7 +130,7 @@ integration error and converges to straight-through as `h→0`). The continuous
 adjoint is needed *only* to bit-reproduce the upstream's adjoint *training run*
 — a niche, already-framework-fragile reproducibility goal. Implement it (the
 augmented adjoint ODE + `jax.custom_vjp`, composing
-[`fixed-point-combinators.md`](fixed-point-combinators.md) +
+[`fixed-point-combinators.md`](resolved/fixed-point-combinators.md) +
 [`krylov-solvers.md`](krylov-solvers.md)) only if a concrete torch-training-parity
 need lands; until then the nimox backend raises a loud error for
 `adjoint='backsolve'` rather than silently substituting a different gradient.
@@ -161,7 +161,7 @@ suggested order `tsit5` (diffrax's own default, best for non-stiff) → `dopri5`
 - `docs/feature-requests catalogue §12.11` — origin entry; `§13` — acceptance protocol.
 - [`ode-backend-nitrix.md`](../../../nimox/docs/feature-requests/ode-backend-nitrix.md)
   (nimox) — the consumer-side rewire of `integrate_vertex_flow` onto this.
-- [`fixed-point-combinators.md`](fixed-point-combinators.md) and
+- [`fixed-point-combinators.md`](resolved/fixed-point-combinators.md) and
   [`krylov-solvers.md`](krylov-solvers.md) — adjoint-pass dependencies.
 - `src/nitrix/geometry/grid.py` — `integrate_velocity_field`, the special
   case this generalises.
