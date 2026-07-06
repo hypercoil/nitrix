@@ -1,5 +1,12 @@
 # jit-safe traced sigma for `smoothing.gaussian`
 
+> **Status (2026-07-06): SHIPPED.** `smoothing.gaussian` accepts a JAX array /
+> tracer sigma (0-D, or 1-D per-axis) under `jit` / `vmap` when `driver='fir'`
+> and an explicit `kernel_size` fixes the kernel shape; only the tap weights
+> vary with the traced sigma. The host-static path is byte-identical; a traced
+> sigma without `kernel_size` (or with `driver='recursive'`) raises. Tests
+> cover jit==static parity, vmap per-view, and 1-D anisotropic; the
+> tail-truncation caveat is on the `sigma` param / Notes.
 > **Home:** `smoothing.gaussian`.
 > **Severity:** ENABLING for the ilex training-substrate augmentation
 > family (blocks per-view sampled sigma inside a JIT-traced augmentation
@@ -82,8 +89,8 @@ comment).
 
 ## Cross-references
 
-- Existing FR context: [`ilex-training-substrate.md`](ilex-training-substrate.md).
-- Related FR (perf, orthogonal concern): [`pallas-gaussian-blur.md`](pallas-gaussian-blur.md).
+- Existing FR context: [`ilex-training-substrate.md`](../ilex-training-substrate.md).
+- Related FR (perf, orthogonal concern): [`pallas-gaussian-blur.md`](../pallas-gaussian-blur.md).
 - Docstring convention: `src/nitrix/smoothing/gaussian.py` — the
   "host (static) floats — it is not traced" note (line ~242) should be
   updated to describe the traced-sigma path once it exists.

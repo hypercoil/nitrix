@@ -344,7 +344,7 @@ stay downstream. Needs an explicit go-ahead + a lined-up consumer.
 
 ## Resolved (archived)
 
-The 60 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/). Listed here as one flat index; topical context and the shipped-status annotation remain in the family sections above.
+The 61 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/). Listed here as one flat index; topical context and the shipped-status annotation remain in the family sections above.
 
 - [`affine-matrix-algebra`](resolved/affine-matrix-algebra.md) — Affine matrix algebra (geometric convention) — `nitrix.geometry.affine`
 - [`attention-kernels`](resolved/attention-kernels.md) — attention-kernels — scaled dot-product / flash attention
@@ -372,6 +372,7 @@ The 60 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/)
 - [`field-regularisers`](resolved/field-regularisers.md) — Displacement-field regularisers — `nitrix.register.regulariser`
 - [`fixed-point-combinators`](resolved/fixed-point-combinators.md) — Fixed-point combinators — `nitrix.numerics.fixed_point`
 - [`gaussian-kl-nll`](resolved/gaussian-kl-nll.md) — Diagonal-Gaussian KL / NLL — `nitrix.stats`
+- [`gaussian-smooth-traced-sigma`](resolved/gaussian-smooth-traced-sigma.md) — jit-safe traced sigma for `smoothing.gaussian`
 - [`generative-bias-field`](resolved/generative-bias-field.md) — Generative bias field — simulated INU — `nitrix.augment`
 - [`geometric-augmentation-ops`](resolved/geometric-augmentation-ops.md) — Geometric-augmentation ops — `nitrix.augment.geometric`
 - [`gibbs-ringing`](resolved/gibbs-ringing.md) — Gibbs (truncation) ringing artefact — `nitrix.augment.intensity`

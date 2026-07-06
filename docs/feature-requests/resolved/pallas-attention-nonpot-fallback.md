@@ -82,7 +82,7 @@ patches; both non-POT).
 
 - Existing FR context: [`ilex-training-substrate.md`](../ilex-training-substrate.md).
 - Related FR (also blocks the 3DINO augmentation stack):
-  [`gaussian-smooth-traced-sigma.md`](../gaussian-smooth-traced-sigma.md).
+  [`gaussian-smooth-traced-sigma.md`](gaussian-smooth-traced-sigma.md).
 - Error source: JAX ``pallas/triton/lowering.py:_check_tensor_size``.
 - Resolver hook: ``src/nitrix/_internal/backend.py``.
 

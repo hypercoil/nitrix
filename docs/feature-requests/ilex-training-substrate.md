@@ -109,7 +109,7 @@ Severity: **ENABLING** = a downstream surface is blocked / hand-rolling it;
 | Gamma, histogram-shift, gaussian/rician noise | [intensity-augmentation-ops](resolved/intensity-augmentation-ops.md) | CONVENIENCE | `augment.intensity` |
 | Gibbs (truncation) ringing artefact | [gibbs-ringing](resolved/gibbs-ringing.md) | CONVENIENCE | `augment.intensity` |
 | Random flip / crop / resized-crop / affine / SVF gen | [geometric-augmentation-ops](resolved/geometric-augmentation-ops.md) | CONVENIENCE | `augment.geometric` |
-| jit-safe traced sigma for `smoothing.gaussian` | [gaussian-smooth-traced-sigma](gaussian-smooth-traced-sigma.md) | ENABLING | `smoothing.gaussian` |
+| jit-safe traced sigma for `smoothing.gaussian` | [gaussian-smooth-traced-sigma](resolved/gaussian-smooth-traced-sigma.md) | ENABLING | `smoothing.gaussian` |
 | Pallas attention: auto-fallback on non-POT token counts | [pallas-attention-nonpot-fallback](resolved/pallas-attention-nonpot-fallback.md) | ENABLING | `nn.attention` |
 
 ### Loss / metric numerics (nimox loss library)
