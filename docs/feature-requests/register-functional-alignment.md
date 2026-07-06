@@ -164,8 +164,19 @@ it disagrees with the theory:
   eigendecomposition.
 - **Prior projection (Lemma 5).** The matrix-vMF prior enters *only* as
   `F* = Qₓᵀ F Q_m`. `prior=None` stays fully `O(p n²)`; a dense `(p, p)` prior
-  costs `O(p² l)` to project (the coordinate-kernel construction that keeps this
-  sub-`O(p²)` is a downstream modelling policy, noted but out of scope).
+  costs `O(p² l)` to project.
+- **Coordinate-kernel spatial prior (Lemma 5, whole-brain) — ✅ SHIPPED
+  (2026-07-06).** `CoordinateKernelPrior(coords, lengthscale, key, n_features)` +
+  `EfficientProMises(spatial_prior=…)`. The anatomical location prior — an RBF
+  kernel `K` over locus coordinates biasing nearby loci to align — is built at
+  whole-brain scale by **random Fourier features**: `K ≈ Φ Φᵀ`, so `F* ≈ (Qₓᵀ Φ)
+  (Φᵀ Q_m)` in `O(p·r·l)`, **never forming the `(p, p)` kernel**. Applied *inside*
+  `fit`, where the row-space bases `Qₓ / Q_m` live (resolving the basis
+  circularity — `F*` can't be built before the fit computes the bases). The kernel
+  *choice* (RBF, lengthscale) is the modelling knob; the irreducible content is
+  the never-materialise-`(p,p)` subspace projection. Validated: `F*_RFF → Qₓᵀ K
+  Q_m` as `O(r^{-1/2})`; the whole-brain path matches the dense-`(p,p)`-prior
+  projection to `< 5e-3` at high `n_features`.
 - **Reconstruction convention — the theory-vs-legacy fork.** The map is
   `R = Qₓ R* Q_mᵀ` (source basis in, **reference** basis out), applied as
   `data @ Qₓ @ R* @ Q_mᵀ`. The legacy `EfficientProMises` lifts back with the

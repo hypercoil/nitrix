@@ -102,6 +102,7 @@ from ._force import (
 )
 from ._functional import (
     AlignmentMethod,
+    CoordinateKernelPrior,
     DenseAlignment,
     EfficientProMises,
     FunctionalAlignment,
@@ -199,4 +200,5 @@ __all__ = [
     'AlignmentMethod',
     'ProMises',
     'EfficientProMises',
+    'CoordinateKernelPrior',
 ]
