@@ -145,16 +145,33 @@ Two gradient-boundary fixes were load-bearing: the `|z|→z` double-`where` and 
 **additive-`eps`** series floor (a clamping/denormal floor zeroes or underflows
 `g(0)=1/p`, which then misroutes every girdle root-find). 18 tests + op-matrix.
 
+**Kent (FB5) SHIPPED (2026-07-06)** — the S² *elliptical* vMF, density `∝
+exp(κ γ₁ᵀx + β[(γ₂ᵀx)² − (γ₃ᵀx)²])`: `log_kent_normaliser` (the half-integer-
+Bessel series `c(κ,β)=2π Σ_j (Γ(j+½)/j!) β^{2j} (2/κ)^{2j+½} I_{2j+½}(κ)`,
+**reusing `log_iv`**; validated **< 7e-15 vs mpmath** and reducing to `1/C_3(κ)`
+at β=0), `kent_log_prob` (surface-measure density), and `kent_fit` / `KentFit`
+(Kent-1982 moment estimator — resultant mean + tangent-plane axis
+diagonalisation; frame + κ recovered accurately, β carries the estimator's known
+finite-κ downward bias, documented with an MLE-refinement note). 23 tests.
+
+**Unnormalised energy SHIPPED (2026-07-06)** — `vmf_log_prob` /
+`watson_log_prob` / `kent_log_prob` take **`normalize=False`**, returning the
+bare exponent (natural-parameter · sufficient-statistic) with the normaliser
+*dropped and never computed*. The tractable-in-high-d, per-site Gibbs/Markov-
+random-field **clique potential** (the parcellation setting), score-kernel-clean
+— field-energy composition/scalarisation stays downstream (SPEC §5). For Bingham
+this will be the *only* tractable path (its matrix normaliser is intractable).
+
 Still to build (sequenced by tractability + reuse):
 
 1. **`watson_sample`** — the guaranteed-acceptance axial rejection sampler (the
    remaining half of the vMF-parity triad; the efficient envelope across `κ` is
    the non-trivial part). Deliberately deferred over shipping an unvalidated one.
-2. **Kent (FB5)** — the S² *elliptical* vMF; normaliser is a series in
-   half-integer Bessel functions (**reuses `log_iv`**), moment-estimator fit.
-3. **Bingham** — the general axial law; normaliser is the confluent
+   *(Kent sampler likewise.)*
+2. **Bingham** — the general axial law; normaliser is the confluent
    hypergeometric of *matrix* argument (a saddlepoint approximation, Kume–Wood) —
-   a genuine sub-project.
+   a genuine sub-project. Its **energy** (`xᵀAx`) is already the tractable path
+   via the `normalize=False` pattern once the frame/`A` surface lands.
 
 Plus the coordinate-kernel spatial-prior construction (independent).
 
