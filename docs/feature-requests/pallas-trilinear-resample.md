@@ -12,7 +12,7 @@
 > `IMPLEMENTATION_PLAN.md §10.3` (2026-06-07).
 
 `geometry.spatial_transform` / `integrate_velocity_field` resample via
-`map_coordinates(order=1)`. (See also [`cubic-resample.md`](cubic-resample.md)
+`map_coordinates(order=1)`. (See also [`cubic-resample.md`](resolved/cubic-resample.md)
 — cubic order-3 resampling is a separate, parity-driven gap.)
 
 **Trigger.** Both of: (a) the baseline shows resampling is a real bottleneck
@@ -44,7 +44,7 @@ CPU, parity-equal to a ULP.
 
 - [`internal-backlog.md`](internal-backlog.md) — the engineering-backlog
   ledger.
-- [`cubic-resample.md`](cubic-resample.md) — the separate order-3 parity gap.
+- [`cubic-resample.md`](resolved/cubic-resample.md) — the separate order-3 parity gap.
 - `src/nitrix/geometry/_interpolate.py` (`_separable_gather`,
   `_gather_sample` — the shipped interim win); `src/nitrix/geometry/grid.py`;
   `bench/G0_ELL_REPORT.md`.

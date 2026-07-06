@@ -287,7 +287,7 @@ several *are* the same refactor as a feature above:
    rather than bespoke iteration. The eigsolve design doc names **aCompCor as
    the second consumer that promotes `eigsolve_top_k` to public** — a
    nuisance-Gram component extractor in this suite *is* that consumer, closing
-   that deferred promotion. See [`pca-svd`](pca-svd.md).
+   that deferred promotion. See [`pca-svd`](resolved/pca-svd.md).
 6. **covariance.py audit.** Confirm the matrix-weight bias correction and
    complex-Hermitian paths against the documented tests, and that
    `conditionalcov` / `precision` route through `residualise` consistently —
@@ -373,12 +373,12 @@ brain-scale-`V` GPU certification, plus backend-parity where kernels exist
 
 - Drivers: [`lme-family-tiny-linalg-gpu-block-and-perf`](lme-family-tiny-linalg-gpu-block-and-perf.md),
   [`gpu-cusolver-first-call-handle-failure`](gpu-cusolver-first-call-handle-failure.md),
-  [`pca-svd`](pca-svd.md).
+  [`pca-svd`](resolved/pca-svd.md).
 - Related substrate already filed: [`graphical-lasso`](graphical-lasso.md)
   (§12.14), [`robust-statistics`](robust-statistics.md) (§12.7),
   [`ledoit-wolf-shrinkage`](ledoit-wolf-shrinkage.md),
-  [`gaussian-kl-nll`](gaussian-kl-nll.md),
-  [`contrastive-ssl-losses`](contrastive-ssl-losses.md).
+  [`gaussian-kl-nll`](resolved/gaussian-kl-nll.md),
+  [`contrastive-ssl-losses`](resolved/contrastive-ssl-losses.md).
 - Design docs: [`../design/lme.md`](../design/lme.md),
   [`../design/stats.md`](../design/stats.md),
   [`../design/eigsolve-dispatcher.md`](../design/eigsolve-dispatcher.md)

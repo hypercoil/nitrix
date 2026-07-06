@@ -25,6 +25,20 @@ Status is verified against the live `src/nitrix` surface as of 2026-06-02
 `CubicBSpline` (scipy `order=3` bit-exact) added 2026-06-08; see
 `IMPLEMENTATION_PLAN.md §10.3`).
 
+### Active vs. resolved
+
+Fully **shipped / resolved** atomic FRs are archived under
+[`resolved/`](resolved/) to keep the active backlog scannable — the doc is kept
+as a provenance record, out of the working view. The family sections below still
+list them (annotated *✅ SHIPPED / RESOLVED*, linking into `resolved/`) so each
+section reads as a complete ledger and the duplicate-issue guard stays intact; a
+single flat archive index is at the [bottom](#resolved-archived). What remains
+**un-archived in this directory is genuinely open work**: the suite-scoping
+ledgers/registers, the trigger-gated internal backlog, the `§12` brainstorm
+candidates, and the actionable per-suite items. (Post-release this whole scheme
+is expected to migrate to GitHub issues; the `resolved/` split is an
+internal-dev convenience until then.)
+
 ## Consumer-pipeline substrate (ilex → thrux)
 
 Context, scope boundary, and already-shipped record:
@@ -32,16 +46,16 @@ Context, scope boundary, and already-shipped record:
 
 | Doc | Severity | Home |
 |---|---|---|
-| [connected-components](connected-components.md) | ENABLING (highest recurrence) | `morphology` |
-| [pad-to-multiple](pad-to-multiple.md) | ENABLING | `numerics` |
-| [crop-to-nonzero](crop-to-nonzero.md) | ENABLING | `numerics` |
-| [cubic-resample](cubic-resample.md) | MISMATCH (parity) — ✅ **resolved**: `CubicBSpline` (scipy `order=3` bit-exact) (2026-06-08) | `geometry._interpolate` |
-| [intensity-normalize-variants](intensity-normalize-variants.md) | CONVENIENCE | `numerics.normalize` |
-| [sliding-window-weighting](sliding-window-weighting.md) | CONVENIENCE | `numerics` |
-| [point-sample](point-sample.md) | CONVENIENCE — **partial**: capability via `spatial_transform(method=Linear(), mode='constant')`; flat-point-list wrapper unshipped (2026-06-07) | `geometry.grid` |
-| [compute-vertex-normals](compute-vertex-normals.md) | CONVENIENCE | `sparse.mesh` |
-| [upsample-nearest-nd](upsample-nearest-nd.md) | CONVENIENCE — ✅ **addressed**: `resample(method=NearestNeighbour())` (2026-06-07) | `geometry` |
-| [spatial-transform-batched](spatial-transform-batched.md) | CONVENIENCE | `geometry.grid` |
+| [connected-components](resolved/connected-components.md) | ENABLING (highest recurrence) | `morphology` |
+| [pad-to-multiple](resolved/pad-to-multiple.md) | ENABLING | `numerics` |
+| [crop-to-nonzero](resolved/crop-to-nonzero.md) | ENABLING | `numerics` |
+| [cubic-resample](resolved/cubic-resample.md) | MISMATCH (parity) — ✅ **resolved**: `CubicBSpline` (scipy `order=3` bit-exact) (2026-06-08) | `geometry._interpolate` |
+| [intensity-normalize-variants](resolved/intensity-normalize-variants.md) | CONVENIENCE | `numerics.normalize` |
+| [sliding-window-weighting](resolved/sliding-window-weighting.md) | CONVENIENCE | `numerics` |
+| [point-sample](resolved/point-sample.md) | CONVENIENCE — **partial**: capability via `spatial_transform(method=Linear(), mode='constant')`; flat-point-list wrapper unshipped (2026-06-07) | `geometry.grid` |
+| [compute-vertex-normals](resolved/compute-vertex-normals.md) | CONVENIENCE | `sparse.mesh` |
+| [upsample-nearest-nd](resolved/upsample-nearest-nd.md) | CONVENIENCE — ✅ **addressed**: `resample(method=NearestNeighbour())` (2026-06-07) | `geometry` |
+| [spatial-transform-batched](resolved/spatial-transform-batched.md) | CONVENIENCE | `geometry.grid` |
 
 ## Consumer training-substrate (ilex → nitrix)
 
@@ -53,24 +67,24 @@ the nimox modules + newest models (`krakencoder`, `cortex_ode`, `surfnet`).
 
 | Doc | Severity | Home |
 |---|---|---|
-| [lab2im-gmm-synthesis](lab2im-gmm-synthesis.md) | ENABLING | `augment` |
-| [generative-bias-field](generative-bias-field.md) (simulated INU) | ENABLING | `augment` / `bias` |
-| [intensity-augmentation-ops](intensity-augmentation-ops.md) | CONVENIENCE | `augment.intensity` |
-| [gibbs-ringing](gibbs-ringing.md) | CONVENIENCE | `augment.intensity` |
-| [geometric-augmentation-ops](geometric-augmentation-ops.md) | CONVENIENCE | `augment.geometric` |
-| [dice-loss](dice-loss.md) | ENABLING | `metrics.dice` |
-| [cross-entropy-focal](cross-entropy-focal.md) | CONVENIENCE (dedup ×3) | `metrics` |
-| [contrastive-ssl-losses](contrastive-ssl-losses.md) | CONVENIENCE | `metrics` / `stats` |
-| [field-regularisers](field-regularisers.md) | ENABLING | `register.regulariser` |
-| [gaussian-kl-nll](gaussian-kl-nll.md) | CONVENIENCE | `stats` |
-| [affine-matrix-algebra](affine-matrix-algebra.md) | ENABLING | `geometry.transform` |
-| [pca-svd](pca-svd.md) | CONVENIENCE | `stats.pca` |
+| [lab2im-gmm-synthesis](resolved/lab2im-gmm-synthesis.md) | ENABLING | `augment` |
+| [generative-bias-field](resolved/generative-bias-field.md) (simulated INU) | ENABLING | `augment` / `bias` |
+| [intensity-augmentation-ops](resolved/intensity-augmentation-ops.md) | CONVENIENCE | `augment.intensity` |
+| [gibbs-ringing](resolved/gibbs-ringing.md) | CONVENIENCE | `augment.intensity` |
+| [geometric-augmentation-ops](resolved/geometric-augmentation-ops.md) | CONVENIENCE | `augment.geometric` |
+| [dice-loss](resolved/dice-loss.md) | ENABLING | `metrics.dice` |
+| [cross-entropy-focal](resolved/cross-entropy-focal.md) | CONVENIENCE (dedup ×3) | `metrics` |
+| [contrastive-ssl-losses](resolved/contrastive-ssl-losses.md) | CONVENIENCE | `metrics` / `stats` |
+| [field-regularisers](resolved/field-regularisers.md) | ENABLING | `register.regulariser` |
+| [gaussian-kl-nll](resolved/gaussian-kl-nll.md) | CONVENIENCE | `stats` |
+| [affine-matrix-algebra](resolved/affine-matrix-algebra.md) | ENABLING | `geometry.transform` |
+| [pca-svd](resolved/pca-svd.md) | CONVENIENCE | `stats.pca` |
 | [lp-normalize](lp-normalize.md) | CONVENIENCE | `numerics.normalize` |
-| [mesh-laplacian-smoothing](mesh-laplacian-smoothing.md) | CONVENIENCE | `geometry.mesh` |
+| [mesh-laplacian-smoothing](resolved/mesh-laplacian-smoothing.md) | CONVENIENCE | `geometry.mesh` |
 
 Expansions to existing docs (new drivers / scope from this audit):
-[compute-vertex-normals](compute-vertex-normals.md) (+`cortex_ode`/`surfnet`),
-[point-sample](point-sample.md) (arbitrary-point `grid_sample`; 3 dups; task
+[compute-vertex-normals](resolved/compute-vertex-normals.md) (+`cortex_ode`/`surfnet`),
+[point-sample](resolved/point-sample.md) (arbitrary-point `grid_sample`; 3 dups; task
 #138), [ode-integrators](ode-integrators.md) (per-vertex NODE; diffrax can't
 follow into nitrix).
 
@@ -94,12 +108,12 @@ memory, the perf suite (`bench/`) owns wall-clock parity at scale.
 | P0 | [attention-kernels](attention-kernels.md) (flash + windowed-bias + causal + cross) | ENABLING | `nitrix.nn.attention` |
 | P1 | [selective-scan](selective-scan.md) (Mamba/S6 fused scan) | ENABLING | `nitrix.nn.ssm` |
 | P3 | [attention-no-upcast-knob](attention-no-upcast-knob.md) (caller-controlled SDPA accumulation precision; nimox `diffusion_unet._Attention` consumer) | CONVENIENCE | `nitrix.nn.attention` |
-| P2 | [affine-matrix-algebra](affine-matrix-algebra.md) / [spherical-parameterisation](spherical-parameterisation.md) / [field-regularisers](field-regularisers.md) *(existing — nimox-extraction blockers)* | ENABLING | `geometry` / `register` |
+| P2 | [affine-matrix-algebra](resolved/affine-matrix-algebra.md) / [spherical-parameterisation](spherical-parameterisation.md) / [field-regularisers](resolved/field-regularisers.md) *(existing — nimox-extraction blockers)* | ENABLING | `geometry` / `register` |
 | P3 | [fused-norm-kernels](fused-norm-kernels.md) (fused LN/GN/IN, perf-only) | CONVENIENCE | `nitrix.nn.norm` |
-| P3 | [nimox-mesh-loss-geometry](nimox-mesh-loss-geometry.md) (face normals / edge-face topology / seg-seg distance / chamfer NN — nimox mesh-loss consolidation; confirm equivalents to delegate, pairs with [mesh-spatial-acceleration](mesh-spatial-acceleration.md)) — ✅ **SHIPPED** (2026-06-25): delegation map confirmed; `sparse.face_normals` / `sparse.edge_face_adjacency` / `geometry.segment_segment_sq_dist` / `geometry.point_set_nearest_sq_dist` | CONVENIENCE (consolidation) | `geometry` / `sparse` |
-| P3 | [nimox-differentiable-registration-layer](nimox-differentiable-registration-layer.md) (public implicit-diff registration returning a self-contained matrix — owns the centring conjugation nimox `AffineRegister(gradient='implicit')` hand-rolls; optional general-metric `implicit_minimize` path) — ✅ **SHIPPED** (2026-06-25): `register.register_implicit` (single-level) + `rigid_register_implicit` / `affine_register_implicit` (coarse-to-fine); forward driver hoisted behind a `LevelSolver` seam (byte-identical); SSD→`implicit_least_squares`, else→`implicit_minimize` | ENABLING (differentiable layer) | `register` / `linalg` |
-| P3 | [nimox-histogram-match-fit-apply](nimox-histogram-match-fit-apply.md) (split `bias.histogram_match` into `fit(reference)->landmarks` / `apply(source, landmarks)` so nimox `HistogramMatch` carries ~9 floats not a reference volume) — ✅ **SHIPPED** (2026-06-25): `bias.histogram_match_fit` / `histogram_match_apply`; convenience is byte-faithful composition (§6.5) | CONVENIENCE (refinement) | `bias` |
-| P3 | [nimox-stats-response-predict](nimox-stats-response-predict.md) (public `beta_predict` / `ordinal_predict` / `gaulss_predict` / `gam_predict` mirroring `stats.predict`, so nimox.estimators wraps the response regressions as fit/transform) — ✅ **SHIPPED** (2026-06-25): the four `*_predict`; `OrdinalResult.link` / `GAMResult.intercept` added as static aux (fit jaxpr byte-identical, zero fit-path cost) | CONVENIENCE (apply surface) | `stats.{betareg,ordinal,gaulss,gam}` |
+| P3 | [nimox-mesh-loss-geometry](resolved/nimox-mesh-loss-geometry.md) (face normals / edge-face topology / seg-seg distance / chamfer NN — nimox mesh-loss consolidation; confirm equivalents to delegate, pairs with [mesh-spatial-acceleration](mesh-spatial-acceleration.md)) — ✅ **SHIPPED** (2026-06-25): delegation map confirmed; `sparse.face_normals` / `sparse.edge_face_adjacency` / `geometry.segment_segment_sq_dist` / `geometry.point_set_nearest_sq_dist` | CONVENIENCE (consolidation) | `geometry` / `sparse` |
+| P3 | [nimox-differentiable-registration-layer](resolved/nimox-differentiable-registration-layer.md) (public implicit-diff registration returning a self-contained matrix — owns the centring conjugation nimox `AffineRegister(gradient='implicit')` hand-rolls; optional general-metric `implicit_minimize` path) — ✅ **SHIPPED** (2026-06-25): `register.register_implicit` (single-level) + `rigid_register_implicit` / `affine_register_implicit` (coarse-to-fine); forward driver hoisted behind a `LevelSolver` seam (byte-identical); SSD→`implicit_least_squares`, else→`implicit_minimize` | ENABLING (differentiable layer) | `register` / `linalg` |
+| P3 | [nimox-histogram-match-fit-apply](resolved/nimox-histogram-match-fit-apply.md) (split `bias.histogram_match` into `fit(reference)->landmarks` / `apply(source, landmarks)` so nimox `HistogramMatch` carries ~9 floats not a reference volume) — ✅ **SHIPPED** (2026-06-25): `bias.histogram_match_fit` / `histogram_match_apply`; convenience is byte-faithful composition (§6.5) | CONVENIENCE (refinement) | `bias` |
+| P3 | [nimox-stats-response-predict](resolved/nimox-stats-response-predict.md) (public `beta_predict` / `ordinal_predict` / `gaulss_predict` / `gam_predict` mirroring `stats.predict`, so nimox.estimators wraps the response regressions as fit/transform) — ✅ **SHIPPED** (2026-06-25): the four `*_predict`; `OrdinalResult.link` / `GAMResult.intercept` added as static aux (fit jaxpr byte-identical, zero fit-path cost) | CONVENIENCE (apply surface) | `stats.{betareg,ordinal,gaulss,gam}` |
 | P3 | [nimox-stats-mixed-effects-predict](nimox-stats-mixed-effects-predict.md) (public BLUP `lme_predict` / `glmm_predict` — group-aware population/conditional prediction + a uniform cross-tier ranef accessor) — ✅ **SHIPPED (R1/R2/GLMM)** (2026-06-25): `lme_predict` / `ranef` / `glmm_predict`; population all tiers; conditional via opt-in `lme_fit(retain_blups=)` post-pass (default byte-identical, zero-cost). R4/R2+corr/R3 conditional staged (raise; population works) | ENABLING (apply surface) | `stats.{lme,glmm}` |
 | P3 | [nimox-gp-fit-traceable-rho-search](nimox-gp-fit-traceable-rho-search.md) (make `gp_fit`'s REML lengthscale-search epilogue traceable — JAX-native `_parabolic_argmin` + traced `rho_hat`, dropping the host `np.asarray(nll_grid)` / `float()` at `gp.py:932-935`, so `gp_fit` `jit`/`vmap`s with `x` closed-over) — ✅ **SHIPPED (Tier-A)** (2026-06-25): `_parabolic_argmin_jax` + traced `rho_hat` + `jnp.log` in the result assembly; Gaussian HSGP `gp_fit` jit/vmaps (vmap==loop-of-eager); 53 GP tests green (fp-parity). **Follow-on OPEN (2026-06-25):** `hgp_fit` (the hierarchical GS model — nimox `HierarchicalGPRegressor` E8 consumer) has the **identical** Gaussian-HSGP rho-search, still eager-only (`hgp.py:71,515-518` reuse the old host `_parabolic_argmin`); the fix reuses the already-shipped `_parabolic_argmin_jax` (smaller than the original). Tier-B (traced-`x`) + non-Gaussian/exact paths deferred | ENABLING (jit/vmap the fit) | `stats.gp` |
 
@@ -180,22 +194,22 @@ and specs the **genuinely-new gaps** from a six-lens audit (2026-06-22, 42→40
 verified findings). **Numerics-only; image/file I/O → `thrux`.**
 
 Atomised registration FRs (add to these, don't duplicate): metric-ADT /
-transform-model ([`registration-typing-metric-adt`](registration-typing-metric-adt.md)),
+transform-model ([`registration-typing-metric-adt`](resolved/registration-typing-metric-adt.md)),
 matrix per-iter perf levers ([`registration-matrix-recipe-perf-levers`](registration-matrix-recipe-perf-levers.md)),
-cold compile ([`registration-recipe-cold-compile`](registration-recipe-cold-compile.md)),
+cold compile ([`registration-recipe-cold-compile`](resolved/registration-recipe-cold-compile.md)),
 transparent differentiability ([`registration-recipe-transparent-differentiability`](registration-recipe-transparent-differentiability.md)),
-early-stop while-loop ([`registration-early-stopping-while-loop`](registration-early-stopping-while-loop.md)),
+early-stop while-loop ([`registration-early-stopping-while-loop`](resolved/registration-early-stopping-while-loop.md)),
 v3 follow-ups ([`registration-suite-v3-followups`](registration-suite-v3-followups.md)),
-affine small-grid ([`register-affine-small-grid-divergence`](register-affine-small-grid-divergence.md)),
-demons 0/0 ([`register-demons-force-divide-by-zero`](register-demons-force-divide-by-zero.md)),
-metric conventions ([`metrics-convention-vs-domain-tools`](metrics-convention-vs-domain-tools.md)),
+affine small-grid ([`register-affine-small-grid-divergence`](resolved/register-affine-small-grid-divergence.md)),
+demons 0/0 ([`register-demons-force-divide-by-zero`](resolved/register-demons-force-divide-by-zero.md)),
+metric conventions ([`metrics-convention-vs-domain-tools`](resolved/metrics-convention-vs-domain-tools.md)),
 Pallas ESM force ([`pallas-demons-esm-force`](pallas-demons-esm-force.md)),
 Mosaic GPU kernels ([`mosaic-hopper-registration-kernels`](mosaic-hopper-registration-kernels.md)),
-field regularisers ([`field-regularisers`](field-regularisers.md)),
-**functional alignment / ProMises** ([`register-functional-alignment`](register-functional-alignment.md);
+field regularisers ([`field-regularisers`](resolved/field-regularisers.md)),
+**functional alignment / ProMises** ([`register-functional-alignment`](resolved/register-functional-alignment.md);
 new capability — alignment in representation space; from the
 [`hypercoil-examples` migration](hypercoil-examples-migration.md); its solver is
-the linalg dependency [`linalg-orthogonal-procrustes`](linalg-orthogonal-procrustes.md)).
+the linalg dependency [`linalg-orthogonal-procrustes`](resolved/linalg-orthogonal-procrustes.md)).
 
 ## Dynamical-systems / DE suite (`nitrix.numerics`)
 
@@ -214,7 +228,7 @@ DS item is gated on a named blocked consumer (SPEC §9).
 
 Atomised DE FRs (add to these, don't duplicate): ODE family + adaptive/adjoint
 roadmap ([`ode-integrators`](ode-integrators.md), the seed), fixed-point /
-implicit combinators ([`fixed-point-combinators`](fixed-point-combinators.md)),
+implicit combinators ([`fixed-point-combinators`](resolved/fixed-point-combinators.md)),
 Krylov solvers ([`krylov-solvers`](krylov-solvers.md), the non-symmetric resolvent
 for spectral DCM), matrix functions ([`matrix-functions`](matrix-functions.md)),
 heat-kernel diffusion ([`heat-kernel-diffusion`](heat-kernel-diffusion.md), linear
@@ -235,9 +249,9 @@ Ledger (framing, closed-by-design, resolved):
 | B7 | [pallas-trilinear-resample](pallas-trilinear-resample.md) | Pallas kernel (interim JAX gather **shipped** 2026-06-07; kernel parked) |
 | B10 | [retune-pallas-log-matmul](retune-pallas-log-matmul.md) | kernel tuning (M) |
 | B11 | [perfbench-migration](perfbench-migration.md) | tooling migration (in progress) |
-| B12 | [iir-filter-gpu-backend](iir-filter-gpu-backend.md) | perf / API-default (IIR GPU backend, S+M) |
+| B12 | [iir-filter-gpu-backend](resolved/iir-filter-gpu-backend.md) | perf / API-default (IIR GPU backend, S+M) |
 | B13 | [boundary-mode-parity](boundary-mode-parity.md) | API refinement (scipy/ITK boundary parity, M) |
-| B14 | [spectral-embedding-gpu-solver](spectral-embedding-gpu-solver.md) | perf + robustness (lobpcg/eigh GPU solver, M) |
+| B14 | [spectral-embedding-gpu-solver](resolved/spectral-embedding-gpu-solver.md) | perf + robustness (lobpcg/eigh GPU solver, M) |
 | B15 | [interpolation-backend-cpu-gpu-gap](interpolation-backend-cpu-gpu-gap.md) | perf characterisation (map_coordinates CPU/GPU) |
 | B16 | [alternative-interp-backends-xla](alternative-interp-backends-xla.md) | research note (scipy/cupy interp backends in XLA) |
 | B17 | [median-percentile-cpu-sort-cliff](median-percentile-cpu-sort-cliff.md) | perf characterisation (jnp.median/percentile CPU sort) |
@@ -246,18 +260,21 @@ Ledger (framing, closed-by-design, resolved):
 ## Doc-drift / correctness fixes
 
 Ledger: [`perf-bench-feedback.md`](perf-bench-feedback.md). These are
-mechanical docstring fixes, not primitive proposals.
+mechanical docstring fixes, not primitive proposals. All below are ✅ resolved
+and archived under [`resolved/`](resolved/).
 
 | Doc | Site |
 |---|---|
-| [doc-lomb-scargle-normalisation](doc-lomb-scargle-normalisation.md) | `signal/lomb_scargle.py:154` |
-| [doc-lomb-scargle-eigh-factorisation](doc-lomb-scargle-eigh-factorisation.md) | `signal/lomb_scargle.py:43–49` |
-| [doc-lomb-scargle-cpu-eigh-caveat](doc-lomb-scargle-cpu-eigh-caveat.md) | `linalg/_solver.py:147` |
-| [doc-tsconv-cross-correlation](doc-tsconv-cross-correlation.md) | `signal/tsconv.py:45` |
-| [doc-lomb-scargle-interpolate-intended-use](doc-lomb-scargle-interpolate-intended-use.md) | `signal/lomb_scargle.py:~264–359` |
-| [doc-op-matrix-inventory-gaps](doc-op-matrix-inventory-gaps.md) | `docs/op_matrix.json` (`ops`) |
-| [doc-gaussian-kernel-gamma](doc-gaussian-kernel-gamma.md) | `linalg/kernel.py:37` |
-| [doc-relaxed-modularity-newman-factor](doc-relaxed-modularity-newman-factor.md) | `graph/community.py:245` |
+| [doc-lomb-scargle-normalisation](resolved/doc-lomb-scargle-normalisation.md) | `signal/lomb_scargle.py:154` |
+| [doc-lomb-scargle-eigh-factorisation](resolved/doc-lomb-scargle-eigh-factorisation.md) | `signal/lomb_scargle.py:43–49` |
+| [doc-lomb-scargle-cpu-eigh-caveat](resolved/doc-lomb-scargle-cpu-eigh-caveat.md) | `linalg/_solver.py:147` |
+| [doc-tsconv-cross-correlation](resolved/doc-tsconv-cross-correlation.md) | `signal/tsconv.py:45` |
+| [doc-lomb-scargle-interpolate-intended-use](resolved/doc-lomb-scargle-interpolate-intended-use.md) | `signal/lomb_scargle.py:~264–359` |
+| [doc-op-matrix-inventory-gaps](resolved/doc-op-matrix-inventory-gaps.md) | `docs/op_matrix.json` (`ops`) |
+| [doc-gaussian-kernel-gamma](resolved/doc-gaussian-kernel-gamma.md) | `linalg/kernel.py:38` |
+| [doc-relaxed-modularity-newman-factor](resolved/doc-relaxed-modularity-newman-factor.md) | `graph/community.py:316,445,622` (landed as a behaviour fix) |
+| [doc-iir-backend-default](resolved/doc-iir-backend-default.md) | `signal/_iir.py` (module docstring) |
+| [doc-instantaneous-frequency-narrowband-caveat](resolved/doc-instantaneous-frequency-narrowband-caveat.md) | `signal/fourier.py` (`instantaneous_phase` / `_frequency`) |
 
 ## docs/feature-requests catalogue §12 brainstorm catalogue (candidate primitives)
 
@@ -274,7 +291,7 @@ live code: *not started* / *partial* (some substrate shipped).
 | 12.5 | [discrete-exterior-calculus](discrete-exterior-calculus.md) | `geometry.dec` | M | partial (cotangent Laplacian shipped) |
 | 12.6 | [mesh-curvature](mesh-curvature.md) | `geometry.curvature` | S | not started |
 | 12.7 | [robust-statistics](robust-statistics.md) | `stats.robust` | S | not started |
-| 12.8 | [fixed-point-combinators](fixed-point-combinators.md) | `numerics.fixed_point` | M | ✅ shipped (`fixed_point_solve` — registration) |
+| 12.8 | [fixed-point-combinators](resolved/fixed-point-combinators.md) | `numerics.fixed_point` | M | ✅ shipped (`fixed_point_solve` — registration) |
 | 12.9 | [spherical-harmonic-transform](spherical-harmonic-transform.md) | `geometry.sphere.harmonics` | M | not started |
 | 12.10 | [compensated-summation](compensated-summation.md) | `numerics.precision` | S | not started |
 | 12.11 | [ode-integrators](ode-integrators.md) | `numerics.ode` | L | partial (`integrate_velocity_field` shipped) |
@@ -298,12 +315,12 @@ S) — analytic shrinkage covariance; sibling of 12.14 glasso and nilearn's
 Ledoit-Wolf; nitrix has no shrinkage estimator). **Planned in
 [stats v2](stats-modelling-suite-v2.md) §4.1** (a quick-win, consumer waiting).
 
-[linalg-orthogonal-procrustes](linalg-orthogonal-procrustes.md) (`linalg`,
+[linalg-orthogonal-procrustes](resolved/linalg-orthogonal-procrustes.md) (`linalg`,
 effort S) — **✅ shipped**: orthogonal Procrustes + `subspace_angles`
 (canonical/Grassmann angles) + `image_basis` (ranked range basis); the
 SVD-of-cross-product subspace-geometry family. Lead item `orthogonal_procrustes`
 is the solver under
-[`register-functional-alignment`](register-functional-alignment.md); from the
+[`register-functional-alignment`](resolved/register-functional-alignment.md); from the
 [`hypercoil-examples` migration](hypercoil-examples-migration.md).
 
 [clifford-geometric-algebra](clifford-geometric-algebra.md) (`algebra` /
@@ -324,3 +341,65 @@ stay downstream. Needs an explicit go-ahead + a lined-up consumer.
                 └─> 12.13 graph-wavelet
 12.16 boundary ──> 12.17 watershed
 ```
+
+## Resolved (archived)
+
+The 57 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/). Listed here as one flat index; topical context and the shipped-status annotation remain in the family sections above.
+
+- [`affine-matrix-algebra`](resolved/affine-matrix-algebra.md) — Affine matrix algebra (geometric convention) — `nitrix.geometry.affine`
+- [`augment-synthetic-connectivity`](resolved/augment-synthetic-connectivity.md) — Synthetic connectivity & time-series generators in `nitrix.augment`
+- [`catmull-rom-interpolator`](resolved/catmull-rom-interpolator.md) — CatmullRom interpolator — `nitrix.geometry._interpolate`
+- [`compute-vertex-normals`](resolved/compute-vertex-normals.md) — `compute_vertex_normals` — `nitrix.sparse.mesh`
+- [`connected-components`](resolved/connected-components.md) — Connected-components / largest-component labelling — `nitrix.morphology`
+- [`connectopy-symmetric-degree-normalisation`](resolved/connectopy-symmetric-degree-normalisation.md) — Connectopy normalises by the wrong degree on asymmetric graphs (symmetrises the Laplacian, no…
+- [`contrastive-ssl-losses`](resolved/contrastive-ssl-losses.md) — Contrastive / self-supervised losses — `nitrix.metrics` / `nitrix.stats`
+- [`crop-to-nonzero`](resolved/crop-to-nonzero.md) — `crop_to_nonzero` / bounding-box crop — `nitrix.numerics`
+- [`cross-entropy-focal`](resolved/cross-entropy-focal.md) — Cross-entropy family + focal loss — `nitrix.metrics`
+- [`cubic-resample`](resolved/cubic-resample.md) — Cubic (order-3) resample — `nitrix.geometry`
+- [`dice-loss`](resolved/dice-loss.md) — Soft / binary Dice — `nitrix.metrics.dice`
+- [`distance-transform-anisotropic-sampling`](resolved/distance-transform-anisotropic-sampling.md) — B20. `distance_transform` euclidean has no `sampling=` (anisotropic spacing)
+- [`doc-gaussian-kernel-gamma`](resolved/doc-gaussian-kernel-gamma.md) — Doc-fix: `gaussian_kernel` sigma->gamma relation is wrong (½ factor)
+- [`doc-iir-backend-default`](resolved/doc-iir-backend-default.md) — doc-drift: `_iir.py` module docstring says `backend='scan' (default)`
+- [`doc-instantaneous-frequency-narrowband-caveat`](resolved/doc-instantaneous-frequency-narrowband-caveat.md) — FR (doc): instantaneous_phase / instantaneous_frequency — narrowband caveat
+- [`doc-lomb-scargle-cpu-eigh-caveat`](resolved/doc-lomb-scargle-cpu-eigh-caveat.md) — Doc-fix: `lomb_scargle_interpolate` silently runs its eigh on CPU on cuSolver-broken stacks
+- [`doc-lomb-scargle-eigh-factorisation`](resolved/doc-lomb-scargle-eigh-factorisation.md) — Doc-fix: lomb-scargle module docstring says "Cholesky"; code uses `eigh` + pseudo-inverse
+- [`doc-lomb-scargle-interpolate-intended-use`](resolved/doc-lomb-scargle-interpolate-intended-use.md) — Doc-fix: `lomb_scargle_interpolate` — document the *intended use* (spectral bridge, not durab…
+- [`doc-lomb-scargle-normalisation`](resolved/doc-lomb-scargle-normalisation.md) — Doc-fix: `lomb_scargle_periodogram` normalisation docstring is wrong
+- [`doc-op-matrix-inventory-gaps`](resolved/doc-op-matrix-inventory-gaps.md) — Doc-fix: public ops missing from the op_matrix inventory
+- [`doc-relaxed-modularity-newman-factor`](resolved/doc-relaxed-modularity-newman-factor.md) — Doc-fix: `relaxed_modularity` does not reduce to Newman modularity (½ factor)
+- [`doc-tsconv-cross-correlation`](resolved/doc-tsconv-cross-correlation.md) — Doc-fix: `tsconv` is documented as "convolution" but implements cross-correlation
+- [`field-regularisers`](resolved/field-regularisers.md) — Displacement-field regularisers — `nitrix.register.regulariser`
+- [`fixed-point-combinators`](resolved/fixed-point-combinators.md) — Fixed-point combinators — `nitrix.numerics.fixed_point`
+- [`gaussian-kl-nll`](resolved/gaussian-kl-nll.md) — Diagonal-Gaussian KL / NLL — `nitrix.stats`
+- [`generative-bias-field`](resolved/generative-bias-field.md) — Generative bias field — simulated INU — `nitrix.augment`
+- [`geometric-augmentation-ops`](resolved/geometric-augmentation-ops.md) — Geometric-augmentation ops — `nitrix.augment.geometric`
+- [`gibbs-ringing`](resolved/gibbs-ringing.md) — Gibbs (truncation) ringing artefact — `nitrix.augment.intensity`
+- [`glmm-fit-jit-incompatible-static-group-count`](resolved/glmm-fit-jit-incompatible-static-group-count.md) — `glmm_fit` is not `jax.jit`-traceable — data-dependent `int(jnp.max(group))` — `nitrix.stats.…
+- [`glmm-random-slope-robust-solver`](resolved/glmm-random-slope-robust-solver.md) — GLMM random-slope robust solver — joint-Schur PQL + REML-EM — `nitrix.stats.glmm`
+- [`iir-filter-gpu-backend`](resolved/iir-filter-gpu-backend.md) — B12. IIR `sosfilt`/`sosfiltfilt` GPU backend — default + missing associative path
+- [`intensity-augmentation-ops`](resolved/intensity-augmentation-ops.md) — Intensity-augmentation ops — `nitrix.augment.intensity`
+- [`intensity-normalize-variants`](resolved/intensity-normalize-variants.md) — Intensity-normalize variants — `nitrix.numerics.normalize`
+- [`lab2im-gmm-synthesis`](resolved/lab2im-gmm-synthesis.md) — GMM label→image synthesis (lab2im) — `nitrix.augment`
+- [`linalg-orthogonal-procrustes`](resolved/linalg-orthogonal-procrustes.md) — Subspace geometry & orthogonal alignment in `nitrix.linalg`
+- [`mesh-laplacian-smoothing`](resolved/mesh-laplacian-smoothing.md) — Uniform 1-ring mesh Laplacian smoothing — `nitrix.sparse.mesh`
+- [`metrics-convention-vs-domain-tools`](resolved/metrics-convention-vs-domain-tools.md) — Convention check: `nitrix.metrics` similarity metrics vs domain-standard ITK/ANTs
+- [`morphology-reduce-window-jitgrad`](resolved/morphology-reduce-window-jitgrad.md) — B19. `erode`/`dilate` flat-SE fast path breaks `jit(grad(...))`
+- [`nimox-differentiable-registration-layer`](resolved/nimox-differentiable-registration-layer.md) — A public differentiable-registration layer (implicit-diff, self-contained matrix)
+- [`nimox-histogram-match-fit-apply`](resolved/nimox-histogram-match-fit-apply.md) — Two-phase `histogram_match` (fit reference landmarks once, apply to many)
+- [`nimox-mesh-loss-geometry`](resolved/nimox-mesh-loss-geometry.md) — nimox mesh-loss geometry → `nitrix.geometry` (consolidation handoff)
+- [`nimox-stats-response-predict`](resolved/nimox-stats-response-predict.md) — Public `*_predict` for the response-regression fitters (Beta / Ordinal / GauLSS / GAM)
+- [`pad-to-multiple`](resolved/pad-to-multiple.md) — `pad_to_multiple` / `crop_to_multiple` (+ unpad) — `nitrix.numerics`
+- [`pca-svd`](resolved/pca-svd.md) — PCA fit / transform / inverse (SVD) — `nitrix.stats.pca`
+- [`point-sample`](resolved/point-sample.md) — `point_sample` / `sample_volume_at_points` — `nitrix.geometry.grid`
+- [`register-affine-small-grid-divergence`](resolved/register-affine-small-grid-divergence.md) — `affine_register` multi-level GN/LM **diverges at small grids** (v3 regression)
+- [`register-demons-force-divide-by-zero`](resolved/register-demons-force-divide-by-zero.md) — Demons ESM force **0/0 → NaN** on uniform regions (real images always NaN)
+- [`register-functional-alignment`](resolved/register-functional-alignment.md) — Functional alignment (Procrustes / ProMises) in `nitrix.register`
+- [`registration-early-stopping-while-loop`](resolved/registration-early-stopping-while-loop.md) — Registration optimisers: try a `while_loop` early-exit forward (implicit backward already sup…
+- [`registration-recipe-cold-compile`](resolved/registration-recipe-cold-compile.md) — Perf: registration recipes have a pathological cold compile (the Python-unrolled optimizer loop)
+- [`registration-typing-metric-adt`](resolved/registration-typing-metric-adt.md) — Register v2: Metric ADT + TransformModel protocol + differentiable non-SSD metrics
+- [`semiring-annihilator-field`](resolved/semiring-annihilator-field.md) — B8. Store the `(*)`-annihilator explicitly on `Semiring`
+- [`sliding-window-weighting`](resolved/sliding-window-weighting.md) — Sliding-window weighting kernel + overlap-add stitch — `nitrix.numerics`
+- [`spatial-transform-batched`](resolved/spatial-transform-batched.md) — `spatial_transform_batched` — `nitrix.geometry.grid`
+- [`spectral-embedding-gpu-solver`](resolved/spectral-embedding-gpu-solver.md) — B14. Spectral-embedding solver on GPU: lobpcg lags eigsh; eigh-path wedges
+- [`stats-whitening`](resolved/stats-whitening.md) — Whitening in `nitrix.stats` — findability wrapper + implementation-strategy research
+- [`upsample-nearest-nd`](resolved/upsample-nearest-nd.md) — `upsample_nearest_nd` — `nitrix.numerics` / `geometry`

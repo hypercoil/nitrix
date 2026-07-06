@@ -36,7 +36,7 @@ What we ship:
   weighted.
 - :func:`rbf_kernel` / :func:`gaussian_kernel` --
   :math:`\exp(-\gamma \|x - y\|^2)`; the two are aliases up to the
-  :math:`\gamma = \sigma^{-2}` substitution.
+  :math:`\gamma = 1 / (2\sigma^2)` substitution.
 - :func:`polynomial_kernel` -- :math:`(\gamma\, x^{\top} y + r)^{\mathrm{order}}`.
 - :func:`sigmoid_kernel` -- :math:`\tanh(\gamma\, x^{\top} y + r)`.
 - :func:`cosine_kernel` -- linear kernel on row-normalised inputs.

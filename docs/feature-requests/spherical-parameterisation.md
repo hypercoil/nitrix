@@ -381,7 +381,7 @@ P1.1 curvature record.
 
 - **Suite docs.** [`geometry-suite.md`](geometry-suite.md) §5 GS-2 (parent),
   [`../design/geometry-suite.md`](../design/geometry-suite.md) §6 P3.2,
-  [`field-regularisers.md`](field-regularisers.md) (strain/bending energies),
+  [`field-regularisers.md`](resolved/field-regularisers.md) (strain/bending energies),
   GS-1 inflation (the upstream producer of the inflated input).
 - **Substrate.** `sparse/mesh.py` (cotangent), `linalg/krylov.py` (`cg`),
   `geometry/surface.py` (`_cotangent_apply`, `areal_distortion`,

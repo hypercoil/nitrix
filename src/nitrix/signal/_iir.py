@@ -17,11 +17,16 @@ the test suite) without importing it.  Cut-offs and order are static
 (constant-folded into the trace); the design is not differentiated.
 
 Application is the recurrence ``y[n] = b0 x[n] + b1 x[n-1] + b2 x[n-2]
-- a1 y[n-1] - a2 y[n-2]`` per biquad, with two engines:
+- a1 y[n-1] - a2 y[n-2]`` per biquad.  The ``driver`` axis selects the
+engine; ``driver='auto'`` (the default) resolves by platform to the FFT
+engine on GPU and the ``scan`` recurrence on CPU:
 
+- ``driver='fft'`` -- truncate the biquad impulse response and convolve via
+  the FFT; the GPU-default path and the headline speed-up on long series.
 - ``driver='scan'`` (the canonical variant) -- sequential ``lax.scan`` over
   time, vectorised across all channels; compiles to a single fused loop, low
-  memory.  Best for the fMRI regime (modest ``T``, many voxels).
+  memory; the CPU default.  Best for the fMRI regime (modest ``T``, many
+  voxels).
 - ``driver='associative'`` -- the biquad's linear recurrence composed via
   ``lax.associative_scan`` (the parallel-prefix pattern also used by
   ``signal.linear_interpolate``); ``O(log T)`` depth, for latency-bound

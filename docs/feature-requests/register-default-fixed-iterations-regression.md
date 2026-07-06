@@ -7,7 +7,7 @@
 > regression. File under the **Registration suite** family.
 >
 > *Note:* an earlier doc
-> ([`registration-early-stopping-while-loop.md`](registration-early-stopping-while-loop.md))
+> ([`registration-early-stopping-while-loop.md`](resolved/registration-early-stopping-while-loop.md))
 > shipped `mode='early_exit'` as an opt-in and reasoned about which recipes it
 > helps. I understand several of that doc's per-recipe conclusions (including
 > "no benefit for SyN") to have since been **refuted**, so this FR does **not**
@@ -80,8 +80,8 @@ pin `mode='early_exit'` (the fair, like-for-like path vs the early-stopping
 refs); `volreg` stays `fixed` per the measurement above.
 
 **Related.**
-[`registration-early-stopping-while-loop.md`](registration-early-stopping-while-loop.md)
+[`registration-early-stopping-while-loop.md`](resolved/registration-early-stopping-while-loop.md)
 (shipped the `early_exit` opt-in this uses — its per-recipe conclusions
 superseded);
-[`register-affine-small-grid-divergence.md`](register-affine-small-grid-divergence.md)
+[`register-affine-small-grid-divergence.md`](resolved/register-affine-small-grid-divergence.md)
 (same recipe family).

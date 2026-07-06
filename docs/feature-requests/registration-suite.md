@@ -46,7 +46,7 @@ trackable roadmap.
 **In scope — numerical primitives only**, consistent with the SPEC §6
 dependency contract (`numpy` + `jax`; no `nibabel`, no filesystem, no image
 I/O). Kept in scope and specced below: in-memory **transform algebra**
-(compose / invert / fuse — owned by [`affine-matrix-algebra`](affine-matrix-algebra.md)),
+(compose / invert / fuse — owned by [`affine-matrix-algebra`](resolved/affine-matrix-algebra.md)),
 applying a recovered transform to an **in-memory** array/label
 (`apply_transform`), masked cost, and the numerics of `WorldSpace`.
 
@@ -73,12 +73,12 @@ transforms in memory; the file layer is `thrux`'s.
   (Demons+DemonsForce, SyN+LNCCForce, ±MI multimodal) were validated as
   recovering sub-voxel in 2D + 3D with no fix needed.
 - **Substrate (shipped, see the referenced FRs):** Metric ADT + TransformModel
-  ([`registration-typing-metric-adt`](registration-typing-metric-adt.md)),
-  rolled-loop cold compile ([`registration-recipe-cold-compile`](registration-recipe-cold-compile.md)),
-  single-pair IC early-exit ([`registration-early-stopping-while-loop`](registration-early-stopping-while-loop.md)),
-  affine small-grid trust region ([`register-affine-small-grid-divergence`](register-affine-small-grid-divergence.md)),
-  Demons ESM 0/0 guard ([`register-demons-force-divide-by-zero`](register-demons-force-divide-by-zero.md)),
-  metric-convention verification ([`metrics-convention-vs-domain-tools`](metrics-convention-vs-domain-tools.md)).
+  ([`registration-typing-metric-adt`](resolved/registration-typing-metric-adt.md)),
+  rolled-loop cold compile ([`registration-recipe-cold-compile`](resolved/registration-recipe-cold-compile.md)),
+  single-pair IC early-exit ([`registration-early-stopping-while-loop`](resolved/registration-early-stopping-while-loop.md)),
+  affine small-grid trust region ([`register-affine-small-grid-divergence`](resolved/register-affine-small-grid-divergence.md)),
+  Demons ESM 0/0 guard ([`register-demons-force-divide-by-zero`](resolved/register-demons-force-divide-by-zero.md)),
+  metric-convention verification ([`metrics-convention-vs-domain-tools`](resolved/metrics-convention-vs-domain-tools.md)).
 
 ## 4. Audit findings already owned by an existing FR (duplicate guard)
 
@@ -91,9 +91,9 @@ These audit items are **not re-specced here** — add to the referenced doc inst
 | Hopper/Blackwell registration kernels (Mosaic GPU) | [`mosaic-hopper-registration-kernels`](mosaic-hopper-registration-kernels.md) | hardware-blocked |
 | `jnp.percentile` CPU sort cliff (general) | [`median-percentile-cpu-sort-cliff`](median-percentile-cpu-sort-cliff.md) | open — D3 is the *registration hot-loop* application |
 | Differentiable recipe (implicit-VJP wrapper) | [`registration-recipe-transparent-differentiability`](registration-recipe-transparent-differentiability.md) | proposed — interacts with B2 |
-| In-memory transform algebra (compose/invert/fuse) | [`affine-matrix-algebra`](affine-matrix-algebra.md) | ENABLING — A1's `fuse` consumes it |
-| `register.regulariser` field penalties | [`field-regularisers`](field-regularisers.md) | ENABLING |
-| Demons 0/0 → NaN; affine small-grid divergence | [`register-demons-force-divide-by-zero`](register-demons-force-divide-by-zero.md), [`register-affine-small-grid-divergence`](register-affine-small-grid-divergence.md) | RESOLVED (so F3 is the *remaining* guards only) |
+| In-memory transform algebra (compose/invert/fuse) | [`affine-matrix-algebra`](resolved/affine-matrix-algebra.md) | ENABLING — A1's `fuse` consumes it |
+| `register.regulariser` field penalties | [`field-regularisers`](resolved/field-regularisers.md) | ENABLING |
+| Demons 0/0 → NaN; affine small-grid divergence | [`register-demons-force-divide-by-zero`](resolved/register-demons-force-divide-by-zero.md), [`register-affine-small-grid-divergence`](resolved/register-affine-small-grid-divergence.md) | RESOLVED (so F3 is the *remaining* guards only) |
 | Perf wins must certify at brain scale; interp backend gap | [`perf-wins-must-certify-at-scale`](perf-wins-must-certify-at-scale.md), [`interpolation-backend-cpu-gpu-gap`](interpolation-backend-cpu-gpu-gap.md) | open — E1's scale discipline |
 
 ## 5. New gaps — the roadmap
@@ -117,7 +117,7 @@ compatibility is **not** a constraint.
   → `PipelineResult` that stages rigid (moment init) → affine (warm-started via
   `_affine_params_from_matrix`, MI default) → `greedy_syn` (`init_affine`, LNCC
   default), threads each stage's matrix forward, and returns a fused composite
-  (via [`affine-matrix-algebra`](affine-matrix-algebra.md)'s fuse) plus per-stage
+  (via [`affine-matrix-algebra`](resolved/affine-matrix-algebra.md)'s fuse) plus per-stage
   cost histories, with `antsRegistrationSyN`-matching per-stage metric defaults.
 - **Acceptance.** One call recovers a planted rigid+affine+nonlinear chain on a
   textured/real volume to the same accuracy as the hand-staged sequence; the
@@ -234,7 +234,7 @@ compatibility is **not** a constraint.
 - **Why.** Algebra-mode Demons/SyN re-integrate the velocity field
   (`integrate_velocity_field`, scaling-and-squaring) every iteration; and the
   batch-aggregate early-exit (shipped for volreg) is not available to a cohort
-  SVF driver. (Sibling of [`registration-early-stopping-while-loop`](registration-early-stopping-while-loop.md).)
+  SVF driver. (Sibling of [`registration-early-stopping-while-loop`](resolved/registration-early-stopping-while-loop.md).)
 - **Change.** Cache/incrementally update the integrated field where the velocity
   delta is small; add a `vmap`'d cohort SVF driver honouring the
   all-lanes-exit `while_loop` (the volreg pattern). Fix the stale
@@ -289,7 +289,7 @@ compatibility is **not** a constraint.
 
 **F1. Cost-decrease (Armijo/LM) guard on the single-pair IC step.** · *medium / medium · lens: math*
 - **Why.** The IC Gauss-Newton step has a trust-region clamp
-  ([`register-affine-small-grid-divergence`](register-affine-small-grid-divergence.md))
+  ([`register-affine-small-grid-divergence`](resolved/register-affine-small-grid-divergence.md))
   but no *cost-decrease* check — a clamped step can still increase the cost on a
   hard case (no monotonicity guarantee).
 - **Change.** Add a backtracking/LM damping that rejects a non-decreasing step
@@ -325,7 +325,7 @@ compatibility is **not** a constraint.
   `pyramid_sigma`); the IC-vs-forward dispatch is decided at scattered sites;
   `Convergence` lives in `_core` but is a cross-cutting concern; `init`/`space`/
   `restarts` are exposed inconsistently across recipes. (Builds on the shipped
-  ADT work, [`registration-typing-metric-adt`](registration-typing-metric-adt.md).)
+  ADT work, [`registration-typing-metric-adt`](resolved/registration-typing-metric-adt.md).)
 - **Change.** A shared `ScheduleSpec` base the recipe Specs embed; one
   `resolve_ic_dispatch(...)` resolver; relocate `Convergence` to `_converge`;
   unify `init`/`space`/`restarts` exposure (restarts generalises to any forward
@@ -365,7 +365,7 @@ refined recommendations) backing this roadmap: the 2026-06-22 six-lens audit
 
 ## 9. New capability — functional alignment (representation-space)
 
-Owned by [`register-functional-alignment`](register-functional-alignment.md)
+Owned by [`register-functional-alignment`](resolved/register-functional-alignment.md)
 (do not duplicate here). Extends the suite's scope from **spatial** registration
 to **alignment in representation space**: a closed-form orthogonal-Procrustes
 aligner with an optional **matrix von Mises–Fisher** (matrix-Langevin) spatial
@@ -376,7 +376,7 @@ recipe family — *not* a `TransformModel` chart (closed-form, not an `exp`-map
 optimised by GN/LM) and *not* a `CoordinateSpace` (feature space, not
 voxel/world). Reframes `register/__init__.py` from "pairwise registration
 recipes" to "pairwise **alignment** recipes (spatial + functional)". Solver
-dependency: [`linalg-orthogonal-procrustes`](linalg-orthogonal-procrustes.md)
+dependency: [`linalg-orthogonal-procrustes`](resolved/linalg-orthogonal-procrustes.md)
 (shipped). The whole-brain regime needs the **efficient ProMises** subspace
 method (tracked in the FR §6). Migrated theory-faithfully (not ported) from the
 deprecated `hypercoil-examples` repo — see the

@@ -61,7 +61,7 @@ is at least as large as rigid. Effort **M**, risk **low–med**.
 
 ### B — single-pair `while_loop` early-exit (iteration-count lever).
 
-Tracked in [`registration-early-stopping-while-loop.md`](registration-early-stopping-while-loop.md)
+Tracked in [`registration-early-stopping-while-loop.md`](resolved/registration-early-stopping-while-loop.md)
 (R8-scoped to single-pair matrix recipes). R8 measured rigid converging in
 **~5/20 steps even on a hard case**, so ~3–4× of the budget is spin.
 **Multiplies** with A/A′ (per-iteration × iteration-count are orthogonal axes).
@@ -113,7 +113,7 @@ landing A–E, so the perf wins don't fragment the recipe surface.
 
 - [`../design/registration-suite-v2.md`](../design/registration-suite-v2.md) §6
   (perf program + economic verdict), §8-R8 (the measurements).
-- [`registration-early-stopping-while-loop.md`](registration-early-stopping-while-loop.md)
+- [`registration-early-stopping-while-loop.md`](resolved/registration-early-stopping-while-loop.md)
   — lever B.
 - `src/nitrix/register/_inverse_compositional.py` (the IC kernel — levers A/A′);
   `src/nitrix/linalg/optimize.py` (`gauss_newton`/`levenberg_marquardt`,

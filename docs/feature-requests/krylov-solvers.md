@@ -32,7 +32,7 @@ lines on top of a matvec; the other solvers follow the same template.
 
 **Likely consumer.** Implicit smoothing `(I − αL)x = b`, gradient-flow
 integration, surface harmonic-coordinate solves, neural-ODE adjoint passes.
-Directly unblocks [`fixed-point-combinators.md`](fixed-point-combinators.md)
+Directly unblocks [`fixed-point-combinators.md`](resolved/fixed-point-combinators.md)
 (§12.8) whose implicit-VJP needs an inner linear solve.
 
 **Effort.** M. CG is XS; the implicit-VJP pattern is already proven. Other
@@ -47,7 +47,7 @@ generalise, but no public Krylov surface.
 ## Cross-references
 
 - `docs/feature-requests catalogue §12.1` — origin entry; `§13` — acceptance protocol.
-- [`fixed-point-combinators.md`](fixed-point-combinators.md) — downstream
+- [`fixed-point-combinators.md`](resolved/fixed-point-combinators.md) — downstream
   consumer (inner solve).
 - [`docs/design/lobpcg-implicit-vjp.md`](../design/lobpcg-implicit-vjp.md) —
   the implicit-VJP pattern to reuse.

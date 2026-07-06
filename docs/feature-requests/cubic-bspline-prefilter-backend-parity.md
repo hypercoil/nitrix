@@ -68,7 +68,7 @@ fix); M if a deterministic-scan option is wanted.
 
 - [`interpolation-backend-cpu-gpu-gap`](interpolation-backend-cpu-gpu-gap.md)
   (B15) — the order-1 *perf* sibling (this is the order-3 *parity* sibling).
-- [`cubic-resample`](cubic-resample.md) — where `CubicBSpline` (scipy order-3
+- [`cubic-resample`](resolved/cubic-resample.md) — where `CubicBSpline` (scipy order-3
   parity) was added.
 - `src/nitrix/geometry/_interpolate.py:601` (`associative =
   default_backend_is_gpu()`), `:381` (`_gather_sample` → `_map_coordinates_sample`,

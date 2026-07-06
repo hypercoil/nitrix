@@ -349,6 +349,42 @@ def test_relaxed_modularity_differentiable_dense():
     assert bool(jnp.all(jnp.isfinite(g)))
 
 
+def test_relaxed_modularity_reduces_to_newman():
+    """One-hot partition, ``exclude_diag=False`` -> exact Newman modularity.
+
+    The ``1/2m`` normalisation is the only double-count correction, so the
+    normalised undirected score equals the canonical Newman ``Q`` (not half
+    of it), on both the dense and the sparse public paths.
+    """
+    A = _two_cluster_adjacency(n_per_cluster=9, p_intra=0.8, p_inter=0.05)
+    n = A.shape[0]
+    n_per = n // 2
+    labels = np.zeros(n, dtype=int)
+    labels[n_per:] = 1
+    C = np.zeros((n, 2))
+    C[np.arange(n), labels] = 1.0
+
+    # Hand-computed Newman modularity:
+    #   Q = 1/2m sum_ij (A_ij - k_i k_j / 2m) [c_i == c_j]
+    k = A.sum(axis=1)
+    two_m = A.sum()
+    same = (labels[:, None] == labels[None, :]).astype(np.float64)
+    Q_newman = ((A - np.outer(k, k) / two_m) * same).sum() / two_m
+
+    Q_dense = relaxed_modularity(
+        jnp.asarray(A), jnp.asarray(C), exclude_diag=False
+    )
+    Q_sparse = relaxed_modularity(
+        _ell_from_dense(A), jnp.asarray(C), exclude_diag=False
+    )
+    np.testing.assert_allclose(
+        float(Q_dense), Q_newman, atol=1e-10, rtol=1e-10
+    )
+    np.testing.assert_allclose(
+        float(Q_sparse), Q_newman, atol=1e-10, rtol=1e-10
+    )
+
+
 # ---------------------------------------------------------------------------
 # Connectopy
 # ---------------------------------------------------------------------------

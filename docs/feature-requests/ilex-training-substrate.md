@@ -83,14 +83,14 @@ live in nitrix too (it is pure) or be re-bound upstream by thrux/bitsjax.
   should call `lncc(..., reduction='none')`.
 - **Jacobian determinant** of a displacement — `nitrix.geometry.
   jacobian_det_displacement` (the folding-penalty in
-  [`field-regularisers.md`](field-regularisers.md) builds on it).
+  [`field-regularisers.md`](resolved/field-regularisers.md) builds on it).
 - **SVF integration** — `nitrix.geometry.integrate_velocity_field`
   (scaling-and-squaring); `lab2im.sample_svf_displacement` already calls it.
 - **Average-pool pyramid** — `cortex_ode.build_volume_pyramid` duplicates
   `nitrix.geometry.pyramid` (`downsample`/`gaussian_pyramid`).
 - **Lie-algebra affine** — `nitrix.geometry.transform` `rigid_exp`/`affine_exp`
   (axis-angle/twist); **complementary** to the Euler/scale/shear convention
-  in [`affine-matrix-algebra.md`](affine-matrix-algebra.md), not a duplicate.
+  in [`affine-matrix-algebra.md`](resolved/affine-matrix-algebra.md), not a duplicate.
 - **Histogram matching** — `nitrix.bias.histogram_match` (Nyúl–Udupa);
   `lifespan_strip`/`bme_x` already migrated to it (2026-05-29).
 
@@ -104,37 +104,37 @@ Severity: **ENABLING** = a downstream surface is blocked / hand-rolling it;
 
 | Item | Doc | Severity | Home |
 |---|---|---|---|
-| GMM label→image render | [lab2im-gmm-synthesis](lab2im-gmm-synthesis.md) | ENABLING | `augment` |
-| Generative bias field (simulated INU) | [generative-bias-field](generative-bias-field.md) | ENABLING | `augment` / `bias` |
-| Gamma, histogram-shift, gaussian/rician noise | [intensity-augmentation-ops](intensity-augmentation-ops.md) | CONVENIENCE | `augment.intensity` |
-| Gibbs (truncation) ringing artefact | [gibbs-ringing](gibbs-ringing.md) | CONVENIENCE | `augment.intensity` |
-| Random flip / crop / resized-crop / affine / SVF gen | [geometric-augmentation-ops](geometric-augmentation-ops.md) | CONVENIENCE | `augment.geometric` |
+| GMM label→image render | [lab2im-gmm-synthesis](resolved/lab2im-gmm-synthesis.md) | ENABLING | `augment` |
+| Generative bias field (simulated INU) | [generative-bias-field](resolved/generative-bias-field.md) | ENABLING | `augment` / `bias` |
+| Gamma, histogram-shift, gaussian/rician noise | [intensity-augmentation-ops](resolved/intensity-augmentation-ops.md) | CONVENIENCE | `augment.intensity` |
+| Gibbs (truncation) ringing artefact | [gibbs-ringing](resolved/gibbs-ringing.md) | CONVENIENCE | `augment.intensity` |
+| Random flip / crop / resized-crop / affine / SVF gen | [geometric-augmentation-ops](resolved/geometric-augmentation-ops.md) | CONVENIENCE | `augment.geometric` |
 | jit-safe traced sigma for `smoothing.gaussian` | [gaussian-smooth-traced-sigma](gaussian-smooth-traced-sigma.md) | ENABLING | `smoothing.gaussian` |
 
 ### Loss / metric numerics (nimox loss library)
 
 | Item | Doc | Severity | Home |
 |---|---|---|---|
-| Soft / binary Dice | [dice-loss](dice-loss.md) | ENABLING | `metrics.dice` |
-| Stable BCE / categorical CE / focal | [cross-entropy-focal](cross-entropy-focal.md) | CONVENIENCE (dedup ×3) | `metrics` |
-| NT-Xent / DINO / iBOT / KoLeo | [contrastive-ssl-losses](contrastive-ssl-losses.md) | CONVENIENCE | `metrics` / `stats` |
-| Field gradient/bending + Jacobian-folding penalty | [field-regularisers](field-regularisers.md) | ENABLING | `register.regulariser` |
-| Diagonal-Gaussian KL / NLL | [gaussian-kl-nll](gaussian-kl-nll.md) | CONVENIENCE | `stats` |
+| Soft / binary Dice | [dice-loss](resolved/dice-loss.md) | ENABLING | `metrics.dice` |
+| Stable BCE / categorical CE / focal | [cross-entropy-focal](resolved/cross-entropy-focal.md) | CONVENIENCE (dedup ×3) | `metrics` |
+| NT-Xent / DINO / iBOT / KoLeo | [contrastive-ssl-losses](resolved/contrastive-ssl-losses.md) | CONVENIENCE | `metrics` / `stats` |
+| Field gradient/bending + Jacobian-folding penalty | [field-regularisers](resolved/field-regularisers.md) | ENABLING | `register.regulariser` |
+| Diagonal-Gaussian KL / NLL | [gaussian-kl-nll](resolved/gaussian-kl-nll.md) | CONVENIENCE | `stats` |
 
 ### Model numerics (nimox modules + new models)
 
 | Item | Doc | Severity | Home |
 |---|---|---|---|
-| Affine param↔matrix / euler↔R / fit / homog. | [affine-matrix-algebra](affine-matrix-algebra.md) | ENABLING | `geometry.transform` |
-| PCA fit / transform / inverse (SVD) | [pca-svd](pca-svd.md) | CONVENIENCE | `stats.pca` |
+| Affine param↔matrix / euler↔R / fit / homog. | [affine-matrix-algebra](resolved/affine-matrix-algebra.md) | ENABLING | `geometry.transform` |
+| PCA fit / transform / inverse (SVD) | [pca-svd](resolved/pca-svd.md) | CONVENIENCE | `stats.pca` |
 | Lp / unit normalize + instance-norm stats | [lp-normalize](lp-normalize.md) | CONVENIENCE | `numerics.normalize` |
-| Uniform 1-ring mesh Laplacian smoothing | [mesh-laplacian-smoothing](mesh-laplacian-smoothing.md) | CONVENIENCE | `geometry.mesh` |
+| Uniform 1-ring mesh Laplacian smoothing | [mesh-laplacian-smoothing](resolved/mesh-laplacian-smoothing.md) | CONVENIENCE | `geometry.mesh` |
 
 ### Expansions to existing docs (new drivers / scope)
 
-- [`compute-vertex-normals`](compute-vertex-normals.md) — add `cortex_ode` /
+- [`compute-vertex-normals`](resolved/compute-vertex-normals.md) — add `cortex_ode` /
   `surfnet` as drivers (was `topofit`-only).
-- [`point-sample`](point-sample.md) — the arbitrary-point trilinear
+- [`point-sample`](resolved/point-sample.md) — the arbitrary-point trilinear
   `grid_sample` (align_corners + border-clamp + multichannel) has **3 live
   duplicates** across `cortex_ode`/`surfnet`; planned as nitrix task #138.
 - [`ode-integrators`](ode-integrators.md) — `cortex_ode`/`surfnet` per-vertex

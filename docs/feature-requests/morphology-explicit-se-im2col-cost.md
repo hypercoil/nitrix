@@ -90,7 +90,7 @@ A perf win on the box branch can no longer paper over the disk/ball branch.
   predicted this; the disk-SE row is item 3 of its checklist).
 - [`boundary-mode-parity.md`](boundary-mode-parity.md) (B13 — the border the
   perf-bench oracle pins so the comparison is the same op).
-- [`morphology-reduce-window-jitgrad.md`](morphology-reduce-window-jitgrad.md)
+- [`morphology-reduce-window-jitgrad.md`](resolved/morphology-reduce-window-jitgrad.md)
   (B19 — the flat-box fast path whose reach (1) would extend).
 - perf-bench: `reports/PERF_{DILATE,ERODE,OPEN,CLOSE}.md`,
   `src/nperf/cases/{dilate,erode,opening,closing,_morphology}.py`.

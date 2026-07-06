@@ -218,12 +218,12 @@ The coordinate-kernel spatial-prior construction — **✅ SHIPPED (2026-07-06)*
 `register.CoordinateKernelPrior` / `EfficientProMises(spatial_prior=…)`: the
 whole-brain-tractable ProMises anatomical prior (an RBF coordinate kernel projected
 into the alignment subspace by random Fourier features, never forming the `(p,p)`
-kernel). See [`register-functional-alignment`](register-functional-alignment.md) §6.
+kernel). See [`register-functional-alignment`](resolved/register-functional-alignment.md) §6.
 
 ## 5. Cross-references
 
 - Ledger: [`hypercoil-examples-migration`](hypercoil-examples-migration.md).
-- **Explicitly independent of** [`register-functional-alignment`](register-functional-alignment.md):
+- **Explicitly independent of** [`register-functional-alignment`](resolved/register-functional-alignment.md):
   ProMises uses the *matrix* vMF, whose normaliser never materialises — it does
   **not** depend on this family.
 - Sibling score-kernel surface: `stats.gaussian` (`gaussian_nll`,
