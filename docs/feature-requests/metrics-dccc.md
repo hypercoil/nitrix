@@ -1,19 +1,54 @@
 # Distance-controlled boundary / coaffiliation coefficient (DCBC / DCCC) in `nitrix.metrics`
 
-> **Status (2026-06-30): PROPOSED.** From the
-> [`hypercoil-examples` migration](hypercoil-examples-migration.md)
-> (`atlas/dccc.py`). A **parcellation-quality score kernel**: how well a
-> parcellation's boundaries separate functionally distinct cortex, *controlling
-> for spatial distance* (the confound that nearby vertices are both more
-> correlated and more likely co-parcellated). No DCBC/DCCC anywhere in nitrix
-> (grep). Proposed home: `nitrix.metrics` (a comparison/validity score kernel,
-> §5-clean: unreduced by default, no scalarisation).
+> **Status (2026-07-06): DEFERRED to a dedicated parcellation sprint — the soft
+> (DCCC) extension is mathematically flawed as formulated.** The hard DCBC is
+> fine; the *migrated probabilistic relaxation* (marginal coaffiliation `c_ij =
+> Σ_p Q_i,p Q_j,p`) does **not** yield a parcellation-quality score comparable
+> across deterministic and probabilistic parcellations, and systematically
+> **favours determinism** — verified empirically (§0). Relaxing DCBC to
+> continuous/probabilistic parcellations is genuinely nontrivial (possibly
+> ill-posed as a difference-of-conditional-means) and is the sprint's problem.
+> This is **separate** from the distance-binning kernel (also added to the legacy
+> DCCC), which is its own (independent) design axis. Do not ship the soft
+> coaffiliation contrast as-is.
 >
 > **Correctness mandate — theory over legacy.** Clean-room from Zhi et al. (2022,
 > *Cerebral Cortex*, "Evaluating brain parcellations using the distance-controlled
 > boundary coefficient"); the legacy `dccc` is the recovery oracle. The key
 > obligation: **the continuous relaxation must reduce to the published DCBC** in
 > the hard-assignment + indicator-bin limit (the headline property test).
+
+## 0. Why the soft coaffiliation extension is flawed (empirical, 2026-07-06)
+
+The migrated DCCC generalises the hard within/between indicator to the **marginal
+coaffiliation** `c_ij = <Q_i, Q_j>` (probability loci `i, j` share a parcel,
+marginalising each locus's affiliation), then forms the coaffiliation-weighted
+contrast `within − between` with `within = Σ c_ij r_ij / Σ c_ij`, `between = Σ
+(1−c_ij) r_ij / Σ (1−c_ij)` (`r_ij` = functional correlation). For hard one-hot
+`Q` this is exactly single-bin DCBC. **But the score conflates representation
+*sharpness* with parcellation *quality*.** A simulation (block-structured signals,
+genuine boundary ambiguity; `tools`-side, not shipped) shows:
+
+- **Sharpness confound / non-comparability.** Take the *same* partition (argmax =
+  ground truth at every temperature) and only vary how sharply `Q` represents it:
+  DCCC collapses **monotonically** from ~0.50 (one-hot) to ~0.01 (near-uniform),
+  in **8/8 seeds**. The identical partition decision scores 50× differently by
+  representation entropy alone — so a soft parcellation's DCCC is *not* comparable
+  to a hard one's. Analytic cause: as `Q_i → uniform`, `c_ij → 1/K` constant, so
+  the within- and between-weightings converge and both correlations tend to the
+  global mean ⇒ `DCCC → 0`, regardless of boundary quality.
+- **Favours determinism.** The hard argmax parcellation beats the *honest* soft
+  posterior calibrated to the true boundary mixing (`α` own / `1−α` neighbour) in
+  **8/8 seeds** — the metric penalises correctly representing genuine uncertainty.
+- **Refinement of the recollection (not an absolute ordering).** It is *not* that
+  hard always wins: a sufficiently corrupted hard parcellation (10 % labels wrong)
+  still scored below the honest soft one. The defect is a **systematic
+  sharpness-dependent bias/offset**, so scores are only comparable *within* a
+  fixed sharpness — invalid for the intended cross-parcellation comparison.
+
+A valid probabilistic DCBC must **decouple sharpness from boundary quality**
+(e.g. normalise by the sharpness-achievable contrast; or an information-theoretic
+/ proper-scoring-rule reformulation) — deferred, non-trivial, sprint-scoped.
 
 ## 1. Theory
 
@@ -83,6 +118,11 @@ geodesic neighbourhood** (DCBC only uses pairs out to a max distance, so the ful
   boundary-improving moves.
 - Empty bins / single parcel handled (no NaN); reuses
   `geometry.spherical_geodesic_distance`.
+- **NEW gate for any soft formulation (§0):** *sharpness-invariance* — a fixed
+  partition represented at different `Q`-entropies (same argmax) must score
+  (near-)equally, and an honest calibrated soft posterior must not lose to its
+  hard argmax purely for being soft. The marginal-coaffiliation contrast **fails**
+  this; it is the acceptance bar the sprint's reformulation must clear.
 
 ## 6. Cross-references
 
