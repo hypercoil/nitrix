@@ -24,8 +24,8 @@ over the broadcast axes back to the caller's bias shape.
 
 The supported shapes (anything else raises :class:`PallasNotTileable`, which the
 dispatcher turns into a loud JAX fallback) are: NVIDIA Ampere+ hardware, float32
-data, a power-of-two head dimension :math:`\geq 16` with ``d_v == d``, and query
-/ key lengths divisible by the block size.  Anisotropic or awkward shapes fall
+data, a power-of-two head dimension :math:`\geq 16` with ``d_v == d``, and
+power-of-two query / key lengths.  Anisotropic or awkward shapes fall
 back; pad-to-multiple is a later refinement, and the at-scale
 wall-clock-versus-reference certification is the sibling perf suite's job.
 
@@ -714,8 +714,8 @@ def _check_tileable(
 
     Raises :class:`PallasNotTileable` (which the dispatcher turns into a loud JAX
     fallback) unless the inputs satisfy every kernel requirement: float32 dtype,
-    ``d_v == d``, a power-of-two head dimension of at least 16, and query / key
-    lengths divisible by the block size.
+    ``d_v == d``, a power-of-two head dimension of at least 16, and power-of-two
+    query / key lengths.
 
     Parameters
     ----------
@@ -750,13 +750,18 @@ def _check_tileable(
         raise PallasNotTileable(
             f'fused attention requires a power-of-two head dim >= 16; got {d}.'
         )
-    block_q = min(_BLOCK, s)
-    block_k = min(_BLOCK, t)
-    if s % block_q != 0 or t % block_k != 0:
+    # The forward loads the full key length ``t`` as one SRAM tile and the
+    # backward the full query length ``s``; the Triton lowering requires every
+    # tile dimension to be a power of 2 (the block sizes and their divisibility
+    # then follow automatically).  Non-power-of-two token counts -- including
+    # ones the block size happens to divide evenly, e.g. ``28 = min(32, 28)`` --
+    # must decline here so the dispatcher falls back to JAX, rather than pass
+    # the gate and crash the lowering mid-trace.
+    if s != pl.next_power_of_2(s) or t != pl.next_power_of_2(t):
         raise PallasNotTileable(
-            f'fused attention requires s % {block_q} == 0 and t % {block_k} '
-            f'== 0; got s={s}, t={t} (pad to a friendly shape or use '
-            'backend="jax").'
+            f'fused attention requires power-of-two query/key lengths; got '
+            f's={s}, t={t} (non-power-of-two token counts fall back to '
+            'backend="jax"; pad to a power of 2 to use the fused kernel).'
         )
 
 

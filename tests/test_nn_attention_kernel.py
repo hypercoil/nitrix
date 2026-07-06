@@ -281,7 +281,9 @@ def test_jit_through_kernel():
 
 
 @pallas_only
-@pytest.mark.parametrize('reason', ['dv_ne_d', 'non_pow2_d', 'odd_seq'])
+@pytest.mark.parametrize(
+    'reason', ['dv_ne_d', 'non_pow2_d', 'odd_seq', 'nonpot_seq']
+)
 def test_unsupported_shape_falls_back_loudly(reason):
     h, b = 2, 2
     if reason == 'dv_ne_d':
@@ -292,10 +294,14 @@ def test_unsupported_shape_falls_back_loudly(reason):
         q = _mk((b, h, 128, 48), 0)  # head dim not a power of two
         k = _mk((b, h, 128, 48), 1)
         v = _mk((b, h, 128, 48), 2)
-    else:  # odd_seq: not divisible by the block size
+    elif reason == 'odd_seq':  # not divisible by the block size
         q = _mk((b, h, 100, 64), 0)
         k = _mk((b, h, 100, 64), 1)
         v = _mk((b, h, 100, 64), 2)
+    else:  # nonpot_seq: block-divisible but not a power of two (DINO local crop)
+        q = _mk((b, h, 28, 64), 0)
+        k = _mk((b, h, 28, 64), 1)
+        v = _mk((b, h, 28, 64), 2)
     reset_fallback_state()
     with warnings.catch_warnings(record=True) as rec:
         warnings.simplefilter('always')
@@ -307,3 +313,35 @@ def test_unsupported_shape_falls_back_loudly(reason):
     # Default scale on both sides (a python float); the fallback must be the
     # byte-identical reference output.
     assert np.array_equal(np.asarray(out), np.asarray(ref_sdpa(q, k, v)))
+
+
+def test_check_tileable_rejects_non_pow2_token_counts():
+    """The tileability gate declines non-power-of-two ``s`` / ``t`` up front.
+
+    Runs on any host (pure shape logic, no GPU): the fused kernel loads the
+    full ``t`` (forward) and full ``s`` (backward) as SRAM tiles, and the
+    Triton lowering requires power-of-two tile dimensions. A non-POT length
+    the block size happens to divide -- notably the DINO local-crop shape of
+    28 tokens (``28 = min(32, 28)``) -- passed the old block-divisibility gate
+    and then crashed the lowering; it must now decline so the dispatcher falls
+    back to JAX.
+    """
+    from nitrix._kernels.cuda.attention import (
+        PallasNotTileable,
+        _check_tileable,
+    )
+
+    # Power-of-two lengths (incl. cross-attention s != t) pass the gate.
+    _check_tileable(
+        _mk((2, 2, 128, 64), 0),
+        _mk((2, 2, 256, 64), 1),
+        _mk((2, 2, 256, 64), 2),
+    )
+    # Non-POT lengths decline -- including the block-divisible 28 and 96.
+    for s, t in [(28, 28), (96, 96), (128, 96), (96, 128), (100, 128)]:
+        with pytest.raises(PallasNotTileable, match='power-of-two'):
+            _check_tileable(
+                _mk((2, 2, s, 64), 0),
+                _mk((2, 2, t, 64), 1),
+                _mk((2, 2, t, 64), 2),
+            )
