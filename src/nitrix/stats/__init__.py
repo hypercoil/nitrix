@@ -138,9 +138,13 @@ from .lme import (
     var_power,
 )
 from .directional import (
+    KentFit,
     VMFFit,
     WatsonFit,
+    kent_fit,
+    kent_log_prob,
     log_iv,
+    log_kent_normaliser,
     log_kummer_m,
     vmf_fit,
     vmf_log_prob,
@@ -226,6 +230,10 @@ __all__ = [
     'watson_log_prob',
     'watson_fit',
     'WatsonFit',
+    'log_kent_normaliser',
+    'kent_log_prob',
+    'kent_fit',
+    'KentFit',
     # glm
     'Family',
     'Link',

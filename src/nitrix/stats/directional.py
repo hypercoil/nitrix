@@ -18,6 +18,18 @@ confluent hypergeometric :math:`M(\tfrac12, p/2, \kappa)` -- the law for
 undirected orientations / axial data (:func:`log_kummer_m`,
 :func:`watson_log_prob`, :func:`watson_fit`).
 
+The **Kent** (Fisher--Bingham FB5) distribution is the *elliptical* vMF on
+:math:`S^2`: density :math:`\propto \exp(\kappa\, \gamma_1^\top x + \beta
+[(\gamma_2^\top x)^2 - (\gamma_3^\top x)^2])` with an orthonormal frame and
+ovalness :math:`\beta` (:math:`\beta = 0` recovers vMF); its normaliser is a
+series in half-integer-order Bessel functions, reusing :func:`log_iv`
+(:func:`log_kent_normaliser`, :func:`kent_log_prob`, :func:`kent_fit`).
+
+Each ``*_log_prob`` takes ``normalize=False`` to return the **unnormalised**
+log-density (energy) -- the normaliser is dropped *and never computed*, so it is
+tractable in high dimensions and composes additively as a per-site potential in
+a Gibbs / Markov-random-field energy (the parcellation setting).
+
 For :math:`x \in S^{p-1}`, mean direction :math:`\mu \in S^{p-1}` and
 concentration :math:`\kappa > 0`,
 
@@ -89,6 +101,10 @@ __all__ = [
     'watson_log_prob',
     'watson_fit',
     'WatsonFit',
+    'log_kent_normaliser',
+    'kent_log_prob',
+    'kent_fit',
+    'KentFit',
 ]
 
 _AxisArg = Union[int, Tuple[int, ...]]
@@ -243,6 +259,7 @@ def vmf_log_prob(
     *,
     axis: Optional[_AxisArg] = None,
     reduction: Reduction = 'none',
+    normalize: bool = True,
 ) -> Float[Array, '...']:
     r"""Von Mises--Fisher log-density of unit vectors.
 
@@ -273,6 +290,14 @@ def vmf_log_prob(
         How to reduce the per-observation log-density. ``"none"`` (the default,
         per the score-kernel convention) returns the unreduced tensor;
         ``"sum"`` gives the log-likelihood; ``"mean"`` its average.
+    normalize : bool, optional
+        If ``True`` (default), the full log-density.  If ``False``, the
+        **unnormalised** log-density :math:`\kappa\, \mu^\top x` -- the
+        normaliser term is dropped *and never computed* (no :func:`log_iv`).
+        Its negative is the Gibbs energy (:math:`p \propto e^{-E}`): a
+        per-site clique **potential** that composes additively into a
+        Gibbs/Markov-random-field energy (the parcellation setting) and is
+        tractable in high dimensions where the normaliser is expensive.
 
     Returns
     -------
@@ -282,10 +307,14 @@ def vmf_log_prob(
         over ``axis``.
     """
     p = x.shape[-1]
-    nu = p / 2.0 - 1.0
     dot = jnp.sum(mu * x, axis=-1)  # mu^T x, per observation
-    log_norm = nu * jnp.log(kappa) - (p / 2.0) * _LOG_2PI - log_iv(nu, kappa)
-    per_obs = kappa * dot + log_norm
+    per_obs = kappa * dot
+    if normalize:
+        nu = p / 2.0 - 1.0
+        log_norm = (
+            nu * jnp.log(kappa) - (p / 2.0) * _LOG_2PI - log_iv(nu, kappa)
+        )
+        per_obs = per_obs + log_norm
     return reduce(per_obs, axis=axis, reduction=reduction)
 
 
@@ -596,6 +625,7 @@ def watson_log_prob(
     *,
     axis: Optional[_AxisArg] = None,
     reduction: Reduction = 'none',
+    normalize: bool = True,
 ) -> Float[Array, '...']:
     r"""Watson log-density of axial unit vectors.
 
@@ -622,6 +652,11 @@ def watson_log_prob(
         Axes to reduce over when ``reduction != "none"``.
     reduction : {'none', 'sum', 'mean'}, optional
         Reduction of the per-observation log-density (default ``"none"``).
+    normalize : bool, optional
+        If ``False``, the **unnormalised** log-density :math:`\kappa (\mu^\top
+        x)^2` -- the Kummer normaliser is dropped *and never computed* (no
+        :func:`log_kummer_m`).  The axial per-site potential for a Gibbs/Markov-
+        random-field energy, tractable at any :math:`p`.  Default ``True``.
 
     Returns
     -------
@@ -630,14 +665,18 @@ def watson_log_prob(
         reduction.
     """
     p = x.shape[-1]
-    # Surface-measure normalisation (as for :func:`vmf_log_prob`): divide by the
-    # area of S^{p-1}, omega = 2 pi^{p/2} / Gamma(p/2), so the density integrates
-    # to one against the sphere's Lebesgue measure.
-    log_area = (
-        math.log(2.0) + (p / 2.0) * math.log(math.pi) - math.lgamma(p / 2.0)
-    )
     dot = jnp.sum(mu * x, axis=-1)
-    per_obs = kappa * dot**2 - log_kummer_m(0.5, p / 2.0, kappa) - log_area
+    per_obs = kappa * dot**2
+    if normalize:
+        # Surface-measure normalisation (as for :func:`vmf_log_prob`): divide by
+        # the area of S^{p-1}, omega = 2 pi^{p/2} / Gamma(p/2), so the density
+        # integrates to one against the sphere's Lebesgue measure.
+        log_area = (
+            math.log(2.0)
+            + (p / 2.0) * math.log(math.pi)
+            - math.lgamma(p / 2.0)
+        )
+        per_obs = per_obs - log_kummer_m(0.5, p / 2.0, kappa) - log_area
     return reduce(per_obs, axis=axis, reduction=reduction)
 
 
@@ -770,3 +809,245 @@ def watson_fit(
     mu = jnp.where(use_bip[..., None], v_max, v_min)
     kappa = jnp.where(use_bip, kappa_bip, kappa_gir)
     return WatsonFit(mu=mu, kappa=kappa)
+
+
+# ===========================================================================
+# Kent (Fisher--Bingham FB5) distribution -- the elliptical vMF on S^2.
+#
+# Density on S^2: f(x) = c(kappa, beta)^{-1} exp(kappa g1^T x + beta [(g2^T x)^2
+# - (g3^T x)^2]), with an orthonormal frame (g1 mean, g2 major axis, g3 minor
+# axis), concentration kappa >= 0 and ovalness 0 <= 2 beta < kappa (beta = 0
+# recovers vMF).  The normaliser is a series in half-integer-order Bessel
+# functions (reuses `log_iv`); validated < 6e-14 vs mpmath and reduces to the
+# vMF C_3 normaliser at beta = 0.
+# ===========================================================================
+
+_KENT_TERMS = 64  # normaliser-series terms (machine precision to kappa ~ 1e3)
+
+
+def log_kent_normaliser(
+    kappa: Float[Array, '...'],
+    beta: Float[Array, '...'],
+    *,
+    n_terms: int = _KENT_TERMS,
+) -> Float[Array, '...']:
+    r"""Log of the Kent (FB5) normalising constant :math:`\log c(\kappa, \beta)`.
+
+    :math:`c(\kappa, \beta) = 2\pi \sum_{j \ge 0} \frac{\Gamma(j + \tfrac12)}{
+    \Gamma(j + 1)} \beta^{2j} (2/\kappa)^{2j + 1/2} I_{2j + 1/2}(\kappa)`, the
+    surface-measure normaliser (so :math:`c(\kappa, 0) = 1/C_3(\kappa)`, the vMF
+    constant).  The half-integer Bessel terms reuse :func:`log_iv`; the sum is
+    taken in log-space.  Differentiable in ``kappa`` and ``beta``; requires
+    ``kappa > 0`` and ``0 <= 2 beta < kappa``.
+
+    Parameters
+    ----------
+    kappa, beta : Float[Array, '...']
+        Concentration and ovalness (broadcastable).
+    n_terms : int, optional
+        Series terms (default 64; machine precision to ``kappa`` ~ 1e3).
+
+    Returns
+    -------
+    Float[Array, '...']
+        :math:`\log c(\kappa, \beta)`.
+    """
+    kappa = jnp.asarray(kappa)
+    beta = jnp.asarray(beta)
+    dtype = jnp.result_type(kappa.dtype, beta.dtype, jnp.float32)
+    kappa = kappa.astype(dtype)
+    beta = beta.astype(dtype)
+    eps = jnp.finfo(dtype).eps
+    j = jnp.arange(n_terms, dtype=dtype)
+    lg = jnp.asarray(
+        [math.lgamma(k + 0.5) - math.lgamma(k + 1) for k in range(n_terms)],
+        dtype=dtype,
+    )
+    # log I_{2j+1/2}(kappa) for each static order; stacked on a new trailing axis.
+    log_bessel = jnp.stack(
+        [log_iv(2.0 * k + 0.5, kappa) for k in range(n_terms)], axis=-1
+    )
+    log_beta = jnp.log(beta + eps)[..., None]  # additive floor: beta=0 safe
+    log_2_over_kappa = jnp.log(2.0 / kappa)[..., None]
+    terms = (
+        lg
+        + 2.0 * j * log_beta
+        + (2.0 * j + 0.5) * log_2_over_kappa
+        + log_bessel
+    )
+    return math.log(2.0 * math.pi) + logsumexp(terms, axis=-1)
+
+
+def kent_log_prob(
+    x: Float[Array, '... 3'],
+    gamma1: Float[Array, '... 3'],
+    gamma2: Float[Array, '... 3'],
+    gamma3: Float[Array, '... 3'],
+    kappa: Float[Array, '...'],
+    beta: Float[Array, '...'],
+    *,
+    axis: Optional[_AxisArg] = None,
+    reduction: Reduction = 'none',
+    normalize: bool = True,
+) -> Float[Array, '...']:
+    r"""Kent (FB5) log-density of unit vectors on :math:`S^2`.
+
+    :math:`\log f(x) = \kappa\, \gamma_1^\top x + \beta [(\gamma_2^\top x)^2 -
+    (\gamma_3^\top x)^2] - \log c(\kappa, \beta)`.  The elliptical generalisation
+    of vMF: :math:`\gamma_1` is the mean direction, :math:`\gamma_2` /
+    :math:`\gamma_3` the major / minor axes of the elliptical contours, and
+    :math:`\beta` the ovalness (:math:`\beta = 0` is vMF).  Differentiable in the
+    frame, ``kappa`` and ``beta``.
+
+    Parameters
+    ----------
+    x : Float[Array, '... 3']
+        Observations on :math:`S^2`.
+    gamma1, gamma2, gamma3 : Float[Array, '... 3']
+        Orthonormal frame: mean direction, major axis, minor axis.
+    kappa, beta : Float[Array, '...']
+        Concentration and ovalness (``0 <= 2 beta < kappa``).
+    axis : int or tuple of int, optional
+        Axes to reduce over when ``reduction != "none"``.
+    reduction : {'none', 'sum', 'mean'}, optional
+        Reduction of the per-observation log-density (default ``"none"``).
+    normalize : bool, optional
+        If ``False``, the **unnormalised** log-density (energy) -- the series
+        normaliser :func:`log_kent_normaliser` is dropped *and never computed*.
+        The per-site potential for a Gibbs/Markov-random-field energy.  Default
+        ``True``.
+
+    Returns
+    -------
+    Float[Array, '...']
+        The per-observation Kent log-density (``reduction="none"``) or its
+        reduction.
+    """
+    d1 = jnp.sum(gamma1 * x, axis=-1)
+    d2 = jnp.sum(gamma2 * x, axis=-1)
+    d3 = jnp.sum(gamma3 * x, axis=-1)
+    per_obs = kappa * d1 + beta * (d2**2 - d3**2)
+    if normalize:
+        per_obs = per_obs - log_kent_normaliser(kappa, beta)
+    return reduce(per_obs, axis=axis, reduction=reduction)
+
+
+class KentFit(NamedTuple):
+    """A fitted Kent (FB5) distribution: the moment-estimator state.
+
+    Attributes
+    ----------
+    gamma1, gamma2, gamma3
+        The orthonormal frame: mean direction, major axis, minor axis, each
+        ``(..., 3)``.
+    kappa
+        Concentration :math:`\\hat\\kappa`, ``(...)``.
+    beta
+        Ovalness :math:`\\hat\\beta \\ge 0`, ``(...)``.
+    """
+
+    gamma1: Float[Array, '... 3']
+    gamma2: Float[Array, '... 3']
+    gamma3: Float[Array, '... 3']
+    kappa: Float[Array, '...']
+    beta: Float[Array, '...']
+
+
+def _tangent_frame(gamma1: Float[Array, '... 3']) -> Float[Array, '... 3']:
+    """A unit vector orthogonal to ``gamma1`` (jit-safe reference choice)."""
+    e_x = jnp.zeros_like(gamma1).at[..., 0].set(1.0)
+    e_y = jnp.zeros_like(gamma1).at[..., 1].set(1.0)
+    # Use e_x unless gamma1 is nearly parallel to it, then e_y.
+    ref = jnp.where(jnp.abs(gamma1[..., :1]) < 0.9, e_x, e_y)
+    h2 = ref - jnp.sum(ref * gamma1, axis=-1, keepdims=True) * gamma1
+    unit = h2 / jnp.linalg.norm(h2, axis=-1, keepdims=True)
+    return cast(Float[Array, '... 3'], unit)
+
+
+def kent_fit(
+    x: Float[Array, '... n 3'],
+    *,
+    weights: Optional[Float[Array, '... n']] = None,
+    axis: int = -2,
+) -> KentFit:
+    r"""Moment-estimator fit of a Kent (FB5) distribution (Kent 1982).
+
+    The mean direction is the normalised resultant :math:`\hat\gamma_1 =
+    \bar{x}/\bar R`.  The major / minor axes diagonalise the sample scatter in
+    the tangent plane :math:`\perp \hat\gamma_1` (rotation :math:`\psi = \tfrac12
+    \operatorname{atan2}(2 B_{23}, B_{22} - B_{33})`), oriented so
+    :math:`\hat\gamma_2` carries the larger tangent variance.  With :math:`\bar
+    R` the mean resultant length and :math:`Q` the tangent eigenvalue gap, the
+    moment estimators are :math:`\hat\kappa = (2 - 2\bar R - Q)^{-1} + (2 - 2\bar
+    R + Q)^{-1}` and :math:`\hat\beta = \tfrac12[(2 - 2\bar R - Q)^{-1} - (2 -
+    2\bar R + Q)^{-1}]` (at :math:`\beta = 0` this is the S^2 vMF
+    :math:`\hat\kappa = 1/(1 - \bar R)`).
+
+    Parameters
+    ----------
+    x : Float[Array, '... n 3']
+        Observations on :math:`S^2`; ``n`` along ``axis``.
+    weights : Float[Array, '... n'], optional
+        Per-observation non-negative weights.  ``None`` weights equally.
+    axis : int, optional
+        The observation axis. Default ``-2``.
+
+    Returns
+    -------
+    KentFit
+        The fitted frame, ``kappa`` and ``beta``.
+
+    Notes
+    -----
+    The moment estimator is derived from the near-pole tangent-Gaussian
+    approximation, so :math:`\hat\gamma_1` and the axes are recovered accurately,
+    and :math:`\hat\kappa` closely, but :math:`\hat\beta` carries the estimator's
+    known **downward finite-**:math:`\kappa` **bias**, worsening as the ovalness
+    :math:`2\beta/\kappa \to 1` (where the minor-axis spread is large).  For a
+    high-eccentricity / low-:math:`\kappa` regime, refine with a numerical MLE
+    seeded from this fit (maximising :func:`kent_log_prob`).
+    """
+    xm = jnp.moveaxis(x, axis, -2)  # (..., n, 3)
+    if weights is None:
+        w = jnp.ones(xm.shape[:-1], dtype=xm.dtype)  # (..., n)
+    else:
+        w_axis = axis if axis >= 0 else axis + 1
+        w = jnp.moveaxis(weights, w_axis, -1)
+    w_sum = jnp.sum(w, axis=-1, keepdims=True)  # (..., 1)
+
+    def wmean(v: Float[Array, '... n']) -> Float[Array, '...']:
+        return jnp.sum(w * v, axis=-1) / w_sum[..., 0]
+
+    resultant = jnp.sum(w[..., None] * xm, axis=-2) / w_sum  # (..., 3)
+    r_bar = jnp.linalg.norm(resultant, axis=-1)  # (...)
+    gamma1 = resultant / r_bar[..., None]
+
+    h2 = _tangent_frame(gamma1)
+    h3 = jnp.cross(gamma1, h2)
+    t2 = jnp.sum(h2[..., None, :] * xm, axis=-1)  # (..., n)
+    t3 = jnp.sum(h3[..., None, :] * xm, axis=-1)
+    b22 = wmean(t2**2)
+    b33 = wmean(t3**2)
+    b23 = wmean(t2 * t3)
+    psi = 0.5 * jnp.arctan2(2.0 * b23, b22 - b33)
+    cos_psi = jnp.cos(psi)[..., None]
+    sin_psi = jnp.sin(psi)[..., None]
+    a2 = cos_psi * h2 + sin_psi * h3
+    a3 = -sin_psi * h2 + cos_psi * h3
+    l2 = wmean(jnp.sum(a2[..., None, :] * xm, axis=-1) ** 2)
+    l3 = wmean(jnp.sum(a3[..., None, :] * xm, axis=-1) ** 2)
+
+    # Orient so gamma2 carries the larger tangent variance (beta >= 0).
+    major = l2 >= l3
+    gamma2 = jnp.where(major[..., None], a2, a3)
+    gamma3 = jnp.where(major[..., None], a3, a2)
+    q = jnp.abs(l2 - l3)
+
+    tiny = jnp.finfo(xm.dtype).tiny
+    denom_minus = jnp.maximum(2.0 - 2.0 * r_bar - q, tiny)
+    denom_plus = jnp.maximum(2.0 - 2.0 * r_bar + q, tiny)
+    kappa = 1.0 / denom_minus + 1.0 / denom_plus
+    beta = 0.5 * (1.0 / denom_minus - 1.0 / denom_plus)
+    return KentFit(
+        gamma1=gamma1, gamma2=gamma2, gamma3=gamma3, kappa=kappa, beta=beta
+    )

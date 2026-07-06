@@ -3262,6 +3262,63 @@ register(
         notes='eigh-based (safe_eigh fallback), like pca_fit',
     )
 )
+
+
+def _kent_frame_data():
+    x = jax.random.normal(_key(0), (24, 3))
+    x = x / jnp.linalg.norm(x, axis=-1, keepdims=True)
+    g1 = jnp.asarray([0.0, 0.0, 1.0])
+    g2 = jnp.asarray([1.0, 0.0, 0.0])
+    g3 = jnp.asarray([0.0, 1.0, 0.0])
+    return x, g1, g2, g3
+
+
+def _kent_fit_op(x):
+    from nitrix.stats import kent_fit
+
+    return kent_fit(x).kappa
+
+
+register(
+    OpInfo(
+        'nitrix.stats.log_kent_normaliser',
+        fixture=lambda: (
+            (
+                jax.random.uniform(_key(0), (16,), minval=2.0, maxval=40.0),
+                jax.random.uniform(_key(1), (16,), minval=0.1, maxval=1.0),
+            ),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=(
+            'Kent FB5 normaliser: half-integer-Bessel series (reuses log_iv)',
+        ),
+        notes='pure; reduces to 1/C_3 at beta=0; jit-clean',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.stats.kent_log_prob',
+        fixture=lambda: (
+            (*_kent_frame_data(), 8.0, 3.0),
+            {},
+        ),
+        diff_arg=1,
+        vmap_arg=0,
+        invariants=('Kent (elliptical vMF on S^2) log-density',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.stats.kent_fit',
+        fixture=lambda: ((jax.random.normal(_key(), (48, 3)),), {}),
+        fn_override=_kent_fit_op,
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('Kent moment estimator (frame + kappa/beta); eigh-free',),
+    )
+)
 register(
     OpInfo(
         'nitrix.stats.pca_fit',
