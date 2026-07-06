@@ -1,6 +1,19 @@
 # Graphical-LASSO — roll the sweep loop (GPU-compile-hostile as shipped)
 
-> **Status (2026-06-18): perf finding + fix request.** `nitrix.stats.glasso`
+> **Status (2026-07-06): RESOLVED — the sweep loop is rolled.** `_glasso_wb`
+> runs the block-coordinate descent as four nested `lax.fori_loop`s (outer
+> sweeps · columns · inner lasso sweeps · coordinates) and `glasso_path` as a
+> `lax.scan`, so the XLA graph stays `O(p^2)` and **GPU compile is flat in the
+> iteration counts** — verified: AOT compile at `n_outer=100, n_inner=50` is
+> ~0.27 s (vs `2,2` ~0.33 s), no longer the unbounded blow-up described below.
+> Numerics preserved (12 glasso tests green, incl. sklearn parity). The residual
+> **GPU wall-clock** at the default 5000 sweeps is the inherent cost of a
+> *sequential* coordinate descent (the CPU path is the right device and runs
+> fine); an optional duality-gap early-exit (`lax.while_loop`, single-problem)
+> would cut sweeps but is a separate follow-up, and wall-clock-vs-`sklearn` is
+> the perf suite's concern.
+>
+> **Original (2026-06-18): perf finding + fix request.** `nitrix.stats.glasso`
 > / `glasso_path` UNROLL their `n_outer × n_inner` block-coordinate-descent
 > sweeps into a single XLA graph. On the GPU this makes **compile infeasible**
 > (>5 min at p=32, timing out at every size the perf-bench tried), while the

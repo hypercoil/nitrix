@@ -344,7 +344,7 @@ stay downstream. Needs an explicit go-ahead + a lined-up consumer.
 
 ## Resolved (archived)
 
-The 61 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/). Listed here as one flat index; topical context and the shipped-status annotation remain in the family sections above.
+The 62 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/). Listed here as one flat index; topical context and the shipped-status annotation remain in the family sections above.
 
 - [`affine-matrix-algebra`](resolved/affine-matrix-algebra.md) — Affine matrix algebra (geometric convention) — `nitrix.geometry.affine`
 - [`attention-kernels`](resolved/attention-kernels.md) — attention-kernels — scaled dot-product / flash attention
@@ -376,6 +376,7 @@ The 61 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/)
 - [`generative-bias-field`](resolved/generative-bias-field.md) — Generative bias field — simulated INU — `nitrix.augment`
 - [`geometric-augmentation-ops`](resolved/geometric-augmentation-ops.md) — Geometric-augmentation ops — `nitrix.augment.geometric`
 - [`gibbs-ringing`](resolved/gibbs-ringing.md) — Gibbs (truncation) ringing artefact — `nitrix.augment.intensity`
+- [`glasso-roll-sweep-loop`](resolved/glasso-roll-sweep-loop.md) — Graphical-LASSO — roll the sweep loop (GPU-compile-hostile as shipped)
 - [`glmm-fit-jit-incompatible-static-group-count`](resolved/glmm-fit-jit-incompatible-static-group-count.md) — `glmm_fit` is not `jax.jit`-traceable — data-dependent `int(jnp.max(group))` — `nitrix.stats.…
 - [`glmm-random-slope-robust-solver`](resolved/glmm-random-slope-robust-solver.md) — GLMM random-slope robust solver — joint-Schur PQL + REML-EM — `nitrix.stats.glmm`
 - [`iir-filter-gpu-backend`](resolved/iir-filter-gpu-backend.md) — B12. IIR `sosfilt`/`sosfiltfilt` GPU backend — default + missing associative path
