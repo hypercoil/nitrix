@@ -1,7 +1,9 @@
 # Mesh curvature — `nitrix.geometry.curvature`
 
-> **Status (2026-06-02): not started.** Brainstorm candidate; promotion
-> gated by the §13 acceptance protocol. Provenance:
+> **Status (2026-07-06): SHIPPED** (via the geometry suite).
+> `geometry.mean_curvature`, `geometry.gaussian_curvature`, and
+> `geometry.principal_curvatures` (`geometry/surface.py`), tested in
+> `test_surface_curvature.py`. Provenance:
 > `docs/feature-requests catalogue §12.6`.
 
 **What.** Pointwise curvature scalars on a triangulated surface.
@@ -32,6 +34,6 @@ shape-feature extraction, surface-based registration regularisation.
 ## Cross-references
 
 - `docs/feature-requests catalogue §12.6` — origin entry; `§13` — acceptance protocol.
-- [`discrete-exterior-calculus.md`](discrete-exterior-calculus.md) — sibling
+- [`discrete-exterior-calculus.md`](../discrete-exterior-calculus.md) — sibling
   geometry primitive (shares the cotangent-Laplacian substrate).
 - `src/nitrix/sparse/mesh.py`.

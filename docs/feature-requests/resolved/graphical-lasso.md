@@ -1,6 +1,11 @@
 # Graphical LASSO — `nitrix.stats.glasso`
 
-> **Status (2026-06-02): not started — the empirical-covariance input
+> **Status (2026-07-06): SHIPPED.** `stats.glasso` / `stats.glasso_path`
+> (v2 Phase 3; `stats/connectivity.py`, `test_connectivity.py`). The
+> GPU-compile loop-roll is tracked in
+> [glasso-roll-sweep-loop](glasso-roll-sweep-loop.md).
+>
+> **Original (2026-06-02): not started — the empirical-covariance input
 > (`stats.cov`) and dense `stats.precision` are shipped; the L1-penalised
 > sparse estimator is not.** Brainstorm candidate; promotion gated by the
 > §13 acceptance protocol. Provenance: `docs/feature-requests catalogue §12.14`.
@@ -28,7 +33,7 @@ with existing substrate:
 - **Coordinate descent** (the GLASSO algorithm) — per-row partition +
   lasso-shrinkage update. Pure JAX; differentiable through the
   regularisation path via implicit-VJP at the KKT-stationary point (composes
-  [`krylov-solvers.md`](krylov-solvers.md), §12.1).
+  [`krylov-solvers.md`](../krylov-solvers.md), §12.1).
 - **ADMM** (Boyd 2011) — two proximal steps (log-det + soft-thresholding);
   `proximal_log_det` composes with `linalg.symlog` (shipped).
 
@@ -54,6 +59,6 @@ this sparsifies), and `linalg.symlog` (the ADMM `proximal_log_det` piece).
 - [`ledoit-wolf-shrinkage.md`](ledoit-wolf-shrinkage.md) — sibling
   regularised-covariance estimator (analytic shrinkage; nilearn's *default*
   connectome estimator, the lighter default-path counterpart to GLASSO).
-- [`krylov-solvers.md`](krylov-solvers.md) — implicit-VJP inner solve.
+- [`krylov-solvers.md`](../krylov-solvers.md) — implicit-VJP inner solve.
 - `src/nitrix/stats/covariance.py` — `cov` / `precision` / `partialcorr`.
-- [`docs/design/stats.md`](../design/stats.md).
+- [`docs/design/stats.md`](../../design/stats.md).

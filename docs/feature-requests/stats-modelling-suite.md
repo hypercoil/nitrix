@@ -4,7 +4,7 @@
 > for a consumer-driven statistical-modelling sprint spanning three sibling
 > requests that share **one substrate**: (1) the perf-bench agent's LME
 > **size-dispatch + cuSOLVER bypass** ([`lme-family-tiny-linalg-gpu-block-and-perf`](lme-family-tiny-linalg-gpu-block-and-perf.md),
-> [`gpu-cusolver-first-call-handle-failure`](gpu-cusolver-first-call-handle-failure.md));
+> [`gpu-cusolver-first-call-handle-failure`](resolved/gpu-cusolver-first-call-handle-failure.md));
 > (2) ModelArray-parity **GAMs / GAMMs / GLMs** on GPU; (3) niffi's flagged
 > **TFCE-backed `randomise`** cluster-correction kernel it cannot lift out of
 > FSL. This doc is the shared framing + the atomised work-item index; the
@@ -99,7 +99,7 @@ Per SPEC §1 and v0.5 §1 (normative):
 
 **Driver.** [`lme-family-tiny-linalg-gpu-block-and-perf`](lme-family-tiny-linalg-gpu-block-and-perf.md)
 (measured: 3–6× CPU steady, 3–5× flatter compile, ~700× GPU at `V=65536`) +
-[`gpu-cusolver-first-call-handle-failure`](gpu-cusolver-first-call-handle-failure.md)
+[`gpu-cusolver-first-call-handle-failure`](resolved/gpu-cusolver-first-call-handle-failure.md)
 (the `flame_two_level` GPU skip). Highest-confidence, lowest-risk, measured —
 **lands first**.
 
@@ -372,11 +372,11 @@ brain-scale-`V` GPU certification, plus backend-parity where kernels exist
 ## §11. Cross-references
 
 - Drivers: [`lme-family-tiny-linalg-gpu-block-and-perf`](lme-family-tiny-linalg-gpu-block-and-perf.md),
-  [`gpu-cusolver-first-call-handle-failure`](gpu-cusolver-first-call-handle-failure.md),
+  [`gpu-cusolver-first-call-handle-failure`](resolved/gpu-cusolver-first-call-handle-failure.md),
   [`pca-svd`](resolved/pca-svd.md).
-- Related substrate already filed: [`graphical-lasso`](graphical-lasso.md)
+- Related substrate already filed: [`graphical-lasso`](resolved/graphical-lasso.md)
   (§12.14), [`robust-statistics`](robust-statistics.md) (§12.7),
-  [`ledoit-wolf-shrinkage`](ledoit-wolf-shrinkage.md),
+  [`ledoit-wolf-shrinkage`](resolved/ledoit-wolf-shrinkage.md),
   [`gaussian-kl-nll`](resolved/gaussian-kl-nll.md),
   [`contrastive-ssl-losses`](resolved/contrastive-ssl-losses.md).
 - Design docs: [`../design/lme.md`](../design/lme.md),

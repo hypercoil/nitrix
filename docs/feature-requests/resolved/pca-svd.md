@@ -78,6 +78,6 @@ plain tuple / NamedTuple of arrays — not a PyTree module (SPEC §2).
 - [`ilex-training-substrate.md`](../ilex-training-substrate.md) — survey context.
 - `src/nitrix/stats/covariance.py` — PCA is the eigendecomposition of this;
   shared substrate.
-- [`ledoit-wolf-shrinkage.md`](../ledoit-wolf-shrinkage.md),
-  [`graphical-lasso.md`](../graphical-lasso.md) — the other covariance-family
+- [`ledoit-wolf-shrinkage.md`](ledoit-wolf-shrinkage.md),
+  [`graphical-lasso.md`](graphical-lasso.md) — the other covariance-family
   estimators.

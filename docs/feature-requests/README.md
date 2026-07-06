@@ -115,7 +115,7 @@ memory, the perf suite (`bench/`) owns wall-clock parity at scale.
 | P3 | [nimox-histogram-match-fit-apply](resolved/nimox-histogram-match-fit-apply.md) (split `bias.histogram_match` into `fit(reference)->landmarks` / `apply(source, landmarks)` so nimox `HistogramMatch` carries ~9 floats not a reference volume) — ✅ **SHIPPED** (2026-06-25): `bias.histogram_match_fit` / `histogram_match_apply`; convenience is byte-faithful composition (§6.5) | CONVENIENCE (refinement) | `bias` |
 | P3 | [nimox-stats-response-predict](resolved/nimox-stats-response-predict.md) (public `beta_predict` / `ordinal_predict` / `gaulss_predict` / `gam_predict` mirroring `stats.predict`, so nimox.estimators wraps the response regressions as fit/transform) — ✅ **SHIPPED** (2026-06-25): the four `*_predict`; `OrdinalResult.link` / `GAMResult.intercept` added as static aux (fit jaxpr byte-identical, zero fit-path cost) | CONVENIENCE (apply surface) | `stats.{betareg,ordinal,gaulss,gam}` |
 | P3 | [nimox-stats-mixed-effects-predict](nimox-stats-mixed-effects-predict.md) (public BLUP `lme_predict` / `glmm_predict` — group-aware population/conditional prediction + a uniform cross-tier ranef accessor) — ✅ **SHIPPED (R1/R2/GLMM)** (2026-06-25): `lme_predict` / `ranef` / `glmm_predict`; population all tiers; conditional via opt-in `lme_fit(retain_blups=)` post-pass (default byte-identical, zero-cost). R4/R2+corr/R3 conditional staged (raise; population works) | ENABLING (apply surface) | `stats.{lme,glmm}` |
-| P3 | [nimox-gp-fit-traceable-rho-search](nimox-gp-fit-traceable-rho-search.md) (make `gp_fit`'s REML lengthscale-search epilogue traceable — JAX-native `_parabolic_argmin` + traced `rho_hat`, dropping the host `np.asarray(nll_grid)` / `float()` at `gp.py:932-935`, so `gp_fit` `jit`/`vmap`s with `x` closed-over) — ✅ **SHIPPED (Tier-A)** (2026-06-25): `_parabolic_argmin_jax` + traced `rho_hat` + `jnp.log` in the result assembly; Gaussian HSGP `gp_fit` jit/vmaps (vmap==loop-of-eager); 53 GP tests green (fp-parity). **Follow-on OPEN (2026-06-25):** `hgp_fit` (the hierarchical GS model — nimox `HierarchicalGPRegressor` E8 consumer) has the **identical** Gaussian-HSGP rho-search, still eager-only (`hgp.py:71,515-518` reuse the old host `_parabolic_argmin`); the fix reuses the already-shipped `_parabolic_argmin_jax` (smaller than the original). Tier-B (traced-`x`) + non-Gaussian/exact paths deferred | ENABLING (jit/vmap the fit) | `stats.gp` |
+| P3 | [nimox-gp-fit-traceable-rho-search](resolved/nimox-gp-fit-traceable-rho-search.md) (make `gp_fit`'s REML lengthscale-search epilogue traceable — JAX-native `_parabolic_argmin` + traced `rho_hat`, dropping the host `np.asarray(nll_grid)` / `float()` at `gp.py:932-935`, so `gp_fit` `jit`/`vmap`s with `x` closed-over) — ✅ **SHIPPED (Tier-A)** (2026-06-25): `_parabolic_argmin_jax` + traced `rho_hat` + `jnp.log` in the result assembly; Gaussian HSGP `gp_fit` jit/vmaps (vmap==loop-of-eager); 53 GP tests green (fp-parity). **Follow-on OPEN (2026-06-25):** `hgp_fit` (the hierarchical GS model — nimox `HierarchicalGPRegressor` E8 consumer) has the **identical** Gaussian-HSGP rho-search, still eager-only (`hgp.py:71,515-518` reuse the old host `_parabolic_argmin`); the fix reuses the already-shipped `_parabolic_argmin_jax` (smaller than the original). Tier-B (traced-`x`) + non-Gaussian/exact paths deferred | ENABLING (jit/vmap the fit) | `stats.gp` |
 
 ## Statistical modelling suite (perf-bench → ModelArray → niffi)
 
@@ -126,7 +126,7 @@ spanning three sibling requests that share one substrate.
 
 | Workstream | Severity | Home | Driver |
 |---|---|---|---|
-| A — LME size-dispatch + cuSOLVER bypass | ✅ SHIPPED (merged to main) | `stats.lme._varcomp` | [lme-family-tiny-linalg-gpu-block-and-perf](lme-family-tiny-linalg-gpu-block-and-perf.md), [gpu-cusolver-first-call-handle-failure](gpu-cusolver-first-call-handle-failure.md) |
+| A — LME size-dispatch + cuSOLVER bypass | ✅ SHIPPED (merged to main) | `stats.lme._varcomp` | [lme-family-tiny-linalg-gpu-block-and-perf](lme-family-tiny-linalg-gpu-block-and-perf.md), [gpu-cusolver-first-call-handle-failure](resolved/gpu-cusolver-first-call-handle-failure.md) |
 | B — mass-univariate GLM + GAM / GAMM | ✅ SHIPPED (merged to main) | `stats.{glm,gam,basis}` | ModelArray-parity request |
 | C — TFCE `randomise` cluster correction | ✅ SHIPPED (merged to main) | `stats.inference` | niffi capability gap |
 
@@ -289,7 +289,7 @@ live code: *not started* / *partial* (some substrate shipped).
 | 12.3 | [heat-kernel-diffusion](heat-kernel-diffusion.md) | `graph.diffusion` | S | partial (`diffusion_embedding` shipped) |
 | 12.4 | [sinkhorn-optimal-transport](sinkhorn-optimal-transport.md) | `transport` | M | not started |
 | 12.5 | [discrete-exterior-calculus](discrete-exterior-calculus.md) | `geometry.dec` | M | partial (cotangent Laplacian shipped) |
-| 12.6 | [mesh-curvature](mesh-curvature.md) | `geometry.curvature` | S | not started |
+| 12.6 | [mesh-curvature](resolved/mesh-curvature.md) | `geometry.curvature` | S | ✅ shipped (geometry suite: mean/gaussian/principal_curvatures) |
 | 12.7 | [robust-statistics](robust-statistics.md) | `stats.robust` | S | not started |
 | 12.8 | [fixed-point-combinators](resolved/fixed-point-combinators.md) | `numerics.fixed_point` | M | ✅ shipped (`fixed_point_solve` — registration) |
 | 12.9 | [spherical-harmonic-transform](spherical-harmonic-transform.md) | `geometry.sphere.harmonics` | M | not started |
@@ -297,10 +297,10 @@ live code: *not started* / *partial* (some substrate shipped).
 | 12.11 | [ode-integrators](ode-integrators.md) | `numerics.ode` | L | partial (`integrate_velocity_field` shipped) |
 | 12.12 | [continuous-wavelet-transform](continuous-wavelet-transform.md) | `signal.cwt` | S | not started |
 | 12.13 | [graph-wavelet-transform](graph-wavelet-transform.md) | `graph.wavelet` | S | not started (blocked on 12.2) |
-| 12.14 | [graphical-lasso](graphical-lasso.md) | `stats.glasso` | M | not started — planned in [stats v2](stats-modelling-suite-v2.md) §4.2 |
-| 12.15 | [surface-resample-adap-bary](surface-resample-adap-bary.md) | `geometry.sphere.resample` | M | partial (icosphere `BARYCENTRIC` shipped) |
-| 12.16 | [surface-boundary-map](surface-boundary-map.md) | `graph.parcellation.boundary` | S | not started (composes shipped prims) |
-| 12.17 | [mesh-watershed](mesh-watershed.md) | `graph.parcellation.watershed` | M | not started |
+| 12.14 | [graphical-lasso](resolved/graphical-lasso.md) | `stats.glasso` | M | ✅ shipped (`glasso` / `glasso_path`, v2 Phase 3) |
+| 12.15 | [surface-resample-adap-bary](resolved/surface-resample-adap-bary.md) | `geometry.sphere.resample` | M | ✅ shipped (`surface_resample` `adap_bary_area` + `barycentric`) |
+| 12.16 | [surface-boundary-map](resolved/surface-boundary-map.md) | `graph.parcellation.boundary` | S | ✅ shipped (`surface_boundary_map`) |
+| 12.17 | [mesh-watershed](resolved/mesh-watershed.md) | `graph.parcellation.watershed` | M | ✅ shipped (`mesh_watershed`) |
 | 12.18 | [clustering-primitives](clustering-primitives.md) | `numerics.cluster` | S/M | not started |
 | 12.19 | [normalised-cut](normalised-cut.md) | `graph.ncut` | XS | not started (blocked on 12.18) |
 
@@ -309,11 +309,10 @@ strategy→primitive mapping table, not a primitive — and stays in
 `docs/feature-requests catalogue §12.20`. The parcellation docs (12.16–12.19) link to it.
 
 **Candidate not yet in docs/feature-requests catalogue §12:**
-[ledoit-wolf-shrinkage](ledoit-wolf-shrinkage.md) (`stats.ledoit_wolf`, effort
+[ledoit-wolf-shrinkage](resolved/ledoit-wolf-shrinkage.md) (`stats.ledoit_wolf`, effort
 S) — analytic shrinkage covariance; sibling of 12.14 glasso and nilearn's
-*default* connectome estimator. Surfaced by perf-bench (nilearn defaults to
-Ledoit-Wolf; nitrix has no shrinkage estimator). **Planned in
-[stats v2](stats-modelling-suite-v2.md) §4.1** (a quick-win, consumer waiting).
+*default* connectome estimator. **✅ shipped** (`stats.ledoit_wolf` / `stats.oas`,
+v2 §4.1).
 
 [linalg-orthogonal-procrustes](resolved/linalg-orthogonal-procrustes.md) (`linalg`,
 effort S) — **✅ shipped**: orthogonal Procrustes + `subspace_angles`
@@ -344,7 +343,7 @@ stay downstream. Needs an explicit go-ahead + a lined-up consumer.
 
 ## Resolved (archived)
 
-The 62 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/). Listed here as one flat index; topical context and the shipped-status annotation remain in the family sections above.
+The 70 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/). Listed here as one flat index; topical context and the shipped-status annotation remain in the family sections above.
 
 - [`affine-matrix-algebra`](resolved/affine-matrix-algebra.md) — Affine matrix algebra (geometric convention) — `nitrix.geometry.affine`
 - [`attention-kernels`](resolved/attention-kernels.md) — attention-kernels — scaled dot-product / flash attention
@@ -379,15 +378,21 @@ The 62 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/)
 - [`glasso-roll-sweep-loop`](resolved/glasso-roll-sweep-loop.md) — Graphical-LASSO — roll the sweep loop (GPU-compile-hostile as shipped)
 - [`glmm-fit-jit-incompatible-static-group-count`](resolved/glmm-fit-jit-incompatible-static-group-count.md) — `glmm_fit` is not `jax.jit`-traceable — data-dependent `int(jnp.max(group))` — `nitrix.stats.…
 - [`glmm-random-slope-robust-solver`](resolved/glmm-random-slope-robust-solver.md) — GLMM random-slope robust solver — joint-Schur PQL + REML-EM — `nitrix.stats.glmm`
+- [`gpu-cusolver-first-call-handle-failure`](resolved/gpu-cusolver-first-call-handle-failure.md) — GPU availability: cuSOLVER `gpusolverDnCreate` fails for a Cholesky/eigh-first program on the…
+- [`graphical-lasso`](resolved/graphical-lasso.md) — Graphical LASSO — `nitrix.stats.glasso`
 - [`iir-filter-gpu-backend`](resolved/iir-filter-gpu-backend.md) — B12. IIR `sosfilt`/`sosfiltfilt` GPU backend — default + missing associative path
 - [`intensity-augmentation-ops`](resolved/intensity-augmentation-ops.md) — Intensity-augmentation ops — `nitrix.augment.intensity`
 - [`intensity-normalize-variants`](resolved/intensity-normalize-variants.md) — Intensity-normalize variants — `nitrix.numerics.normalize`
 - [`lab2im-gmm-synthesis`](resolved/lab2im-gmm-synthesis.md) — GMM label→image synthesis (lab2im) — `nitrix.augment`
+- [`ledoit-wolf-shrinkage`](resolved/ledoit-wolf-shrinkage.md) — Ledoit-Wolf shrinkage covariance — `nitrix.stats.ledoit_wolf`
 - [`linalg-orthogonal-procrustes`](resolved/linalg-orthogonal-procrustes.md) — Subspace geometry & orthogonal alignment in `nitrix.linalg`
+- [`mesh-curvature`](resolved/mesh-curvature.md) — Mesh curvature — `nitrix.geometry.curvature`
 - [`mesh-laplacian-smoothing`](resolved/mesh-laplacian-smoothing.md) — Uniform 1-ring mesh Laplacian smoothing — `nitrix.sparse.mesh`
+- [`mesh-watershed`](resolved/mesh-watershed.md) — Watershed segmentation on meshes — `nitrix.graph.parcellation.watershed`
 - [`metrics-convention-vs-domain-tools`](resolved/metrics-convention-vs-domain-tools.md) — Convention check: `nitrix.metrics` similarity metrics vs domain-standard ITK/ANTs
 - [`morphology-reduce-window-jitgrad`](resolved/morphology-reduce-window-jitgrad.md) — B19. `erode`/`dilate` flat-SE fast path breaks `jit(grad(...))`
 - [`nimox-differentiable-registration-layer`](resolved/nimox-differentiable-registration-layer.md) — A public differentiable-registration layer (implicit-diff, self-contained matrix)
+- [`nimox-gp-fit-traceable-rho-search`](resolved/nimox-gp-fit-traceable-rho-search.md) — Make `gp_fit`'s lengthscale-search epilogue traceable (jit / vmap the GP fit)
 - [`nimox-histogram-match-fit-apply`](resolved/nimox-histogram-match-fit-apply.md) — Two-phase `histogram_match` (fit reference landmarks once, apply to many)
 - [`nimox-mesh-loss-geometry`](resolved/nimox-mesh-loss-geometry.md) — nimox mesh-loss geometry → `nitrix.geometry` (consolidation handoff)
 - [`nimox-stats-response-predict`](resolved/nimox-stats-response-predict.md) — Public `*_predict` for the response-regression fitters (Beta / Ordinal / GauLSS / GAM)
@@ -407,4 +412,6 @@ The 62 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/)
 - [`spatial-transform-batched`](resolved/spatial-transform-batched.md) — `spatial_transform_batched` — `nitrix.geometry.grid`
 - [`spectral-embedding-gpu-solver`](resolved/spectral-embedding-gpu-solver.md) — B14. Spectral-embedding solver on GPU: lobpcg lags eigsh; eigh-path wedges
 - [`stats-whitening`](resolved/stats-whitening.md) — Whitening in `nitrix.stats` — findability wrapper + implementation-strategy research
+- [`surface-boundary-map`](resolved/surface-boundary-map.md) — Surface-boundary / gradient mapping — `nitrix.graph.parcellation.boundary`
+- [`surface-resample-adap-bary`](resolved/surface-resample-adap-bary.md) — Adaptive area-weighted barycentric resampling — `nitrix.geometry.sphere.resample`
 - [`upsample-nearest-nd`](resolved/upsample-nearest-nd.md) — `upsample_nearest_nd` — `nitrix.numerics` / `geometry`

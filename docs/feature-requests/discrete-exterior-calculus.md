@@ -38,6 +38,6 @@ would build on. No incidence / Hodge-star / `hodge_decompose` symbols.
 ## Cross-references
 
 - `docs/feature-requests catalogue §12.5` — origin entry; `§13` — acceptance protocol.
-- [`mesh-curvature.md`](mesh-curvature.md) — sibling geometry primitive.
+- [`mesh-curvature.md`](resolved/mesh-curvature.md) — sibling geometry primitive.
 - `src/nitrix/sparse/mesh.py` — the cotangent Laplacian this generalises.
 - [`docs/design/mesh-graph-conv.md`](../design/mesh-graph-conv.md).

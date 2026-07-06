@@ -188,7 +188,7 @@ Consequences worth stating plainly:
   is not.** `mesh_cotangent_laplacian @ vertices` gives the **integrated**
   mean-curvature normal `2·H·A_mixed·n̂`, *not* the mean curvature `H` — that
   needs the mixed-Voronoi mass `M⁻¹` (GS-5), which is **not shipped**. The
-  [mesh-curvature](mesh-curvature.md) FR therefore depends on GS-5; it cannot
+  [mesh-curvature](resolved/mesh-curvature.md) FR therefore depends on GS-5; it cannot
   just "name" an existing op. See §0 correction 1.
 - The **HCP PreFreeSurfer volumetric front-end is largely shipped**: rigid /
   affine / BBR / SyN registration + B-spline bias correction cover ACPC,
@@ -208,15 +208,15 @@ here.**
 
 | Item | FR | §12 | Status (2026-06-17) | Pipeline role |
 |---|---|---|---|---|
-| Mesh curvature (mean / Gaussian / principal) | [mesh-curvature](mesh-curvature.md) | 12.6 | not started — substrate shipped | curv/sulc features for `sugar`/`josa`; gyrification |
+| Mesh curvature (mean / Gaussian / principal) | [mesh-curvature](resolved/mesh-curvature.md) | 12.6 | not started — substrate shipped | curv/sulc features for `sugar`/`josa`; gyrification |
 | Discrete exterior calculus | [discrete-exterior-calculus](discrete-exterior-calculus.md) | 12.5 | partial (cotangent LBO shipped) | unifying operator for smoothing / parameterisation |
 | Vertex normals | [compute-vertex-normals](resolved/compute-vertex-normals.md) | — | ✅ shipped (`compute_vertex_normals`) | normals for deformation / mapping |
 | Uniform Laplacian smoothing | [mesh-laplacian-smoothing](resolved/mesh-laplacian-smoothing.md) | — | ✅ shipped (`mesh_laplacian_smooth`) | `mris_smooth` analogue |
-| Adaptive area-weighted bary resample | [surface-resample-adap-bary](surface-resample-adap-bary.md) | 12.15 | partial (icosphere bary shipped; arbitrary-mesh `ADAP_BARY_AREA` missing) | **HCP** `fs_LR_32k` downsampling; `fsaverage`↔`fs_LR` |
+| Adaptive area-weighted bary resample | [surface-resample-adap-bary](resolved/surface-resample-adap-bary.md) | 12.15 | partial (icosphere bary shipped; arbitrary-mesh `ADAP_BARY_AREA` missing) | **HCP** `fs_LR_32k` downsampling; `fsaverage`↔`fs_LR` |
 | Heat-kernel diffusion | [heat-kernel-diffusion](heat-kernel-diffusion.md) | 12.3 | partial (`diffusion_embedding` shipped) | geodesic surface smoothing substrate (**GS-12**) |
 | Spherical harmonic transform | [spherical-harmonic-transform](spherical-harmonic-transform.md) | 12.9 | not started | spectral surface analysis; atlas bases |
-| Surface boundary map | [surface-boundary-map](surface-boundary-map.md) | 12.16 | not started (composes shipped prims) | functional parcellation (aparc-adjacent) |
-| Mesh watershed | [mesh-watershed](mesh-watershed.md) | 12.17 | not started | parcellation from boundary map |
+| Surface boundary map | [surface-boundary-map](resolved/surface-boundary-map.md) | 12.16 | not started (composes shipped prims) | functional parcellation (aparc-adjacent) |
+| Mesh watershed | [mesh-watershed](resolved/mesh-watershed.md) | 12.17 | not started | parcellation from boundary map |
 | Field regularisers (bending / strain energy) | [field-regularisers](resolved/field-regularisers.md) | — | filed (ENABLING) | inflation & distortion energies (**GS-1**, **GS-6**) |
 | Distance transform (anisotropic) | [distance-transform-anisotropic-sampling](resolved/distance-transform-anisotropic-sampling.md) | — | filed | SDF generation substrate (**GS-4**) |
 | Point sampling | [point-sample](resolved/point-sample.md) | — | partial (`sample_at_points` core) | surface→volume sampling (**GS-11**) |

@@ -1,11 +1,14 @@
 # Ledoit-Wolf shrinkage covariance — `nitrix.stats.ledoit_wolf`
 
-> **Status (2026-06-02): not started — low priority.** Brainstorm candidate
+> **Status (2026-07-06): SHIPPED.** `stats.ledoit_wolf` / `stats.oas` — analytic
+> shrinkage covariance (v2 §4.1; `stats/connectivity.py`, `test_connectivity.py`).
+>
+> **Original (2026-06-02): not started — low priority.** Brainstorm candidate
 > (sibling of [`graphical-lasso.md`](graphical-lasso.md), §12.14; both
 > regularise the empirical covariance/precision for the small-sample regime).
 > Provenance: surfaced building the `nitrix-perf-bench` precision/partialcorr
 > backfill against nilearn; ledger context in
-> [`perf-bench-feedback.md`](perf-bench-feedback.md).
+> [`perf-bench-feedback.md`](../perf-bench-feedback.md).
 
 **The gap (why this is worth a stub).** nilearn's `ConnectivityMeasure` — the
 canonical fMRI connectome estimator — **defaults its covariance estimator to
@@ -64,6 +67,6 @@ implicit-VJP needed, unlike GLASSO).
 
 - [`graphical-lasso.md`](graphical-lasso.md) — sibling regularised-precision
   estimator (§12.14); `SPEC §9` acceptance protocol.
-- [`perf-bench-feedback.md`](perf-bench-feedback.md) — the perf-bench-surfaced
+- [`perf-bench-feedback.md`](../perf-bench-feedback.md) — the perf-bench-surfaced
   ledger (this gap surfaced matching nilearn's connectome estimators).
 - `src/nitrix/stats/covariance.py` — `cov` / `precision` / `partialcorr`.

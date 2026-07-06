@@ -19,7 +19,7 @@ scatter-add / normalise (`cortex_ode/_pipeline_helpers.py:166`, numpy
 
 **Home.** `nitrix.sparse.mesh` (next to the `Mesh` dataclass). Pairs with
 [`mesh-laplacian-smoothing`](mesh-laplacian-smoothing.md) and
-[`mesh-curvature`](../mesh-curvature.md) as the per-vertex mesh family.
+[`mesh-curvature`](mesh-curvature.md) as the per-vertex mesh family.
 
 ## Cross-references
 
@@ -27,7 +27,7 @@ scatter-add / normalise (`cortex_ode/_pipeline_helpers.py:166`, numpy
   survey context + the residual mesh/UNet tier.
 - [`ilex-training-substrate.md`](../ilex-training-substrate.md) — the 2026-06-08
   audit that added the `cortex_ode`/`surfnet` drivers.
-- [`mesh-curvature.md`](../mesh-curvature.md) (§12.6),
+- [`mesh-curvature.md`](mesh-curvature.md) (§12.6),
   [`mesh-laplacian-smoothing.md`](mesh-laplacian-smoothing.md) — share the
   per-face/per-vertex arithmetic on the `Mesh` container.
 - `src/nitrix/sparse/mesh.py` — the `Mesh` dataclass.

@@ -1,9 +1,9 @@
 # Surface-boundary / gradient mapping — `nitrix.graph.parcellation.boundary`
 
-> **Status (2026-06-02): not started — composes entirely from shipped
-> primitives (a named wrapper, no new kernel).** Brainstorm candidate;
-> promotion gated by the §13 acceptance protocol. Provenance:
-> `docs/feature-requests catalogue §12.16`.
+> **Status (2026-07-06): SHIPPED** (via the geometry suite).
+> `graph.parcellation.surface_boundary_map` — the named wrapper on
+> `edge_aggregate` + `eta_squared` — tested in `test_parcellation.py`.
+> Provenance: `docs/feature-requests catalogue §12.16`.
 
 **What.** The Cohen / Wig / Gordon / Schaefer functional-parcellation
 boundary-detection lineage (Cohen 2008; Wig 2014; Gordon 2016; Schaefer

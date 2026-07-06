@@ -104,7 +104,7 @@ none is a cuSOLVER-free dense symmetric eig.
   machinery this is the jittable, on-device alternative to.
 - `src/nitrix/linalg/_eigsolve.py` — the extremal-eigensolver dispatcher a
   `'jacobi'` method would join (`docs/design/eigsolve-dispatcher.md`).
-- [`gpu-cusolver-first-call-handle-failure.md`](gpu-cusolver-first-call-handle-failure.md)
+- [`gpu-cusolver-first-call-handle-failure.md`](resolved/gpu-cusolver-first-call-handle-failure.md)
   — the broken-cuSOLVER reality that motivates a solver-free eig.
 - [`spectral-embedding-gpu-solver.md`](resolved/spectral-embedding-gpu-solver.md) (B14) —
   sibling GPU-eig robustness item.

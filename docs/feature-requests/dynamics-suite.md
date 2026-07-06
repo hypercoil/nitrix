@@ -265,7 +265,7 @@ DE-suite relevance + current status. **Add to the linked doc, not here.**
 | Matrix functions | [`matrix-functions.md`](matrix-functions.md) | `matrix_exp`/`matrix_log` ✅; `expm_multiply` action open | exponential integrator (DS-3) + large-graph `expm(A)·v` (network diffusion) |
 | Heat-kernel diffusion | [`heat-kernel-diffusion.md`](heat-kernel-diffusion.md) | partial (`diffusion_embedding` shipped) | `exp(−tL)` on the connectome = **linear network-diffusion spreading** |
 | Gaussian-process models | [`gaussian-process-models.md`](gaussian-process-models.md) | ✅ `gp_fit`/HSGP shipped | **priors over model parameters** for Bayesian inversion |
-| Graphical lasso | [`graphical-lasso.md`](graphical-lasso.md) | ✅ `glasso` shipped | sparse **effective-connectivity** priors / structure |
+| Graphical lasso | [`graphical-lasso.md`](resolved/graphical-lasso.md) | ✅ `glasso` shipped | sparse **effective-connectivity** priors / structure |
 | Continuous / graph wavelet transform | [`continuous-wavelet-transform.md`](continuous-wavelet-transform.md), [`graph-wavelet-transform.md`](graph-wavelet-transform.md) | filed | time-frequency analysis of **simulated** output (post-sim) |
 
 ## 5. New gaps — integrator primitives not yet owned by any FR
@@ -500,7 +500,7 @@ a TVB/Hopf/digital-twin module is filed.
   (`expm` action), [`heat-kernel-diffusion.md`](heat-kernel-diffusion.md)
   (`exp(−tL)` network diffusion).
 - **Prior / structure dependencies.** [`gaussian-process-models.md`](gaussian-process-models.md),
-  [`graphical-lasso.md`](graphical-lasso.md).
+  [`graphical-lasso.md`](resolved/graphical-lasso.md).
 - **Governance.** SPEC §1 (charter / non-goals), §4 (no model subpackage), §9
   (consumer-first graduation gate — every DS item is gated on a named blocked
   consumer; the Effort-L items DS-1/DS-5 + the continuous adjoint need SPEC-level

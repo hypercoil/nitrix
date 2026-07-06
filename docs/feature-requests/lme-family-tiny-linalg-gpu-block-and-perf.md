@@ -15,7 +15,7 @@
 > **Scope split.** `flame_two_level` *additionally* skips on GPU with a cuSOLVER
 > handle-creation error — but that is a separate, **lower-confidence /
 > cause-unknown** GPU-availability issue, filed on its own in
-> [`gpu-cusolver-first-call-handle-failure`](gpu-cusolver-first-call-handle-failure.md)
+> [`gpu-cusolver-first-call-handle-failure`](resolved/gpu-cusolver-first-call-handle-failure.md)
 > (with a provisional warm-up workaround and strict verification demands). This
 > FR is the **performance** half: measured, reproducible, and clearly nitrix's
 > to fix regardless of the GPU question. **Correction to an earlier draft:**
@@ -26,7 +26,7 @@
 
 Two coupled CPU symptoms, both traced to the same place (the GPU skip is a
 third symptom, filed separately —
-[`gpu-cusolver-first-call-handle-failure`](gpu-cusolver-first-call-handle-failure.md)):
+[`gpu-cusolver-first-call-handle-failure`](resolved/gpu-cusolver-first-call-handle-failure.md)):
 
 1. **Compile scales linearly in `V`** (XLA:CPU). `flame_two_level`:
    `compile = 1.5 s @ V=1024 → 10.2 s @ 65536 → 21.1 s @ 131072` (≈ linear at
@@ -60,7 +60,7 @@ cuSOLVER custom-call.
 - **GPU (separate FR):** `jnp.linalg.cholesky` lowers to cuSOLVER `potrf`, whose
   handle creation fails on this L4 in `flame_two_level` — an opaque,
   cause-unknown issue filed in
-  [`gpu-cusolver-first-call-handle-failure`](gpu-cusolver-first-call-handle-failure.md).
+  [`gpu-cusolver-first-call-handle-failure`](resolved/gpu-cusolver-first-call-handle-failure.md).
   Relevant here only because the closed-form fix below makes **no** cuSOLVER
   call (a 1×1 `sqrt`, not a `potrf`), so it sidesteps that issue for free.
 - **CPU compile / runtime:** the score and Hessian are taken by **second-order
@@ -77,7 +77,7 @@ cuSOLVER custom-call.
 
 *(The GPU-skip repros — the cuSOLVER handle-creation behaviour and why
 `flame_two_level` skips while `reml_fit` does not — live in the companion FR
-[`gpu-cusolver-first-call-handle-failure`](gpu-cusolver-first-call-handle-failure.md),
+[`gpu-cusolver-first-call-handle-failure`](resolved/gpu-cusolver-first-call-handle-failure.md),
 since they are observational and cause-unknown. The repro below is the
 **performance** one: solid and reproducible.)*
 
@@ -128,7 +128,7 @@ The fix is **not** "delete the Cholesky and assume `p = 1`" — it is a
   decomposition). The minority of general-`p` callers should keep both
   **correctness** and **availability** rather than inheriting today's skip. One
   GPU subtlety carries over from the companion FR
-  [`gpu-cusolver-first-call-handle-failure`](gpu-cusolver-first-call-handle-failure.md):
+  [`gpu-cusolver-first-call-handle-failure`](resolved/gpu-cusolver-first-call-handle-failure.md):
   on this L4 an `LU`/`solve`-based fallback runs but a Cholesky- or eigh-based
   one may not, so prefer an `LU`/CPU fallback for the general path and verify it
   on the target GPU.
@@ -185,7 +185,7 @@ its GPU availability**, so the cleanup must be done as a set, not piecemeal:
    CPU overhead. ⚠️ **Fix-risk (GPU):** on this L4 this `2×2` solve is also the
    `getrf` that incidentally keeps `reml_fit`'s GPU path alive — removing it
    while leaving the eigh/Cholesky in place would reintroduce the skip. See
-   [`gpu-cusolver-first-call-handle-failure`](gpu-cusolver-first-call-handle-failure.md)
+   [`gpu-cusolver-first-call-handle-failure`](resolved/gpu-cusolver-first-call-handle-failure.md)
    for the mechanism and the verification this demands; the clean resolution is
    to remove **all** the per-voxel cuSOLVER calls together (items 1–3), leaving
    none.
@@ -223,6 +223,6 @@ inside) would additionally **bound** peak memory as a tunable knob, fixing the
   `reml_fit` `safe_eigh` 448, `vmap` 467.
 - Companion GPU-availability FR (the cuSOLVER skip, observational / cause
   unknown):
-  [`gpu-cusolver-first-call-handle-failure`](gpu-cusolver-first-call-handle-failure.md).
+  [`gpu-cusolver-first-call-handle-failure`](resolved/gpu-cusolver-first-call-handle-failure.md).
 - The perf-bench ledger:
   [`perf-bench-feedback.md`](perf-bench-feedback.md).

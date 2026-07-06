@@ -29,7 +29,7 @@ same implicit-VJP machinery already validated for LOBPCG.
 **Likely consumer.** Deep-equilibrium models for surface registration,
 iterative ICA fixed-point solvers, implicit filters that solve a per-sample
 optimisation. Underpins the convergence-point gradients in
-[`graphical-lasso.md`](../graphical-lasso.md) and
+[`graphical-lasso.md`](graphical-lasso.md) and
 [`clustering-primitives.md`](../clustering-primitives.md).
 
 **Effort.** M. Depends on §12.1.

@@ -1,9 +1,10 @@
 # Adaptive area-weighted barycentric resampling — `nitrix.geometry.sphere.resample`
 
-> **Status (2026-06-02): partial — `BARYCENTRIC` on icosphere hierarchies is
-> shipped (`mesh_bary_upsample` / `icosphere_bary_upsampler`); the
-> arbitrary-triangulation `ADAP_BARY_AREA` case is not.** Brainstorm
-> candidate; promotion gated by the §13 acceptance protocol. Provenance:
+> **Status (2026-07-06): SHIPPED.** `geometry.surface_resample` exposes both
+> `method='barycentric'` and `method='adap_bary_area'` — the adaptive
+> area-weighted case (the shipped **default**, `geometry/sphere.py`) is
+> complete, alongside the icosphere `mesh_bary_upsample` /
+> `icosphere_bary_upsampler`. Provenance:
 > `docs/feature-requests catalogue §12.15`.
 
 **What.** Connectome Workbench's `ADAP_BARY_AREA` cross-mesh resampling
@@ -55,6 +56,6 @@ arbitrary-mesh `surface_resample` and no area-weighted / adaptive variant.
 
 - `docs/feature-requests catalogue §12.15` — origin entry; `§13` — acceptance protocol.
 - `src/nitrix/sparse/mesh.py` — `mesh_bary_upsample` / `icosphere_bary_upsampler`.
-- [`ilex-pipeline-substrate.md`](ilex-pipeline-substrate.md) — the
+- [`ilex-pipeline-substrate.md`](../ilex-pipeline-substrate.md) — the
   surface↔sphere parameterisation scope boundary (the `surfa`-side projection
   stays with the consumer; the array resample is `nitrix`).

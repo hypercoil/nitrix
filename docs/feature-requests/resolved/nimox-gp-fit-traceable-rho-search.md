@@ -1,6 +1,10 @@
 # Make `gp_fit`'s lengthscale-search epilogue traceable (jit / vmap the GP fit)
 
-> **Status (2026-06-25): SHIPPED (Tier-A).** The Gaussian HSGP rho-search
+> **Status (2026-07-06): SHIPPED (Tier-A + the `hgp_fit` follow-on).** Both the
+> `gp_fit` and the hierarchical `hgp_fit` Gaussian-HSGP rho-searches are traceable
+> and tested (`test_gp_traceable.py` / `test_hgp_traceable.py`); the Tier-B
+> traced-`x` / non-Gaussian-exact paths stay deferred (lower priority). The
+> Gaussian HSGP rho-search
 > epilogue is traceable: a JAX-native `_parabolic_argmin_jax` (grid argmin +
 > 3-point parabolic refine, `jnp.where` fallbacks → a **traced** scalar)
 > replaces the host `_parabolic_argmin(np.asarray(...))`, `rho_hat` stays a
@@ -165,7 +169,7 @@ basis, and `xtx` are all computed from the concrete `x` at trace time, so only t
   and `tests/test_gp.py::test_fit_is_eager_only` witnesses it.
 - `nitrix.stats.gp.gp_fit` / `_parabolic_argmin` (`stats/gp.py:932-935`, the
   helper just below `gp_predict`) — the site.
-- [`gaussian-process-models.md`](gaussian-process-models.md) /
-  [`stats-suite-review-gp.md`](stats-suite-review-gp.md) — the GP suite's own
+- [`gaussian-process-models.md`](../gaussian-process-models.md) /
+  [`stats-suite-review-gp.md`](../stats-suite-review-gp.md) — the GP suite's own
   planning / review register (the HSGP "rho-estimation stays inside the fast
   paths" design intent this completes).

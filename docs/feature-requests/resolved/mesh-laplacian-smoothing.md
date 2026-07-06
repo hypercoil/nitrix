@@ -47,7 +47,7 @@ re-deriving incidence.
 step); `geometry.dec` cotangent Laplacian (area/angle-weighted, for DEC —
 this is the cheaper combinatorial sibling). Pairs with
 [`compute-vertex-normals`](compute-vertex-normals.md) and
-[`mesh-curvature`](../mesh-curvature.md) as the per-vertex mesh-geometry family.
+[`mesh-curvature`](mesh-curvature.md) as the per-vertex mesh-geometry family.
 
 **Home.** `nitrix.geometry` mesh surface (or `nitrix.sparse.mesh`, next to
 the `Mesh` dataclass and `compute_vertex_normals`).
@@ -56,5 +56,5 @@ the `Mesh` dataclass and `compute_vertex_normals`).
 
 - [`ilex-training-substrate.md`](../ilex-training-substrate.md) — survey context.
 - [`compute-vertex-normals.md`](compute-vertex-normals.md),
-  [`mesh-curvature.md`](../mesh-curvature.md) — the per-vertex mesh family.
+  [`mesh-curvature.md`](mesh-curvature.md) — the per-vertex mesh family.
 - `src/nitrix/sparse/mesh.py` — the `Mesh` adjacency to build on.

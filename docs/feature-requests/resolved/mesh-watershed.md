@@ -1,8 +1,8 @@
 # Watershed segmentation on meshes — `nitrix.graph.parcellation.watershed`
 
-> **Status (2026-06-02): not started.** Brainstorm candidate; promotion
-> gated by the §13 acceptance protocol. A host-side (NumPy) primitive
-> returning a JAX array — same pattern as `mesh_k_ring_adjacency`.
+> **Status (2026-07-06): SHIPPED** (via the geometry suite).
+> `graph.parcellation.mesh_watershed` (priority-flood, `h_min` depth-merge),
+> tested in `test_parcellation.py`.
 > Provenance: `docs/feature-requests catalogue §12.17`.
 
 **What.** Priority-flood watershed on a vertex-valued scalar field with

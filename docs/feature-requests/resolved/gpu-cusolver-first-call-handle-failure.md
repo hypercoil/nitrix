@@ -1,6 +1,12 @@
 # GPU availability: cuSOLVER `gpusolverDnCreate` fails for a Cholesky/eigh-first program on the L4 (`flame_two_level` skips) — cause unknown
 
-> **Status (2026-06-12): GPU-availability finding — OBSERVATIONAL ONLY.** On the
+> **Status (2026-07-06): CLOSED — documented env caveat, no code action.**
+> Archived as an observational finding (the FR itself says "not a fix; do not
+> ship one on the strength of these observations"): the cuSOLVER handle failure
+> is a property of *this environment*, and nitrix already routes around dead
+> cuSOLVER via the `linalg._solver.safe_*` fallbacks.
+>
+> **Original (2026-06-12): GPU-availability finding — OBSERVATIONAL ONLY.** On the
 > benchmark L4 (jax 0.10.0), `stats.lme.flame_two_level` skips on GPU with a
 > cuSOLVER handle-creation error. We characterised the *behaviour* fairly
 > thoroughly but **did not establish a cause** — read every statement below as
@@ -109,7 +115,7 @@ repeated measurement**, never reasoned to be correct:
 ## Relationship to the perf rewrite
 
 Companion FR
-[`lme-family-tiny-linalg-gpu-block-and-perf`](lme-family-tiny-linalg-gpu-block-and-perf.md)
+[`lme-family-tiny-linalg-gpu-block-and-perf`](../lme-family-tiny-linalg-gpu-block-and-perf.md)
 proposes replacing the tiny per-voxel Cholesky with closed-form algebra for
 CPU-steady/compile wins. Because that path makes **no cuSOLVER call at all**, it
 also sidesteps *this* bug for the `p ∈ {1, 2}` hot path — the most robust

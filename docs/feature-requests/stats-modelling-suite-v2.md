@@ -14,8 +14,8 @@
 > GLM/GAM/GAMM, TFCE `randomise` — merged to `main`). v2 collects (a) the items
 > v1 deliberately deferred and (b) the long-deferred **regularised connectivity
 > estimators** Ledoit-Wolf and graphical LASSO
-> ([`ledoit-wolf-shrinkage.md`](ledoit-wolf-shrinkage.md),
-> [`graphical-lasso.md`](graphical-lasso.md), docs/feature-requests catalogue §12.14). It reuses the v1
+> ([`ledoit-wolf-shrinkage.md`](resolved/ledoit-wolf-shrinkage.md),
+> [`graphical-lasso.md`](resolved/graphical-lasso.md), docs/feature-requests catalogue §12.14). It reuses the v1
 > substrate wholesale — the cuSOLVER-free tiny-SPD solve (`stats._smalllinalg`,
 > incl. the rolled Cholesky), the chunked-`vmap` spine (`_blocked_vmap`), the
 > `_varcomp` REML engine, the GLM/IRLS core, and the spline-basis machinery —
@@ -158,7 +158,7 @@ are the regularised counterparts that stay invertible and well-conditioned in
 the small-sample regime. New module `stats/connectivity.py` (or fold into
 `stats.covariance`).
 
-### §4.1 Ledoit-Wolf / OAS analytic shrinkage  *(was [`ledoit-wolf-shrinkage.md`](ledoit-wolf-shrinkage.md))*
+### §4.1 Ledoit-Wolf / OAS analytic shrinkage  *(was [`ledoit-wolf-shrinkage.md`](resolved/ledoit-wolf-shrinkage.md))*
 
 **What.** `ledoit_wolf(X) -> (cov, shrinkage)` and `shrunk_covariance(X, *,
 method='ledoit_wolf' | 'oas')`: the closed-form convex blend `Σ̂ = (1−α)S + αμI`
@@ -171,7 +171,7 @@ defaults to `LedoitWolf`), so it is the missing piece for a
 nilearn-default-equivalent estimator. **Effort: S** (~20-line closed form).
 **Oracle:** `sklearn.covariance.LedoitWolf` / `OAS` to ~1e-10.
 
-### §4.2 Graphical LASSO  *(was [`graphical-lasso.md`](graphical-lasso.md), §12.14)*
+### §4.2 Graphical LASSO  *(was [`graphical-lasso.md`](resolved/graphical-lasso.md), §12.14)*
 
 **What.** `glasso(S, lam) -> Θ` (sparse precision), `glasso_path(S, lambdas)`,
 `ebic_score(Θ, S, lam, gamma)`:
@@ -464,8 +464,8 @@ F-contrast in randomise needs per-permutation dispersion.
 ## §9. Cross-references
 
 - v1 ledger (shipped): [`stats-modelling-suite.md`](stats-modelling-suite.md).
-- Origin docs folded here: [`ledoit-wolf-shrinkage.md`](ledoit-wolf-shrinkage.md),
-  [`graphical-lasso.md`](graphical-lasso.md) (§12.14),
+- Origin docs folded here: [`ledoit-wolf-shrinkage.md`](resolved/ledoit-wolf-shrinkage.md),
+  [`graphical-lasso.md`](resolved/graphical-lasso.md) (§12.14),
   [`robust-statistics.md`](robust-statistics.md) (§12.7 — adjacent, *not* in v2
   scope; robust LME / M-estimators, a future v3 candidate).
 - Substrate: `src/nitrix/stats/_smalllinalg.py`, `stats/lme/_varcomp.py`,
