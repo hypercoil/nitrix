@@ -128,10 +128,93 @@ are resolved from the theory, not ported:
 
 51 tests green; ruff + mypy clean. Downstream (`nimox`): the
 `VonMisesFisher(numpyro.Distribution)` wrapper, `NormSphereParameter`, and the
-parcellation emission model. Follow-ups (family growth): Watson / Bingham /
-Kent; the coordinate-kernel spatial prior construction. `docs/op_matrix.json`
-render regen deferred (ungated generated artifact; full run flakes on
-single-process XLA-CPU).
+parcellation emission model. `docs/op_matrix.json` render regen deferred (ungated
+generated artifact; full run flakes on single-process XLA-CPU).
+
+### Family growth — Watson SHIPPED (2026-07-06); Kent / Bingham next
+
+**Watson** (the *axial* distribution, `x ≡ -x`) is built and validated on branch
+`feat/stats-directional-watson`: `log_kummer_m` (the Kummer confluent-
+hypergeometric normaliser `M(½, p/2, κ) = ₁F₁(½; p/2; κ)` — regime-split
+series/large-argument asymptotic, Kummer's transform `M(a,b,z)=eᶻM(b−a,b,−z)` for
+the girdle `κ<0`, validated **< 2e-13 vs mpmath** including `κ=0`), `watson_log_prob`
+(surface-measure density, consistent with `vmf_log_prob`), and `watson_fit` /
+`WatsonFit` (MLE = scatter eigenvector + bisection on the monotone `g(κ)=∂_κ log M
+= r̄`, recovering **both** bipolar `κ>0` and girdle `κ<0`, likelihood-selected).
+Two gradient-boundary fixes were load-bearing: the `|z|→z` double-`where` and an
+**additive-`eps`** series floor (a clamping/denormal floor zeroes or underflows
+`g(0)=1/p`, which then misroutes every girdle root-find). 18 tests + op-matrix.
+
+**Kent (FB5) SHIPPED (2026-07-06)** — the S² *elliptical* vMF, density `∝
+exp(κ γ₁ᵀx + β[(γ₂ᵀx)² − (γ₃ᵀx)²])`: `log_kent_normaliser` (the half-integer-
+Bessel series `c(κ,β)=2π Σ_j (Γ(j+½)/j!) β^{2j} (2/κ)^{2j+½} I_{2j+½}(κ)`,
+**reusing `log_iv`**; validated **< 7e-15 vs mpmath** and reducing to `1/C_3(κ)`
+at β=0), `kent_log_prob` (surface-measure density), and `kent_fit` / `KentFit`
+(Kent-1982 moment estimator — resultant mean + tangent-plane axis
+diagonalisation; frame + κ recovered accurately, β carries the estimator's known
+finite-κ downward bias, documented with an MLE-refinement note). 23 tests.
+
+**Unnormalised energy SHIPPED (2026-07-06)** — `vmf_log_prob` /
+`watson_log_prob` / `kent_log_prob` take **`normalize=False`**, returning the
+bare exponent (natural-parameter · sufficient-statistic) with the normaliser
+*dropped and never computed*. The tractable-in-high-d, per-site Gibbs/Markov-
+random-field **clique potential** (the parcellation setting), score-kernel-clean
+— field-energy composition/scalarisation stays downstream (SPEC §5).
+
+**`fisher_bingham_energy` SHIPPED (2026-07-06)** — the *general* quadratic-
+exponential sphere energy on any `S^{p-1}`: `E = κ γ₁ᵀx + Σⱼ βⱼ(γⱼᵀx)²`
+(orthonormal frame + coefficient vector; the Fisher–Bingham family `exp(κμᵀx +
+xᵀAx)`, `A = Γ diag(β) Γᵀ`). **Named for the family, not one member** (user
+correction — it subsumes several). Validated to reduce, to machine precision, to
+**vMF** (β=0), **Watson** (rank-1 quadratic), **Bingham** (κ=0, `= xᵀAx`), and the
+**S² Kent** (p=3). Energy-only (the p-dim normaliser is intractable) — the
+tractable-at-any-`p` MRF potential for high-dimensional directional fields.
+
+> **Abstraction check (2026-07-06): the subsumption is mathematical, NOT an
+> implementation-sharing directive — keep the specialised energies.** Empirically
+> (jaxpr + compiled timing): `fisher_bingham_energy(β=0)` does **not** reduce to
+> the vMF/Watson energy. It performs a full-frame `Γᵀx` matvec (**O(p²)**, one
+> `dot_general`) and always evaluates the quadratic, whereas `vmf`/`watson_log_prob
+> (normalize=False)` are **O(p)** single-direction dot products (0 `dot_general`;
+> `μ` is a *vector*, not a frame). Since `κ`/`β` are runtime arrays, XLA cannot
+> dead-code-eliminate back to the specialised path — measured **4.4× slower at
+> p=64, 18.8× at p=256**, growing with `p`. Plus an API mismatch (vMF/Watson take a
+> direction; delegating would force materialising an arbitrary orthonormal
+> complement) and no shared numerical-stability code (the energies are plain
+> polynomials; all stability lives in the *normalisers*, which this energy-only
+> form doesn't touch). Only the **S² Kent** energy is ~equivalent (both project
+> all axes; neutral). A guard-note is in the `fisher_bingham_energy` docstring so a
+> future DRY refactor doesn't regress this.
+
+**`watson_sample` + `bingham_sample` SHIPPED (2026-07-06)** — the
+**Angular-Central-Gaussian rejection** (Kent–Ganeiber–Mardia 2018): a
+`lax.while_loop` for **guaranteed acceptance** with **bounded ~25% efficiency
+uniformly** in concentration and dimension (vs the naïve Beta/vMF envelopes,
+which collapse to ~0% at high `κ`), and **normaliser-free**. Correctness is
+*automatic*: accept = `r(s)/sup_s r`, independent of the envelope parameter `b`
+(which only sets efficiency; `b` solves `Σ 1/(b+2aⱼ)=1` by bisection). Watson is
+the rank-one Bingham. Validated: sampled `E[(μᵀx)²]` matches the exact Watson
+second-moment oracle to <0.01 across `p` and bipolar/girdle `κ`; sample→fit
+round-trips; Bingham mode structure + uniform limit. 24 tests.
+
+Still to build — the two **research-grade** pieces (deferred over shipping
+unvalidated/inefficient math; the correctness mandate):
+
+1. **Kent sampler** — Kent is Fisher–Bingham (a linear term *plus* quadratic).
+   The naïve vMF-envelope tilt has acceptance ~`exp(−β)` → unusable for eccentric
+   Kent (`2β/κ → 1`). And the linear term breaks the pure-quadratic ACG's
+   *automatic* sup-bound (the ratio then depends on `x` through two scalars, not
+   one), so an efficient sampler needs the KGM **FB-specific** construction —
+   research-tracked.
+2. **Bingham normaliser + `bingham_log_prob` + `bingham_fit`** — the "very
+   difficult" constant: the confluent hypergeometric of *matrix* argument. The
+   **Kume–Wood saddlepoint** is the standard tractable route (its saddlepoint
+   equation `Σ 1/(2(t̂−λⱼ))=1` mirrors the shipped ACG `b`), but it is an
+   *approximation* needing careful derivation + Monte-Carlo validation before
+   shipping. The Bingham **energy and sampler already ship**, so this is reduced
+   to the normaliser-dependent density/MLE only — research-tracked.
+
+Plus the coordinate-kernel spatial-prior construction (independent).
 
 ## 5. Cross-references
 

@@ -16,9 +16,12 @@ Submodules
   / correlation over time series, with JIT-friendly batch handling.
 - ``gaussian`` -- closed-form diagonal-Gaussian KL divergence and
   negative log-likelihood (log-variance parameterised).
-- ``directional`` -- von Mises-Fisher directional statistics on the sphere
-  (full-range :func:`log_iv` normaliser, :func:`vmf_log_prob`, MLE
-  :func:`vmf_fit`, Wood-1994 :func:`vmf_sample`).
+- ``directional`` -- von Mises-Fisher / Watson / Kent directional statistics
+  on the sphere: normalisers (:func:`log_iv` / :func:`log_kummer_m` /
+  :func:`log_kent_normaliser`), densities and MLE fits, the general
+  :func:`fisher_bingham_energy` (unnormalised, any dimension), and samplers
+  (:func:`vmf_sample`, and :func:`watson_sample` / :func:`bingham_sample` by
+  Angular-Central-Gaussian rejection).
 - ``glm`` -- mass-univariate generalised linear models (OLS / WLS /
   exponential-family IRLS) with t / F contrasts and goodness-of-fit.
 - ``betareg`` / ``ordinal`` / ``gaulss`` -- additional response models: beta
@@ -137,11 +140,22 @@ from .lme import (
     var_power,
 )
 from .directional import (
+    KentFit,
     VMFFit,
+    WatsonFit,
+    bingham_sample,
+    fisher_bingham_energy,
+    kent_fit,
+    kent_log_prob,
     log_iv,
+    log_kent_normaliser,
+    log_kummer_m,
     vmf_fit,
     vmf_log_prob,
     vmf_sample,
+    watson_fit,
+    watson_log_prob,
+    watson_sample,
 )
 from .gaussian import gaussian_nll, kl_diagonal_gaussian
 from .glm import (
@@ -211,12 +225,23 @@ __all__ = [
     # gaussian
     'kl_diagonal_gaussian',
     'gaussian_nll',
-    # directional (von Mises-Fisher)
+    # directional (von Mises-Fisher + Watson)
     'log_iv',
     'vmf_log_prob',
     'vmf_fit',
     'vmf_sample',
     'VMFFit',
+    'log_kummer_m',
+    'watson_log_prob',
+    'watson_fit',
+    'WatsonFit',
+    'log_kent_normaliser',
+    'kent_log_prob',
+    'kent_fit',
+    'KentFit',
+    'fisher_bingham_energy',
+    'watson_sample',
+    'bingham_sample',
     # glm
     'Family',
     'Link',
