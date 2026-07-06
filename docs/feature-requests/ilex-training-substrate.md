@@ -109,6 +109,7 @@ Severity: **ENABLING** = a downstream surface is blocked / hand-rolling it;
 | Gamma, histogram-shift, gaussian/rician noise | [intensity-augmentation-ops](intensity-augmentation-ops.md) | CONVENIENCE | `augment.intensity` |
 | Gibbs (truncation) ringing artefact | [gibbs-ringing](gibbs-ringing.md) | CONVENIENCE | `augment.intensity` |
 | Random flip / crop / resized-crop / affine / SVF gen | [geometric-augmentation-ops](geometric-augmentation-ops.md) | CONVENIENCE | `augment.geometric` |
+| jit-safe traced sigma for `smoothing.gaussian` | [gaussian-smooth-traced-sigma](gaussian-smooth-traced-sigma.md) | ENABLING | `smoothing.gaussian` |
 
 ### Loss / metric numerics (nimox loss library)
 
