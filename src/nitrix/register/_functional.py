@@ -148,6 +148,7 @@ __all__ = [
     'SubspaceAlignment',
     'ProMises',
     'EfficientProMises',
+    'CoordinateKernelPrior',
     'functional_align',
     'functional_align_fit',
     'functional_align_apply',
@@ -377,6 +378,86 @@ def _right_basis(
 
 @jax.tree_util.register_pytree_node_class
 @dataclass(frozen=True)
+class CoordinateKernelPrior:
+    r"""A whole-brain-tractable spatial (coordinate-kernel) ProMises prior.
+
+    The ProMises location prior can encode anatomy: a spatial RBF kernel over the
+    loci's coordinates, :math:`K_{ij} = \exp(-\lVert s_i - s_j \rVert^2 /
+    (2\ell^2))`, biases the alignment so spatially-nearby loci map to nearby loci
+    (regularising the functional match toward anatomical plausibility).  At
+    whole-brain scale the dense :math:`(p, p)` prior cannot be formed, and
+    :class:`EfficientProMises` needs only its subspace projection :math:`F^\star =
+    Q_X^\top F Q_M` (Lemma 5).  This constructs :math:`F^\star` directly by
+    **random Fourier features** -- :math:`K \approx \Phi \Phi^\top`, so
+    :math:`F^\star \approx (Q_X^\top \Phi)(\Phi^\top Q_M)` -- costing :math:`O(p\,
+    r\, l)` and **never forming the** :math:`(p, p)` **kernel** (:math:`r =`
+    ``n_features``; approximation error :math:`O(r^{-1/2})`).
+
+    Attributes
+    ----------
+    coords
+        Locus coordinates :math:`(..., p, d)` -- the shared source/reference grid
+        (e.g. voxel or vertex positions).
+    lengthscale
+        The RBF length-scale :math:`\ell` (larger = smoother, longer-range spatial
+        coupling).  A static scalar.
+    key
+        PRNG key for the random Fourier features.
+    n_features
+        Number of random features :math:`r` (static).
+    """
+
+    coords: Float[Array, '... p d']
+    lengthscale: float
+    key: Array
+    n_features: int = 256
+
+    def reduced(
+        self,
+        source_basis: Float[Array, '... p l'],
+        reference_basis: Float[Array, '... p l'],
+    ) -> Float[Array, '... l l']:
+        r"""The subspace-projected prior :math:`F^\star \approx Q_X^\top K Q_M`.
+
+        Random Fourier features (:math:`K \approx \Phi \Phi^\top`) give
+        :math:`(Q_X^\top \Phi)(\Phi^\top Q_M)` without forming the :math:`(p, p)`
+        kernel.  ``source_basis`` / ``reference_basis`` are the row-space bases
+        :math:`Q_X` / :math:`Q_M` computed inside :meth:`EfficientProMises.fit`.
+        """
+        r = self.n_features
+        d = self.coords.shape[-1]
+        dtype = self.coords.dtype
+        k_omega, k_bias = jax.random.split(self.key)
+        # RBF spectral density: omega ~ N(0, 1/ell^2) per dimension.
+        omega = (
+            jax.random.normal(k_omega, (r, d), dtype=dtype) / self.lengthscale
+        )
+        bias = jax.random.uniform(
+            k_bias, (r,), dtype=dtype, minval=0.0, maxval=2.0 * jnp.pi
+        )
+        phi = jnp.sqrt(2.0 / r) * jnp.cos(self.coords @ _mT(omega) + bias)
+        return (_mT(source_basis) @ phi) @ (_mT(phi) @ reference_basis)
+
+    def tree_flatten(
+        self,
+    ) -> Tuple[Tuple[Array, Array], Tuple[float, int]]:
+        return (self.coords, self.key), (self.lengthscale, self.n_features)
+
+    @classmethod
+    def tree_unflatten(
+        cls, aux: Tuple[float, int], children: Tuple[Any, ...]
+    ) -> 'CoordinateKernelPrior':
+        lengthscale, n_features = aux
+        return cls(
+            coords=children[0],
+            key=children[1],
+            lengthscale=lengthscale,
+            n_features=n_features,
+        )
+
+
+@jax.tree_util.register_pytree_node_class
+@dataclass(frozen=True)
 class EfficientProMises:
     """Subspace (whole-brain) ProMises alignment (a :class:`AlignmentMethod`).
 
@@ -396,9 +477,15 @@ class EfficientProMises:
         reduced solve.  ``None`` (default) is plain Procrustes and stays fully
         :math:`O(p n^2)`; a dense ``prior`` costs :math:`O(p^2 l)` to project
         (the :math:`(p, p)` matrix must exist).  A pytree child.
+    spatial_prior
+        Optional :class:`CoordinateKernelPrior` -- the **whole-brain-tractable**
+        alternative to a dense ``prior``: it builds the subspace-projected
+        location matrix :math:`F^\\star = Q_X^\\top K Q_M` directly from locus
+        coordinates by random Fourier features, never forming the :math:`(p, p)`
+        kernel.  Used only when ``prior is None``.  A pytree child.
     prior_weight
-        Scalar concentration :math:`k` multiplying ``prior``; ignored when
-        ``prior is None``.
+        Scalar concentration :math:`k` multiplying ``prior`` / ``spatial_prior``;
+        ignored when both are ``None``.
     allow_reflection
         Whether the reduced rotation may be improper (a reflection within the
         subspace).  See :class:`ProMises`.
@@ -413,6 +500,7 @@ class EfficientProMises:
     prior_weight: float = 1.0
     allow_reflection: bool = True
     n_components: Optional[int] = None
+    spatial_prior: Optional['CoordinateKernelPrior'] = None
 
     def fit(
         self,
@@ -430,6 +518,10 @@ class EfficientProMises:
         if self.prior is not None:
             # Lemma 5: project the (p, p) prior into the subspace, Q_X^T F Q_M.
             f = _mT(qx) @ (self.prior_weight * self.prior) @ qm  # (..., l, l)
+        elif self.spatial_prior is not None:
+            # Whole-brain path: build F* = Q_X^T K Q_M directly from coordinates
+            # via random Fourier features -- the (p, p) kernel is never formed.
+            f = self.prior_weight * self.spatial_prior.reduced(qx, qm)
         reduced = orthogonal_procrustes(
             a,
             b,
@@ -444,9 +536,12 @@ class EfficientProMises:
 
     def tree_flatten(
         self,
-    ) -> Tuple[Tuple[Optional[Array]], Tuple[float, bool, Optional[int]]]:
+    ) -> Tuple[
+        Tuple[Optional[Array], Optional['CoordinateKernelPrior']],
+        Tuple[float, bool, Optional[int]],
+    ]:
         return (
-            (self.prior,),
+            (self.prior, self.spatial_prior),
             (self.prior_weight, self.allow_reflection, self.n_components),
         )
 
@@ -459,6 +554,7 @@ class EfficientProMises:
         prior_weight, allow_reflection, n_components = aux
         return cls(
             prior=children[0],
+            spatial_prior=children[1],
             prior_weight=prior_weight,
             allow_reflection=allow_reflection,
             n_components=n_components,

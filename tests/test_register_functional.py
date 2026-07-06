@@ -392,3 +392,93 @@ def test_efficient_is_pytree_jit_vmap_grad() -> None:
         lambda a: functional_align(a, m, method=EfficientProMises()).sum()
     )(x)
     assert bool(jnp.all(jnp.isfinite(g)))
+
+
+# ---------------------------------------------------------------------------
+# CoordinateKernelPrior: whole-brain-tractable spatial ProMises prior
+# ---------------------------------------------------------------------------
+
+
+def _fa_data(n=20, p=60, d=3, seed=0):
+    rng = np.random.default_rng(seed)
+    coords = jnp.asarray(rng.standard_normal((p, d)))
+    x = jnp.asarray(rng.standard_normal((n, p)))
+    m = jnp.asarray(rng.standard_normal((n, p)))
+    return coords, x, m
+
+
+def test_coordinate_kernel_prior_rff_converges_to_exact_projection():
+    """F* via random Fourier features approaches the exact Q_X^T K Q_M as the
+    feature count grows (error ~ r^{-1/2}); the (p, p) kernel is never formed."""
+    from nitrix.linalg import rbf_kernel
+    from nitrix.register import CoordinateKernelPrior
+    from nitrix.register._functional import _right_basis
+
+    coords, x, m = _fa_data()
+    qx, qm = _right_basis(x, None), _right_basis(m, None)
+    ell = 1.5
+    k_exact = rbf_kernel(coords, coords, gamma=1.0 / (2 * ell**2))
+    f_exact = qx.T @ k_exact @ qm
+
+    def rel_err(r):
+        ckp = CoordinateKernelPrior(coords, ell, jax.random.PRNGKey(0), r)
+        f = ckp.reduced(qx, qm)
+        assert f.shape == (qx.shape[1], qm.shape[1])  # (l, l), never (p, p)
+        return float(jnp.linalg.norm(f - f_exact) / jnp.linalg.norm(f_exact))
+
+    e_small, e_large = rel_err(256), rel_err(8192)
+    assert e_large < e_small  # more features -> closer
+    assert e_large < 0.05  # accurate at high feature count
+
+
+def test_efficient_promises_spatial_prior_matches_dense_prior_path():
+    """The whole-brain spatial_prior path equals projecting the dense (p, p)
+    kernel prior, once the RFF approximation is accurate."""
+    from nitrix.linalg import rbf_kernel
+    from nitrix.register import CoordinateKernelPrior, EfficientProMises
+
+    coords, x, m = _fa_data()
+    ell = 1.5
+    k_dense = rbf_kernel(coords, coords, gamma=1.0 / (2 * ell**2))
+    ckp = CoordinateKernelPrior(coords, ell, jax.random.PRNGKey(1), 16384)
+
+    fit_spatial = EfficientProMises(spatial_prior=ckp, prior_weight=2.0).fit(
+        x, m
+    )
+    fit_dense = EfficientProMises(prior=k_dense, prior_weight=2.0).fit(x, m)
+    np.testing.assert_allclose(
+        fit_spatial.reduced, fit_dense.reduced, atol=5e-3
+    )
+
+
+def test_spatial_prior_influences_the_alignment():
+    """A spatial prior actually biases the map (differs from prior=None)."""
+    from nitrix.register import CoordinateKernelPrior, EfficientProMises
+
+    coords, x, m = _fa_data(seed=2)
+    ckp = CoordinateKernelPrior(coords, 1.0, jax.random.PRNGKey(2), 1024)
+    with_prior = EfficientProMises(spatial_prior=ckp, prior_weight=5.0).fit(
+        x, m
+    )
+    without = EfficientProMises().fit(x, m)
+    assert float(jnp.max(jnp.abs(with_prior.reduced - without.reduced))) > 1e-3
+
+
+def test_spatial_prior_jit_and_pytree():
+    from nitrix.register import CoordinateKernelPrior, EfficientProMises
+
+    coords, x, m = _fa_data(seed=3)
+
+    def run(c, key):
+        ckp = CoordinateKernelPrior(c, 1.2, key, 512)
+        return EfficientProMises(spatial_prior=ckp).fit(x, m).reduced
+
+    out = jax.jit(run)(coords, jax.random.PRNGKey(0))
+    assert bool(jnp.all(jnp.isfinite(out)))
+    # pytree round-trip carries coords/key as children, lengthscale/n as aux
+    ckp = CoordinateKernelPrior(coords, 1.2, jax.random.PRNGKey(0), 512)
+    method = EfficientProMises(spatial_prior=ckp, prior_weight=3.0)
+    leaves, treedef = jax.tree_util.tree_flatten(method)
+    rebuilt = jax.tree_util.tree_unflatten(treedef, leaves)
+    assert rebuilt.prior_weight == 3.0
+    assert rebuilt.spatial_prior.n_features == 512
