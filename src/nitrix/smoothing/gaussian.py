@@ -20,6 +20,7 @@ from __future__ import annotations
 import math
 from typing import Literal, Optional, Sequence, Union
 
+import jax
 import jax.lax as lax
 import jax.numpy as jnp
 from jax.typing import DTypeLike
@@ -43,7 +44,7 @@ _FIR_SHIFT_MAX_TAPS = 64
 
 
 def _gaussian_1d_kernel(
-    sigma: float,
+    sigma: Union[float, Array],
     truncate: float,
     dtype: DTypeLike,
     *,
@@ -91,10 +92,16 @@ def _gaussian_1d_kernel(
         1D kernel of shape ``(kernel_size,)`` (or ``(2 * half + 1,)``
         under the heuristic), normalised to sum to 1.
     """
-    if sigma <= 0:
+    if kernel_size is None and not isinstance(sigma, (int, float)):
+        raise ValueError(
+            'a traced / array sigma requires an explicit kernel_size; the '
+            'kernel half-width cannot be derived from a non-static sigma.'
+        )
+    if isinstance(sigma, (int, float)) and sigma <= 0:
         raise ValueError(f'sigma must be positive; got {sigma!r}.')
     if kernel_size is None:
-        # Scipy convention.
+        # Scipy convention.  ``sigma`` is host-static here (guarded above).
+        assert isinstance(sigma, (int, float))
         half = int(truncate * sigma + 0.5)
         x = jnp.arange(-half, half + 1, dtype=dtype)
     else:
@@ -324,18 +331,38 @@ def _recursive_gaussian_1d(x: Array, axis: int, sigma: float) -> Array:
 
 
 def _normalise_sigma(
-    sigma: Union[float, Sequence[float]],
+    sigma: Union[float, Sequence[float], Array],
     spatial_rank: int,
-) -> tuple[float, ...]:
+) -> tuple[tuple[Union[float, Array], ...], bool]:
+    """Broadcast ``sigma`` to one value per spatial axis.
+
+    Returns the per-axis sigmas and a ``traced`` flag: ``True`` when ``sigma``
+    is a JAX array / tracer (kept symbolic, for the jit-safe FIR path),
+    ``False`` for a host-static Python scalar / sequence (byte-identical to the
+    historical behaviour).
+    """
     if isinstance(sigma, (int, float)):
-        return (float(sigma),) * spatial_rank
+        return (float(sigma),) * spatial_rank, False
+    if isinstance(sigma, jax.Array):
+        if sigma.ndim == 0:
+            return (sigma,) * spatial_rank, True
+        if sigma.ndim == 1:
+            if sigma.shape[0] != spatial_rank:
+                raise ValueError(
+                    f'sigma has {sigma.shape[0]} elements but spatial_rank='
+                    f'{spatial_rank}.'
+                )
+            return tuple(sigma[i] for i in range(spatial_rank)), True
+        raise ValueError('a traced sigma must be a scalar or 1-D array.')
+    # A Python sequence of host floats (static path); a per-axis *traced*
+    # sigma is expressed as a 1-D array (handled above), not a list of scalars.
     out = tuple(float(s) for s in sigma)
     if len(out) != spatial_rank:
         raise ValueError(
             f'sigma must be a scalar or a length-{spatial_rank} '
             f'sequence; got {sigma!r}.'
         )
-    return out
+    return out, False
 
 
 def _normalise_kernel_size(
@@ -358,7 +385,7 @@ def _normalise_kernel_size(
 def gaussian(
     x: Float[Array, '... *spatial'],
     *,
-    sigma: Union[float, Sequence[float]],
+    sigma: Union[float, Sequence[float], Array],
     truncate: float = 4.0,
     kernel_size: Union[None, int, Sequence[Optional[int]]] = None,
     mode: str = 'reflect',
@@ -377,7 +404,13 @@ def gaussian(
         Standard deviation of the Gaussian.  ``float`` -- same
         sigma along every spatial axis.  Sequence -- per-axis
         sigma, for anisotropic Gaussians (e.g. fMRI with
-        anisotropic voxel spacing).
+        anisotropic voxel spacing).  May also be a **JAX array /
+        tracer** (0-D, broadcast to every axis, or 1-D per-axis) for
+        a ``jit``/``vmap``-traced sigma -- e.g. a per-view sampled
+        augmentation strength -- but only with ``driver='fir'`` and an
+        explicit ``kernel_size`` on every spatial axis (the FIR kernel
+        *shape* must be static at trace time; only the tap *weights*
+        vary with the traced sigma).  See Notes.
     truncate
         Kernel half-width factor when ``kernel_size`` is ``None``:
         kernel is ``2 * int(truncate * sigma + 0.5) + 1`` taps
@@ -454,6 +487,17 @@ def gaussian(
     want to skip smoothing along an axis, omit it from ``spatial_rank``
     or use a tiny sigma plus large ``truncate``.
 
+    **Traced sigma (jit-safe FIR path).**  When ``sigma`` is a JAX
+    array / tracer, an explicit ``kernel_size`` fixes the kernel width
+    (static) and the tap weights ``exp(-0.5 (k / sigma)^2)`` are
+    computed from the traced sigma, so the whole op traces under
+    ``jit`` / ``vmap``.  Positivity of a traced sigma is the caller's
+    obligation (it cannot be checked at trace time), and an
+    ``under-sized`` ``kernel_size`` silently truncates the Gaussian
+    tail -- size it to cover the largest sigma of interest, e.g.
+    ``kernel_size = 2 * ceil(truncate * sigma_max) + 1``.  The
+    host-static path (Python-scalar / sequence sigma) is unchanged.
+
     The implementation uses ``lax.conv_general_dilated`` for each 1D
     pass, so on Ampere+ tensor cores accelerate the REAL convolution.
     No tensor-core gap to recover here -- gaussian is not a semiring
@@ -461,6 +505,8 @@ def gaussian(
     """
     if isinstance(sigma, (tuple, list)):
         inferred_rank = len(sigma)
+    elif isinstance(sigma, jax.Array) and sigma.ndim == 1:
+        inferred_rank = int(sigma.shape[0])
     else:
         inferred_rank = None
     if spatial_rank is None:
@@ -477,22 +523,35 @@ def gaussian(
             f'x.ndim={x.ndim} too small for spatial_rank={spatial_rank}.'
         )
 
-    sigmas = _normalise_sigma(sigma, spatial_rank)
+    sigmas, sigma_traced = _normalise_sigma(sigma, spatial_rank)
     spatial_axes = tuple(range(x.ndim - spatial_rank, x.ndim))
 
     if driver == 'recursive':
+        if sigma_traced:
+            raise ValueError(
+                "driver='recursive' needs a host-static sigma; a traced / "
+                "array sigma requires driver='fir' with an explicit "
+                'kernel_size.'
+            )
         if kernel_size is not None:
             raise ValueError(
                 "driver='recursive' has no kernel; do not pass kernel_size."
             )
         out = x
         for axis, s in zip(spatial_axes, sigmas):
-            out = _recursive_gaussian_1d(out, axis, s)
+            # sigma_traced is False here, so every ``s`` is a host float.
+            out = _recursive_gaussian_1d(out, axis, float(s))
         return out
     if driver != 'fir':
         raise ValueError(f"driver={driver!r}; expected 'fir' or 'recursive'.")
 
     kernel_sizes = _normalise_kernel_size(kernel_size, spatial_rank)
+    if sigma_traced and any(ks is None for ks in kernel_sizes):
+        raise ValueError(
+            'a traced / array sigma requires an explicit kernel_size on every '
+            'spatial axis (the FIR kernel shape must be static at trace time; '
+            'size it as 2 * ceil(truncate * max_sigma) + 1 to cover the tail).'
+        )
     out = x
     for axis, s, ks in zip(spatial_axes, sigmas, kernel_sizes):
         kernel = _gaussian_1d_kernel(

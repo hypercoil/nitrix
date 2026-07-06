@@ -27,7 +27,7 @@ from jaxtyping import Array, Float
 
 def gaussian_profile_1d(
     coords: Float[Array, '...'],
-    sigma: float,
+    sigma: Union[float, Float[Array, '...']],
     *,
     center: Union[float, Float[Array, '...']] = 0.0,
 ) -> Float[Array, '...']:

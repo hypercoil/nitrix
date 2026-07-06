@@ -147,6 +147,64 @@ def test_gaussian_rejects_unknown_mode():
 
 
 # ---------------------------------------------------------------------------
+# traced sigma (jit-safe FIR path)
+# ---------------------------------------------------------------------------
+
+
+def test_gaussian_traced_sigma_matches_static():
+    """A jit-traced sigma with explicit kernel_size matches the static path.
+
+    Only the tap weights vary with sigma; the kernel shape is fixed by
+    kernel_size, so the op traces under jit and reproduces the host-static
+    result bit-for-bit at the same sigma.
+    """
+    x = jax.random.normal(jax.random.key(0), (16, 16, 16))
+    static = gaussian(x, sigma=1.3, kernel_size=11)
+    traced = jax.jit(lambda x, s: gaussian(x, sigma=s, kernel_size=11))(
+        x, jnp.asarray(1.3)
+    )
+    np.testing.assert_allclose(traced, static, atol=1e-12, rtol=0)
+
+
+def test_gaussian_traced_sigma_vmap_per_view():
+    """vmap over a per-view sampled sigma (the DINO augmentation use case)."""
+    x = jax.random.normal(jax.random.key(1), (12, 12))
+    sig = jnp.array([0.5, 1.0, 1.5])
+    xs = jnp.broadcast_to(x, (3,) + x.shape)
+    out = jax.vmap(
+        lambda xi, si: gaussian(xi, sigma=si, kernel_size=9)
+    )(xs, sig)
+    assert out.shape == (3,) + x.shape
+    for i, s in enumerate([0.5, 1.0, 1.5]):
+        np.testing.assert_allclose(
+            out[i], gaussian(x, sigma=s, kernel_size=9), atol=1e-12
+        )
+
+
+def test_gaussian_traced_sigma_1d_anisotropic():
+    """A 1-D traced sigma pins the rank and matches the static sequence."""
+    x = jax.random.normal(jax.random.key(2), (10, 10, 10))
+    sig = jnp.array([0.7, 1.0, 1.3])
+    traced = jax.jit(lambda x, s: gaussian(x, sigma=s, kernel_size=9))(x, sig)
+    static = gaussian(x, sigma=(0.7, 1.0, 1.3), kernel_size=9)
+    np.testing.assert_allclose(traced, static, atol=1e-12)
+
+
+def test_gaussian_traced_sigma_requires_kernel_size():
+    """A traced sigma without kernel_size raises: the shape must be static."""
+    x = jnp.ones((8, 8))
+    with pytest.raises(ValueError, match='kernel_size'):
+        jax.jit(lambda x, s: gaussian(x, sigma=s))(x, jnp.asarray(1.0))
+
+
+def test_gaussian_traced_sigma_rejects_recursive():
+    """The recursive driver needs a host-static sigma; a traced sigma raises."""
+    x = jnp.ones((8, 8))
+    with pytest.raises(ValueError, match='recursive'):
+        gaussian(x, sigma=jnp.asarray(1.0), driver='recursive')
+
+
+# ---------------------------------------------------------------------------
 # kernel_size override (JOSA J.2b)
 # ---------------------------------------------------------------------------
 
