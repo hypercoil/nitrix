@@ -214,7 +214,11 @@ unvalidated/inefficient math; the correctness mandate):
    shipping. The Bingham **energy and sampler already ship**, so this is reduced
    to the normaliser-dependent density/MLE only — research-tracked.
 
-Plus the coordinate-kernel spatial-prior construction (independent).
+The coordinate-kernel spatial-prior construction — **✅ SHIPPED (2026-07-06)** as
+`register.CoordinateKernelPrior` / `EfficientProMises(spatial_prior=…)`: the
+whole-brain-tractable ProMises anatomical prior (an RBF coordinate kernel projected
+into the alignment subspace by random Fourier features, never forming the `(p,p)`
+kernel). See [`register-functional-alignment`](register-functional-alignment.md) §6.
 
 ## 5. Cross-references
 
