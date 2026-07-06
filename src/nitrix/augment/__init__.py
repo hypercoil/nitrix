@@ -20,6 +20,10 @@ Submodules:
   matrix, random diffeomorphic (SVF) displacement.
 - ``synthesis`` -- label-map-to-image Gaussian-mixture render and
   simulated (forward) multiplicative bias / INU fields.
+- ``simulate`` -- synthetic connectivity / time-series generators with
+  known ground-truth structure (band-limited sources, covariance
+  colouring [the whitening inverse], sparse mixing, the mixture forward
+  model, low-rank-block connectomes, Markov state sequences).
 """
 
 from .intensity import (
@@ -40,6 +44,14 @@ from .synthesis import (
     gmm_label_to_image,
     simulate_bias_field,
 )
+from .simulate import (
+    band_limited_signals,
+    color_signals,
+    lowrank_block_connectome,
+    markov_state_sequence,
+    mix_signals,
+    sparse_mixture_matrix,
+)
 
 __all__ = [
     # intensity
@@ -57,4 +69,11 @@ __all__ = [
     # synthesis
     'gmm_label_to_image',
     'simulate_bias_field',
+    # simulate (synthetic connectivity / time series)
+    'band_limited_signals',
+    'color_signals',
+    'sparse_mixture_matrix',
+    'mix_signals',
+    'lowrank_block_connectome',
+    'markov_state_sequence',
 ]

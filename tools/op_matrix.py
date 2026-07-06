@@ -4144,6 +4144,84 @@ register(
 )
 
 
+def _sim_spd(d=6, seed=0):
+    a = jax.random.normal(_key(seed), (d, d))
+    return a @ a.T + jnp.eye(d)
+
+
+def _sim_transition(s=4, seed=0):
+    t = jax.random.uniform(_key(seed), (s, s), minval=0.1, maxval=1.0)
+    return t / t.sum(-1, keepdims=True)
+
+
+register(
+    OpInfo(
+        'nitrix.augment.band_limited_signals',
+        fixture=lambda: ((_key(0), 8, 256), {'low': 0.0, 'high': 0.1}),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('smooth-spectral-window band-limited noise (no brickwall)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.augment.color_signals',
+        fixture=lambda: ((_key(0), _sim_spd(), 512), {}),
+        diff_arg=1,
+        vmap_arg=None,
+        invariants=(
+            'colour white noise to an exact covariance (whitening inverse)',
+            'Newton-Schulz Sigma^{1/2}, cuSOLVER-free + grad-stable',
+        ),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.augment.sparse_mixture_matrix',
+        fixture=lambda: ((_key(0), 10, 5), {'expected_nnz': 3.0}),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('row-L1-normalised sparse mixing (Binomial cardinality)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.augment.mix_signals',
+        fixture=lambda: (
+            (
+                jax.random.uniform(_key(0), (10, 5)),
+                jax.random.normal(_key(1), (5, 128)),
+            ),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('mixture forward model: cov = M cov(src) M^T',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.augment.lowrank_block_connectome',
+        fixture=lambda: (
+            (_key(0), jax.random.randint(_key(1), (12,), 0, 3), 3),
+            {'rank': 6},
+        ),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('symmetric tanh(LL^T)+NN^T with planted communities',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.augment.markov_state_sequence',
+        fixture=lambda: ((_key(0), _sim_transition(), 64), {}),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('keyed Markov state trajectory via lax.scan',),
+    )
+)
+
+
 # ---------------------------------------------------------------------------
 # v4 registration suite + transform algebra + fMRIPrep front-end (backfill)
 # ---------------------------------------------------------------------------
