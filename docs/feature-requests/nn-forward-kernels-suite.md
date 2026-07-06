@@ -465,7 +465,7 @@ bwd). **Gated**: only built/promoted when the perf suite shows norm bandwidth on
 a model's critical path *after* attention/scan are fused. Never blocks a model;
 the XLA path is correct and ships today.
 
-Cross-ref [`lp-normalize.md`](lp-normalize.md) (the *reference* instance-norm
+Cross-ref [`lp-normalize.md`](resolved/lp-normalize.md) (the *reference* instance-norm
 stats home in `numerics.normalize`) — that owns the plain reference op; this
 owns the fused-kernel variant. Do not duplicate.
 

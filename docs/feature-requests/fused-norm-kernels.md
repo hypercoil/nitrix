@@ -23,7 +23,7 @@ relative to attention/scan, and it never blocks a model — the XLA path is
 correct and ships today. So this is parked behind P0/P1 and only promoted when
 a profiler shows norm bandwidth on a model's critical path.
 
-This overlaps the already-filed [`lp-normalize`](lp-normalize.md) (which
+This overlaps the already-filed [`lp-normalize`](resolved/lp-normalize.md) (which
 covers the *reference* instance-norm stats, `numerics.normalize`); this doc is
 strictly the **fused-kernel perf follow-up**, distinct from that reference
 primitive. Cross-reference, do not duplicate: if only the reference op is
@@ -52,7 +52,7 @@ def layer_norm(
 
 Home: `nitrix.nn.norm` (locked) — the fused-kernel forward blocks live together
 under `nitrix.nn` with `attention` / `ssm`; the plain *reference* instance-norm
-stats stay in `numerics.normalize` (see [`lp-normalize`](lp-normalize.md)).
+stats stay in `numerics.normalize` (see [`lp-normalize`](resolved/lp-normalize.md)).
 
 **Implementation + tests.** Standard pattern: `*/_reference.py` reproduces the
 equinox/`rsqrt` math; `_kernels/cuda/` holds the fused single-pass kernel with

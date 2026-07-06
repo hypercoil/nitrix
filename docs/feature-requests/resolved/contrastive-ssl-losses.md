@@ -56,7 +56,7 @@ all jit-clean. The finite-mask trick in `nt_xent` and the safe masked-mean in
 `ibot` are the reusable numerical care worth capturing once. The DINO
 **center EMA update** (`update_center`, `dino.py:213`) is training-state
 bookkeeping → stays upstream (or a generic `numerics.ema`; see
-[`lp-normalize.md`](../lp-normalize.md) note).
+[`lp-normalize.md`](lp-normalize.md) note).
 
 **Home.** `nitrix.metrics` for `nt_xent` / `dino_cross_entropy` /
 `ibot_cross_entropy`; `koleo` fits `nitrix.stats` (entropy estimators) or

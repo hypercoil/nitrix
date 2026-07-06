@@ -1,8 +1,11 @@
 # Lp / unit normalize + instance-norm statistics — `nitrix.numerics.normalize`
 
-> **Status (2026-06-08): not started — CONVENIENCE.** Model-numeric item from
+> **Status (2026-07-06): SHIPPED.** `numerics.l2_normalize` / `lp_normalize`
+> (torch `F.normalize` clamp-eps semantics) + `numerics.instance_norm`
+> (statistics-only, rank-agnostic `axes=`), in `numerics/normalize.py` and
+> tested in `test_numerics.py` (6 tests). Model-numeric item from
 > the 2026-06-08 ilex audit
-> ([`ilex-training-substrate.md`](ilex-training-substrate.md)). Two small,
+> ([`ilex-training-substrate.md`](../ilex-training-substrate.md)). Two small,
 > recurrently re-implemented reductions absent from `numerics.normalize`
 > (which has `zscore`/`robust_zscore`/`psc`/`intensity`/`percentile_rescale`/
 > `demean` — but no plain unit-vector normalize and no instance-norm stat).
@@ -12,7 +15,7 @@
 1. **`l2_normalize` / `unit_normalize`** — `x / max(‖x‖_p, eps)` along an
    axis (torch `F.normalize` eps semantics). `ilex/models/krakencoder/
    _krakencoder.py:59` (`_l2_normalise`); also implicit in `nt_xent` /
-   `koleo` (see [`contrastive-ssl-losses.md`](resolved/contrastive-ssl-losses.md)),
+   `koleo` (see [`contrastive-ssl-losses.md`](contrastive-ssl-losses.md)),
    which L2-normalise before the cosine-sim matrix.
 2. **`instance_norm`** — per-sample/per-channel zero-mean/unit-(biased)var
    over a configurable set of spatial axes, `(x−μ)·rsqrt(var+eps)` (the
@@ -48,7 +51,7 @@ training-loop utilities — keep upstream unless a generic `numerics.ema` /
 
 ## Cross-references
 
-- [`ilex-training-substrate.md`](ilex-training-substrate.md) — survey context.
-- [`contrastive-ssl-losses.md`](resolved/contrastive-ssl-losses.md) — L2-normalize
+- [`ilex-training-substrate.md`](../ilex-training-substrate.md) — survey context.
+- [`contrastive-ssl-losses.md`](contrastive-ssl-losses.md) — L2-normalize
   consumer.
 - `src/nitrix/numerics/normalize.py` — the normalisation family this joins.

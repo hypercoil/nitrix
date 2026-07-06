@@ -128,7 +128,7 @@ Severity: **ENABLING** = a downstream surface is blocked / hand-rolling it;
 |---|---|---|---|
 | Affine param↔matrix / euler↔R / fit / homog. | [affine-matrix-algebra](resolved/affine-matrix-algebra.md) | ENABLING | `geometry.transform` |
 | PCA fit / transform / inverse (SVD) | [pca-svd](resolved/pca-svd.md) | CONVENIENCE | `stats.pca` |
-| Lp / unit normalize + instance-norm stats | [lp-normalize](lp-normalize.md) | CONVENIENCE | `numerics.normalize` |
+| Lp / unit normalize + instance-norm stats | [lp-normalize](resolved/lp-normalize.md) | CONVENIENCE | `numerics.normalize` |
 | Uniform 1-ring mesh Laplacian smoothing | [mesh-laplacian-smoothing](resolved/mesh-laplacian-smoothing.md) | CONVENIENCE | `geometry.mesh` |
 
 ### Expansions to existing docs (new drivers / scope)

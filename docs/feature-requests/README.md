@@ -79,7 +79,7 @@ the nimox modules + newest models (`krakencoder`, `cortex_ode`, `surfnet`).
 | [gaussian-kl-nll](resolved/gaussian-kl-nll.md) | CONVENIENCE | `stats` |
 | [affine-matrix-algebra](resolved/affine-matrix-algebra.md) | ENABLING | `geometry.transform` |
 | [pca-svd](resolved/pca-svd.md) | CONVENIENCE | `stats.pca` |
-| [lp-normalize](lp-normalize.md) | CONVENIENCE | `numerics.normalize` |
+| [lp-normalize](resolved/lp-normalize.md) | CONVENIENCE | `numerics.normalize` |
 | [mesh-laplacian-smoothing](resolved/mesh-laplacian-smoothing.md) | CONVENIENCE | `geometry.mesh` |
 
 Expansions to existing docs (new drivers / scope from this audit):
@@ -343,7 +343,7 @@ stay downstream. Needs an explicit go-ahead + a lined-up consumer.
 
 ## Resolved (archived)
 
-The 70 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/). Listed here as one flat index; topical context and the shipped-status annotation remain in the family sections above.
+The 71 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/). Listed here as one flat index; topical context and the shipped-status annotation remain in the family sections above.
 
 - [`affine-matrix-algebra`](resolved/affine-matrix-algebra.md) — Affine matrix algebra (geometric convention) — `nitrix.geometry.affine`
 - [`attention-kernels`](resolved/attention-kernels.md) — attention-kernels — scaled dot-product / flash attention
@@ -386,6 +386,7 @@ The 70 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/)
 - [`lab2im-gmm-synthesis`](resolved/lab2im-gmm-synthesis.md) — GMM label→image synthesis (lab2im) — `nitrix.augment`
 - [`ledoit-wolf-shrinkage`](resolved/ledoit-wolf-shrinkage.md) — Ledoit-Wolf shrinkage covariance — `nitrix.stats.ledoit_wolf`
 - [`linalg-orthogonal-procrustes`](resolved/linalg-orthogonal-procrustes.md) — Subspace geometry & orthogonal alignment in `nitrix.linalg`
+- [`lp-normalize`](resolved/lp-normalize.md) — Lp / unit normalize + instance-norm statistics — `nitrix.numerics.normalize`
 - [`mesh-curvature`](resolved/mesh-curvature.md) — Mesh curvature — `nitrix.geometry.curvature`
 - [`mesh-laplacian-smoothing`](resolved/mesh-laplacian-smoothing.md) — Uniform 1-ring mesh Laplacian smoothing — `nitrix.sparse.mesh`
 - [`mesh-watershed`](resolved/mesh-watershed.md) — Watershed segmentation on meshes — `nitrix.graph.parcellation.watershed`
