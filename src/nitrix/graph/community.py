@@ -317,9 +317,15 @@ def relaxed_modularity(
 
     Computes :math:`Q = \\sum_{i,j} B_{ij}\\,(CC^{\\top})_{ij}`, where
     :math:`B` is the modularity matrix.  For a one-hot assignment ``C``
-    this reduces to the standard Newman modularity; for soft or
-    overlapping assignments it is a smooth, differentiable relaxation
-    suitable as an optimisation objective.
+    with ``exclude_diag=False`` this reduces **exactly** to the standard
+    Newman modularity :math:`Q_{\\mathrm{Newman}}` (the :math:`1/2m`
+    normalisation of :func:`modularity_matrix` already corrects the
+    undirected double-count).  The default ``exclude_diag=True`` drops the
+    within-community diagonal null terms that Newman includes, giving a
+    co-affiliation variant better suited to correlation-like adjacencies
+    and soft / overlapping assignments (see ``exclude_diag``), where the
+    score is a smooth, differentiable relaxation suitable as an
+    optimisation objective.
 
     The implementation dispatches on the type of ``A``:
 
@@ -364,11 +370,18 @@ def relaxed_modularity(
         If ``True`` (default), normalise ``C`` (and ``C_other``) by their
         maximum value before forming the coaffiliation.
     exclude_diag : bool, optional
-        If ``True`` (default), drop the diagonal of the coaffiliation so
-        a node's trivial self-affiliation does not bias the score.
+        If ``True`` (default), drop the diagonal of the coaffiliation so a
+        node's trivial self-affiliation does not bias the score -- apt when
+        ``A`` is a correlation-like matrix (unit, uninformative diagonal)
+        or when self-self coupling carries a different scale or noise than
+        self-other.  Set ``False`` to include the diagonal null terms and
+        recover exact Newman modularity for a one-hot partition.
     directed : bool, optional
-        If ``False`` (default), halve the score to correct for counting
-        each undirected edge twice; if ``True``, return the raw sum.
+        If ``False`` (default), the score counts each undirected edge
+        once: the :math:`1/2m` normalisation removes the ordered-sum
+        double-count when ``normalise_modularity=True``, and the
+        un-normalised sum is halved explicitly.  If ``True``, return the
+        raw (directed) sum with no double-count correction.
     sign : {'+', '-', None}, optional
         Weight handling on the dense path, forwarded to
         :func:`modularity_matrix`.  ``'+'`` (default) clips negative
@@ -436,7 +449,11 @@ def _relaxed_modularity_dense(
         normalise=normalise_coaffiliation,
     )
     Q = (B * K).sum(axis=(-2, -1))
-    return Q if directed else Q / 2.0
+    # The undirected double-count is corrected by the 1/2m normalisation
+    # (see modularity_matrix); only the un-normalised sum still needs the
+    # explicit halving, so the normalised undirected score reduces exactly
+    # to Newman modularity.
+    return Q / 2.0 if (not directed and not normalise_modularity) else Q
 
 
 def _relaxed_modularity_sparse(
@@ -494,8 +511,10 @@ def _relaxed_modularity_sparse(
     exclude_diag : bool
         Whether to drop the diagonal contribution of the coaffiliation.
     directed : bool
-        If ``False``, halve the score to correct for double-counting
-        undirected edges; if ``True``, return the raw sum.
+        If ``False``, count each undirected edge once (the :math:`1/2m`
+        normalisation removes the ordered-sum double-count, or the
+        un-normalised sum is halved explicitly); if ``True``, return the
+        raw directed sum.
 
     Returns
     -------
@@ -613,4 +632,6 @@ def _relaxed_modularity_sparse(
     Q = trace_term - rank1
     if normalise_modularity:
         Q = Q / two_m
-    return Q if directed else Q / 2.0
+    # See _relaxed_modularity_dense: the 1/2m normalisation already removes
+    # the undirected double-count, so only the un-normalised sum is halved.
+    return Q / 2.0 if (not directed and not normalise_modularity) else Q
