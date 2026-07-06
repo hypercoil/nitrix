@@ -1099,6 +1099,20 @@ def fisher_bingham_energy(
     fully-normalised densities: :math:`S^2` Kent :func:`kent_log_prob`; vMF /
     Watson :func:`vmf_log_prob` / :func:`watson_log_prob`.)
 
+    .. note::
+
+        The subsumption above is **mathematical, not an implementation-sharing
+        directive** -- do *not* collapse the specialised ``normalize=False``
+        energies onto this general form.  This form projects onto the full
+        frame (an :math:`O(p^2)` ``gamma^T x`` matvec) and always evaluates the
+        quadratic term, whereas the vMF / Watson energies are :math:`O(p)`
+        single-direction dot products (``mu`` is a vector, not a frame); since
+        ``kappa`` / ``beta`` are runtime values, XLA cannot recover the
+        specialised path (measured 4--19x slower at :math:`p = 64`--256).  The
+        specialised energies are retained deliberately; use this general form
+        only when the parameters genuinely are a full frame plus a coefficient
+        vector.
+
     For a *proper* density the frame is orthonormal, :math:`\beta` is fixed only
     up to a common additive shift (the :math:`\beta_1 = 0` gauge is conventional
     -- no quadratic on the mean axis), and the concentration dominates the

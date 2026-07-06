@@ -159,8 +159,32 @@ finite-κ downward bias, documented with an MLE-refinement note). 23 tests.
 bare exponent (natural-parameter · sufficient-statistic) with the normaliser
 *dropped and never computed*. The tractable-in-high-d, per-site Gibbs/Markov-
 random-field **clique potential** (the parcellation setting), score-kernel-clean
-— field-energy composition/scalarisation stays downstream (SPEC §5). For Bingham
-this will be the *only* tractable path (its matrix normaliser is intractable).
+— field-energy composition/scalarisation stays downstream (SPEC §5).
+
+**`fisher_bingham_energy` SHIPPED (2026-07-06)** — the *general* quadratic-
+exponential sphere energy on any `S^{p-1}`: `E = κ γ₁ᵀx + Σⱼ βⱼ(γⱼᵀx)²`
+(orthonormal frame + coefficient vector; the Fisher–Bingham family `exp(κμᵀx +
+xᵀAx)`, `A = Γ diag(β) Γᵀ`). **Named for the family, not one member** (user
+correction — it subsumes several). Validated to reduce, to machine precision, to
+**vMF** (β=0), **Watson** (rank-1 quadratic), **Bingham** (κ=0, `= xᵀAx`), and the
+**S² Kent** (p=3). Energy-only (the p-dim normaliser is intractable) — the
+tractable-at-any-`p` MRF potential for high-dimensional directional fields.
+
+> **Abstraction check (2026-07-06): the subsumption is mathematical, NOT an
+> implementation-sharing directive — keep the specialised energies.** Empirically
+> (jaxpr + compiled timing): `fisher_bingham_energy(β=0)` does **not** reduce to
+> the vMF/Watson energy. It performs a full-frame `Γᵀx` matvec (**O(p²)**, one
+> `dot_general`) and always evaluates the quadratic, whereas `vmf`/`watson_log_prob
+> (normalize=False)` are **O(p)** single-direction dot products (0 `dot_general`;
+> `μ` is a *vector*, not a frame). Since `κ`/`β` are runtime arrays, XLA cannot
+> dead-code-eliminate back to the specialised path — measured **4.4× slower at
+> p=64, 18.8× at p=256**, growing with `p`. Plus an API mismatch (vMF/Watson take a
+> direction; delegating would force materialising an arbitrary orthonormal
+> complement) and no shared numerical-stability code (the energies are plain
+> polynomials; all stability lives in the *normalisers*, which this energy-only
+> form doesn't touch). Only the **S² Kent** energy is ~equivalent (both project
+> all axes; neutral). A guard-note is in the `fisher_bingham_energy` docstring so a
+> future DRY refactor doesn't regress this.
 
 Still to build (sequenced by tractability + reuse):
 
@@ -168,10 +192,11 @@ Still to build (sequenced by tractability + reuse):
    remaining half of the vMF-parity triad; the efficient envelope across `κ` is
    the non-trivial part). Deliberately deferred over shipping an unvalidated one.
    *(Kent sampler likewise.)*
-2. **Bingham** — the general axial law; normaliser is the confluent
-   hypergeometric of *matrix* argument (a saddlepoint approximation, Kume–Wood) —
-   a genuine sub-project. Its **energy** (`xᵀAx`) is already the tractable path
-   via the `normalize=False` pattern once the frame/`A` surface lands.
+2. **Bingham** — the general axial law. Its **energy is already shipped**
+   (`fisher_bingham_energy` at `κ=0` is exactly `xᵀAx`); what remains is the
+   **normaliser** (confluent hypergeometric of *matrix* argument; a saddlepoint
+   approximation, Kume–Wood) and the MLE/sampler — a genuine sub-project, now
+   reduced to the intractable-normaliser piece only.
 
 Plus the coordinate-kernel spatial-prior construction (independent).
 
