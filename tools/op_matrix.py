@@ -3340,6 +3340,46 @@ register(
         notes='unnormalised Gibbs/MRF potential; tractable at any dimension',
     )
 )
+
+
+def _watson_sample_op(key):
+    from nitrix.stats import watson_sample
+
+    return watson_sample(key, jnp.asarray([0.0, 0.0, 1.0]), jnp.asarray(6.0), (64,))
+
+
+def _bingham_sample_op(key):
+    from nitrix.stats import bingham_sample
+
+    return bingham_sample(
+        key, jnp.eye(4), jnp.asarray([2.0, 1.0, -1.0, -2.0]), (64,)
+    )
+
+
+register(
+    OpInfo(
+        'nitrix.stats.watson_sample',
+        fixture=lambda: ((_key(),), {}),
+        fn_override=_watson_sample_op,
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('Watson axial sampler (ACG rejection, any kappa)',),
+        notes='sampling; non-differentiable; guaranteed acceptance',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.stats.bingham_sample',
+        fixture=lambda: ((_key(),), {}),
+        fn_override=_bingham_sample_op,
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=(
+            'Bingham sampler (Kent-Ganeiber-Mardia ACG rejection); ~25% accept',
+        ),
+        notes='sampling; non-differentiable; normaliser-free',
+    )
+)
 register(
     OpInfo(
         'nitrix.stats.pca_fit',

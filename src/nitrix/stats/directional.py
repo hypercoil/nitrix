@@ -112,6 +112,8 @@ __all__ = [
     'kent_fit',
     'KentFit',
     'fisher_bingham_energy',
+    'watson_sample',
+    'bingham_sample',
 ]
 
 _AxisArg = Union[int, Tuple[int, ...]]
@@ -1145,3 +1147,177 @@ def fisher_bingham_energy(
     )  # gamma_k^T x, shape (..., p)
     per_obs = kappa * proj[..., 0] + jnp.sum(beta * proj**2, axis=-1)
     return reduce(per_obs, axis=axis, reduction=reduction)
+
+
+# ===========================================================================
+# Bingham / Watson samplers -- the Angular-Central-Gaussian rejection method
+# (Kent, Ganeiber & Mardia 2018), guaranteed acceptance with bounded (~25%)
+# efficiency uniformly in concentration and dimension.
+# ===========================================================================
+
+_ACG_B_BISECT = 50  # bisection steps for the ACG envelope parameter b
+
+
+def _solve_acg_b(a: Float[Array, ' p']) -> Float[Array, '']:
+    """Envelope parameter ``b`` solving ``sum_j 1/(b + 2 a_j) = 1``.
+
+    ``a`` are the (shifted, non-negative, ``min = 0``) Bingham eigenvalues.  The
+    ``a = 0`` entry makes the sum diverge as ``b -> 0`` and it decreases to
+    ``sum 1/(p + 2 a_j) <= 1`` at ``b = p``, so the unique root lies in
+    ``(0, p]`` (found by bisection).
+    """
+    p = a.shape[0]
+
+    def resid(b: Array) -> Array:
+        return jnp.sum(1.0 / (b + 2.0 * a)) - 1.0  # decreasing in b
+
+    lo = jnp.asarray(jnp.finfo(a.dtype).tiny, a.dtype)
+    hi = jnp.asarray(float(p), a.dtype)
+
+    def body(_: Array, s: Tuple[Array, Array]) -> Tuple[Array, Array]:
+        lo, hi = s
+        mid = 0.5 * (lo + hi)
+        higher = resid(mid) > 0  # root is at larger b (resid decreasing)
+        return jnp.where(higher, mid, lo), jnp.where(higher, hi, mid)
+
+    lo, hi = jax.lax.fori_loop(0, _ACG_B_BISECT, body, (lo, hi))
+    return cast(Float[Array, ''], 0.5 * (lo + hi))
+
+
+def _acg_bingham_eigen(
+    key: jax.Array, a: Float[Array, ' p'], n: int
+) -> Float[Array, 'n p']:
+    """Sample ``exp(-sum_j a_j x_j^2)`` on ``S^{p-1}`` in the eigenbasis.
+
+    The Kent--Ganeiber--Mardia Angular-Central-Gaussian rejection: propose from
+    ``ACG(Omega)``, ``Omega = I + 2 diag(a)/b`` (``x = y/|y|``, ``y ~ N(0,
+    Omega^{-1})``), and accept with probability ``r(s)/sup_s r``, ``r(s) = e^{-s}
+    (1 + 2s/b)^{p/2}``, ``s = x^T diag(a) x``.  Because the acceptance is the
+    ratio to the *supremum* of ``r``, it is a valid rejection for **any** ``b``
+    (the envelope choice only affects efficiency); a :func:`jax.lax.while_loop`
+    gives guaranteed acceptance.  ``a`` must be non-negative with ``min = 0``.
+    """
+    p = a.shape[0]
+    b = _solve_acg_b(a)
+    omega = 1.0 + 2.0 * a / b  # (p,)
+    sqrt_omega = jnp.sqrt(omega)
+    a_max = jnp.max(a)
+    s_star = jnp.clip((p - b) / 2.0, 0.0, a_max)  # argmax of r over [0, a_max]
+    log_sup = -s_star + (p / 2.0) * jnp.log1p(2.0 * s_star / b)
+
+    def cond(state: Tuple[jax.Array, Array, Array]) -> Array:
+        _, _, accepted = state
+        return jnp.logical_not(jnp.all(accepted))
+
+    def body(
+        state: Tuple[jax.Array, Array, Array],
+    ) -> Tuple[jax.Array, Array, Array]:
+        key, x, accepted = state
+        key, k_z, k_u = jax.random.split(key, 3)
+        y = jax.random.normal(k_z, (n, p), dtype=a.dtype) / sqrt_omega
+        cand = y / jnp.linalg.norm(y, axis=-1, keepdims=True)
+        s = jnp.sum(a * cand**2, axis=-1)
+        log_r = -s + (p / 2.0) * jnp.log1p(2.0 * s / b)
+        log_u = jnp.log(jax.random.uniform(k_u, (n,), dtype=a.dtype))
+        test = log_r - log_sup >= log_u
+        newly = test & jnp.logical_not(accepted)
+        x = jnp.where(newly[:, None], cand, x)
+        return key, x, accepted | test
+
+    x0 = jnp.zeros((n, p), dtype=a.dtype)
+    accepted0: Bool[Array, ' n'] = jnp.zeros((n,), dtype=bool)
+    _, x, _ = jax.lax.while_loop(cond, body, (key, x0, accepted0))
+    return x
+
+
+def bingham_sample(
+    key: jax.Array,
+    gamma: Float[Array, 'p p'],
+    beta: Float[Array, ' p'],
+    shape: Tuple[int, ...] = (),
+) -> Float[Array, '... p']:
+    r"""Draw samples from a Bingham distribution on :math:`S^{p-1}`.
+
+    The axial law :math:`f(x) \propto \exp(x^\top A x)`, :math:`A = \Gamma
+    \operatorname{diag}(\beta) \Gamma^\top` (orthonormal frame ``gamma``,
+    per-axis coefficients ``beta``) -- i.e. :func:`fisher_bingham_energy` with
+    :math:`\kappa = 0`.  Sampled by the Angular-Central-Gaussian rejection
+    (Kent--Ganeiber--Mardia 2018) with **guaranteed acceptance** and bounded
+    efficiency (~25%) uniformly in the eigenvalue spread and dimension -- and
+    **normaliser-free** (it needs only the intractable-normaliser energy).
+
+    Sampling is **not differentiable** (the rejection loop).
+
+    Parameters
+    ----------
+    key : jax.Array
+        A PRNG key.
+    gamma : Float[Array, 'p p']
+        Orthonormal frame (columns are the axes :math:`\gamma_j`).
+    beta : Float[Array, 'p']
+        Per-axis coefficients; the mode is the axis with the largest ``beta``.
+    shape : tuple of int, optional
+        Batch shape of draws. Default ``()`` (a single sample).
+
+    Returns
+    -------
+    Float[Array, '... p']
+        Samples of shape ``(*shape, p)`` on :math:`S^{p-1}`.
+    """
+    p = gamma.shape[-1]
+    n = math.prod(shape) if shape else 1
+    beta = jnp.asarray(beta, dtype=gamma.dtype)
+    a = jnp.max(beta) - beta  # Bingham eigenvalues, >= 0, min 0
+    x_eigen = _acg_bingham_eigen(key, a, n)  # (n, p) in the gamma eigenbasis
+    x_world = x_eigen @ gamma.T
+    return x_world.reshape((*shape, p))
+
+
+def watson_sample(
+    key: jax.Array,
+    mu: Float[Array, ' p'],
+    kappa: Float[Array, ''],
+    shape: Tuple[int, ...] = (),
+) -> Float[Array, '... p']:
+    r"""Draw samples from a Watson distribution on :math:`S^{p-1}`.
+
+    The axial law :math:`f(x) \propto \exp(\kappa (\mu^\top x)^2)` -- a rank-one
+    Bingham.  The :math:`\mu`-component is drawn by the same
+    Angular-Central-Gaussian rejection as :func:`bingham_sample` (guaranteed
+    acceptance, ~25% efficiency for any :math:`\kappa`, bipolar or girdle), and
+    the tangent direction is uniform on the sub-sphere :math:`\perp \mu`.
+
+    Sampling is **not differentiable** (the rejection loop).
+
+    Parameters
+    ----------
+    key : jax.Array
+        A PRNG key.
+    mu : Float[Array, 'p']
+        The axis :math:`\mu \in S^{p-1}` (sign-agnostic).
+    kappa : Float[Array, '']
+        Concentration (:math:`> 0` bipolar, :math:`< 0` girdle).
+    shape : tuple of int, optional
+        Batch shape of draws. Default ``()``.
+
+    Returns
+    -------
+    Float[Array, '... p']
+        Samples of shape ``(*shape, p)``, each a unit vector on :math:`S^{p-1}`.
+    """
+    p = mu.shape[-1]
+    n = math.prod(shape) if shape else 1
+    kappa = jnp.asarray(kappa, dtype=mu.dtype)
+    key_acg, key_v = jax.random.split(key)
+
+    # Rank-one Bingham in the eigenbasis (axis 0 == mu): coefficient kappa on the
+    # mu-axis, 0 elsewhere.  a = max(kappa, 0) - beta gives min 0.
+    beta = jnp.zeros((p,), dtype=mu.dtype).at[0].set(kappa)
+    a = jnp.maximum(kappa, 0.0) - beta
+    w = _acg_bingham_eigen(key_acg, a, n)[:, 0]  # the mu-component
+
+    v = jax.random.normal(key_v, (n, p), dtype=mu.dtype)
+    v = v - jnp.sum(v * mu, axis=-1, keepdims=True) * mu
+    v = v / jnp.linalg.norm(v, axis=-1, keepdims=True)
+    x = w[:, None] * mu + jnp.sqrt(jnp.maximum(1.0 - w**2, 0.0))[:, None] * v
+    return cast(Float[Array, '... p'], x.reshape((*shape, p)))

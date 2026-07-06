@@ -16,10 +16,12 @@ Submodules
   / correlation over time series, with JIT-friendly batch handling.
 - ``gaussian`` -- closed-form diagonal-Gaussian KL divergence and
   negative log-likelihood (log-variance parameterised).
-- ``directional`` -- von Mises-Fisher + Watson directional statistics on
-  the sphere (full-range :func:`log_iv` / :func:`log_kummer_m` normalisers,
-  :func:`vmf_log_prob` / :func:`watson_log_prob`, MLE :func:`vmf_fit` /
-  :func:`watson_fit`, Wood-1994 :func:`vmf_sample`).
+- ``directional`` -- von Mises-Fisher / Watson / Kent directional statistics
+  on the sphere: normalisers (:func:`log_iv` / :func:`log_kummer_m` /
+  :func:`log_kent_normaliser`), densities and MLE fits, the general
+  :func:`fisher_bingham_energy` (unnormalised, any dimension), and samplers
+  (:func:`vmf_sample`, and :func:`watson_sample` / :func:`bingham_sample` by
+  Angular-Central-Gaussian rejection).
 - ``glm`` -- mass-univariate generalised linear models (OLS / WLS /
   exponential-family IRLS) with t / F contrasts and goodness-of-fit.
 - ``betareg`` / ``ordinal`` / ``gaulss`` -- additional response models: beta
@@ -141,6 +143,7 @@ from .directional import (
     KentFit,
     VMFFit,
     WatsonFit,
+    bingham_sample,
     fisher_bingham_energy,
     kent_fit,
     kent_log_prob,
@@ -152,6 +155,7 @@ from .directional import (
     vmf_sample,
     watson_fit,
     watson_log_prob,
+    watson_sample,
 )
 from .gaussian import gaussian_nll, kl_diagonal_gaussian
 from .glm import (
@@ -236,6 +240,8 @@ __all__ = [
     'kent_fit',
     'KentFit',
     'fisher_bingham_energy',
+    'watson_sample',
+    'bingham_sample',
     # glm
     'Family',
     'Link',
