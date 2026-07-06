@@ -186,17 +186,33 @@ tractable-at-any-`p` MRF potential for high-dimensional directional fields.
 > all axes; neutral). A guard-note is in the `fisher_bingham_energy` docstring so a
 > future DRY refactor doesn't regress this.
 
-Still to build (sequenced by tractability + reuse):
+**`watson_sample` + `bingham_sample` SHIPPED (2026-07-06)** — the
+**Angular-Central-Gaussian rejection** (Kent–Ganeiber–Mardia 2018): a
+`lax.while_loop` for **guaranteed acceptance** with **bounded ~25% efficiency
+uniformly** in concentration and dimension (vs the naïve Beta/vMF envelopes,
+which collapse to ~0% at high `κ`), and **normaliser-free**. Correctness is
+*automatic*: accept = `r(s)/sup_s r`, independent of the envelope parameter `b`
+(which only sets efficiency; `b` solves `Σ 1/(b+2aⱼ)=1` by bisection). Watson is
+the rank-one Bingham. Validated: sampled `E[(μᵀx)²]` matches the exact Watson
+second-moment oracle to <0.01 across `p` and bipolar/girdle `κ`; sample→fit
+round-trips; Bingham mode structure + uniform limit. 24 tests.
 
-1. **`watson_sample`** — the guaranteed-acceptance axial rejection sampler (the
-   remaining half of the vMF-parity triad; the efficient envelope across `κ` is
-   the non-trivial part). Deliberately deferred over shipping an unvalidated one.
-   *(Kent sampler likewise.)*
-2. **Bingham** — the general axial law. Its **energy is already shipped**
-   (`fisher_bingham_energy` at `κ=0` is exactly `xᵀAx`); what remains is the
-   **normaliser** (confluent hypergeometric of *matrix* argument; a saddlepoint
-   approximation, Kume–Wood) and the MLE/sampler — a genuine sub-project, now
-   reduced to the intractable-normaliser piece only.
+Still to build — the two **research-grade** pieces (deferred over shipping
+unvalidated/inefficient math; the correctness mandate):
+
+1. **Kent sampler** — Kent is Fisher–Bingham (a linear term *plus* quadratic).
+   The naïve vMF-envelope tilt has acceptance ~`exp(−β)` → unusable for eccentric
+   Kent (`2β/κ → 1`). And the linear term breaks the pure-quadratic ACG's
+   *automatic* sup-bound (the ratio then depends on `x` through two scalars, not
+   one), so an efficient sampler needs the KGM **FB-specific** construction —
+   research-tracked.
+2. **Bingham normaliser + `bingham_log_prob` + `bingham_fit`** — the "very
+   difficult" constant: the confluent hypergeometric of *matrix* argument. The
+   **Kume–Wood saddlepoint** is the standard tractable route (its saddlepoint
+   equation `Σ 1/(2(t̂−λⱼ))=1` mirrors the shipped ACG `b`), but it is an
+   *approximation* needing careful derivation + Monte-Carlo validation before
+   shipping. The Bingham **energy and sampler already ship**, so this is reduced
+   to the normaliser-dependent density/MLE only — research-tracked.
 
 Plus the coordinate-kernel spatial-prior construction (independent).
 
