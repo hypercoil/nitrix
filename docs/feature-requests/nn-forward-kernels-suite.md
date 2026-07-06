@@ -9,8 +9,8 @@
 > delegated to the sibling perf suite** (see §3).
 
 Atomised requests this plan implements (do not duplicate — append drivers to
-those docs): [`attention-kernels.md`](attention-kernels.md) (P0),
-[`selective-scan.md`](selective-scan.md) (P1),
+those docs): [`attention-kernels.md`](resolved/attention-kernels.md) (P0),
+[`selective-scan.md`](resolved/selective-scan.md) (P1),
 [`fused-norm-kernels.md`](fused-norm-kernels.md) (P3). P2 (affine / spherical /
 field-regulariser nimox-extraction blockers) is cross-referenced only — no new
 code here.
@@ -655,8 +655,8 @@ Style: jaxtyping signatures, single-quote / 79-col ruff, mypy-strict
 
 - Context ledger / duplicate guard:
   [`nn-forward-block-kernels.md`](nn-forward-block-kernels.md).
-- Atomised FRs: [`attention-kernels.md`](attention-kernels.md),
-  [`selective-scan.md`](selective-scan.md),
+- Atomised FRs: [`attention-kernels.md`](resolved/attention-kernels.md),
+  [`selective-scan.md`](resolved/selective-scan.md),
   [`fused-norm-kernels.md`](fused-norm-kernels.md).
 - House pattern design docs: `docs/design/backend-selection.md`,
   `docs/design/streaming-kernel.md`, `docs/design/backward-kernels.md`,

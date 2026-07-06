@@ -1,5 +1,12 @@
 # Pallas attention: automatic fallback on non-power-of-2 token counts
 
+> **Status (2026-07-06): RESOLVED — primary (gate) fix shipped.** The
+> tileability gate now requires power-of-two query / key lengths, so non-POT
+> token counts (e.g. the DINO local-crop 28) decline the fused path and fall
+> back to JAX loudly instead of crashing the Triton lowering
+> (`_kernels/cuda/attention.py` `_check_tileable`; CPU gate test + GPU
+> fallback case). The **pad-to-next-pow2-with-mask** ergonomic alternative
+> (keeping the fused path for these shapes) is deferred as a separate perf item.
 > **Home:** `nn.attention` (Pallas-Triton backend, ``_kernels/cuda``).
 > **Severity:** ENABLING for DINO/MoCo/simCLR multi-crop pipelines
 > (any recipe with heterogeneous view sizes producing non-POT token
@@ -73,9 +80,9 @@ patches; both non-POT).
 
 ## Cross-references
 
-- Existing FR context: [`ilex-training-substrate.md`](ilex-training-substrate.md).
+- Existing FR context: [`ilex-training-substrate.md`](../ilex-training-substrate.md).
 - Related FR (also blocks the 3DINO augmentation stack):
-  [`gaussian-smooth-traced-sigma.md`](gaussian-smooth-traced-sigma.md).
+  [`gaussian-smooth-traced-sigma.md`](../gaussian-smooth-traced-sigma.md).
 - Error source: JAX ``pallas/triton/lowering.py:_check_tensor_size``.
 - Resolver hook: ``src/nitrix/_internal/backend.py``.
 

@@ -2,7 +2,7 @@
 
 > **Status (2026-07-01).** Not present. Consumer-pipeline substrate — reported
 > against `nitrix main@bbb22c0` (as vendored under ilex sibling tree). Related:
-> [`attention-kernels`](attention-kernels.md) (Pallas custom kernel),
+> [`attention-kernels`](resolved/attention-kernels.md) (Pallas custom kernel),
 > [`mixed-precision-strategy`](mixed-precision-strategy.md) (D2 bf16
 > polymorphism), [`nn-forward-kernels-suite`](nn-forward-kernels-suite.md)
 > (Phase-2 fast-path ledger).

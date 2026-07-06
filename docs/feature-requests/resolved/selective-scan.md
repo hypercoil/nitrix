@@ -1,10 +1,14 @@
 # selective-scan — state-space-model fused scan (Mamba/S6)
 
-> **Status (2026-06-23), against `nitrix main@6449cfa`.** Not present. Part of
-> the [`nn-forward-block-kernels.md`](nn-forward-block-kernels.md) bundle —
+> **Status (2026-07-06): SHIPPED & VERIFIED (GPU, 11 tests on L4).**
+> `selective_scan` (Mamba / S6) with a fused chunked-scan Pallas kernel (fwd +
+> fully-fused recompute-adjoint bwd `custom_vjp`), a bit-exact `lax.scan`
+> reference (+ associative / chunked drivers), golden corpus, and pallas≈jax
+> parity + grad tests. Part of
+> the [`nn-forward-block-kernels.md`](../nn-forward-block-kernels.md) bundle —
 > **P1, ENABLING**. Read that ledger first for the shared framing. **Home
 > locked to `nitrix.nn.ssm`** and the sequenced build is in
-> [`nn-forward-kernels-suite.md`](nn-forward-kernels-suite.md) §7.2.
+> [`nn-forward-kernels-suite.md`](../nn-forward-kernels-suite.md) §7.2.
 
 **What.** A selective state-space scan primitive `nitrix.nn.ssm.selective_scan`,
 with a `jax` reference (today's `lax.scan` recurrence) and a `pallas-cuda`

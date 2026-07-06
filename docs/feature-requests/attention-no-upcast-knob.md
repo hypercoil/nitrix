@@ -1,7 +1,7 @@
 # attention-no-upcast-knob — caller-controlled SDPA accumulation precision
 
 > **Status (2026-06-24), against `nitrix main@85fc6ac`.** Not present.
-> Follow-up to [`attention-kernels.md`](attention-kernels.md) (the SDPA
+> Follow-up to [`attention-kernels.md`](resolved/attention-kernels.md) (the SDPA
 > primitive, now landed in `nitrix.nn.attention`). Raised by the **nimox**
 > dispatch-seam migration
 > (`nimox/docs/feature-requests/dispatch-seam-attention-ssm.md`): 8 of 9

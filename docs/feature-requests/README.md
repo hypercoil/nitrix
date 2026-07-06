@@ -105,8 +105,8 @@ memory, the perf suite (`bench/`) owns wall-clock parity at scale.
 
 | Pri | Doc | Severity | Home |
 |---|---|---|---|
-| P0 | [attention-kernels](attention-kernels.md) (flash + windowed-bias + causal + cross) | ENABLING | `nitrix.nn.attention` |
-| P1 | [selective-scan](selective-scan.md) (Mamba/S6 fused scan) | ENABLING | `nitrix.nn.ssm` |
+| P0 | [attention-kernels](resolved/attention-kernels.md) (flash + windowed-bias + causal + cross) — ✅ **SHIPPED** (GPU-verified) | ENABLING | `nitrix.nn.attention` |
+| P1 | [selective-scan](resolved/selective-scan.md) (Mamba/S6 fused scan) — ✅ **SHIPPED** (GPU-verified) | ENABLING | `nitrix.nn.ssm` |
 | P3 | [attention-no-upcast-knob](attention-no-upcast-knob.md) (caller-controlled SDPA accumulation precision; nimox `diffusion_unet._Attention` consumer) | CONVENIENCE | `nitrix.nn.attention` |
 | P2 | [affine-matrix-algebra](resolved/affine-matrix-algebra.md) / [spherical-parameterisation](spherical-parameterisation.md) / [field-regularisers](resolved/field-regularisers.md) *(existing — nimox-extraction blockers)* | ENABLING | `geometry` / `register` |
 | P3 | [fused-norm-kernels](fused-norm-kernels.md) (fused LN/GN/IN, perf-only) | CONVENIENCE | `nitrix.nn.norm` |
@@ -344,9 +344,10 @@ stay downstream. Needs an explicit go-ahead + a lined-up consumer.
 
 ## Resolved (archived)
 
-The 57 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/). Listed here as one flat index; topical context and the shipped-status annotation remain in the family sections above.
+The 60 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/). Listed here as one flat index; topical context and the shipped-status annotation remain in the family sections above.
 
 - [`affine-matrix-algebra`](resolved/affine-matrix-algebra.md) — Affine matrix algebra (geometric convention) — `nitrix.geometry.affine`
+- [`attention-kernels`](resolved/attention-kernels.md) — attention-kernels — scaled dot-product / flash attention
 - [`augment-synthetic-connectivity`](resolved/augment-synthetic-connectivity.md) — Synthetic connectivity & time-series generators in `nitrix.augment`
 - [`catmull-rom-interpolator`](resolved/catmull-rom-interpolator.md) — CatmullRom interpolator — `nitrix.geometry._interpolate`
 - [`compute-vertex-normals`](resolved/compute-vertex-normals.md) — `compute_vertex_normals` — `nitrix.sparse.mesh`
@@ -389,6 +390,7 @@ The 57 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/)
 - [`nimox-mesh-loss-geometry`](resolved/nimox-mesh-loss-geometry.md) — nimox mesh-loss geometry → `nitrix.geometry` (consolidation handoff)
 - [`nimox-stats-response-predict`](resolved/nimox-stats-response-predict.md) — Public `*_predict` for the response-regression fitters (Beta / Ordinal / GauLSS / GAM)
 - [`pad-to-multiple`](resolved/pad-to-multiple.md) — `pad_to_multiple` / `crop_to_multiple` (+ unpad) — `nitrix.numerics`
+- [`pallas-attention-nonpot-fallback`](resolved/pallas-attention-nonpot-fallback.md) — Pallas attention: automatic fallback on non-power-of-2 token counts
 - [`pca-svd`](resolved/pca-svd.md) — PCA fit / transform / inverse (SVD) — `nitrix.stats.pca`
 - [`point-sample`](resolved/point-sample.md) — `point_sample` / `sample_volume_at_points` — `nitrix.geometry.grid`
 - [`register-affine-small-grid-divergence`](resolved/register-affine-small-grid-divergence.md) — `affine_register` multi-level GN/LM **diverges at small grids** (v3 regression)
@@ -397,6 +399,7 @@ The 57 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/)
 - [`registration-early-stopping-while-loop`](resolved/registration-early-stopping-while-loop.md) — Registration optimisers: try a `while_loop` early-exit forward (implicit backward already sup…
 - [`registration-recipe-cold-compile`](resolved/registration-recipe-cold-compile.md) — Perf: registration recipes have a pathological cold compile (the Python-unrolled optimizer loop)
 - [`registration-typing-metric-adt`](resolved/registration-typing-metric-adt.md) — Register v2: Metric ADT + TransformModel protocol + differentiable non-SSD metrics
+- [`selective-scan`](resolved/selective-scan.md) — selective-scan — state-space-model fused scan (Mamba/S6)
 - [`semiring-annihilator-field`](resolved/semiring-annihilator-field.md) — B8. Store the `(*)`-annihilator explicitly on `Semiring`
 - [`sliding-window-weighting`](resolved/sliding-window-weighting.md) — Sliding-window weighting kernel + overlap-add stitch — `nitrix.numerics`
 - [`spatial-transform-batched`](resolved/spatial-transform-batched.md) — `spatial_transform_batched` — `nitrix.geometry.grid`

@@ -1,11 +1,15 @@
 # attention-kernels — scaled dot-product / flash attention
 
-> **Status (2026-06-23), against `nitrix main@6449cfa`.** Not present. Part of
-> the [`nn-forward-block-kernels.md`](nn-forward-block-kernels.md) bundle —
+> **Status (2026-07-06): SHIPPED & VERIFIED (GPU, 24 tests on L4).**
+> `scaled_dot_product_attention` (dense / windowed-bias / causal / cross /
+> qk_norm) with a fused flash Pallas kernel (fwd + bwd `custom_vjp`), a
+> bit-faithful JAX reference, golden corpus, and pallas≈jax parity + grad tests.
+> Part of
+> the [`nn-forward-block-kernels.md`](../nn-forward-block-kernels.md) bundle —
 > **P0, ENABLING**. Read that ledger first for the shared framing (new family,
 > parity two-tier, dispatch fit, boundary). **Home locked to
 > `nitrix.nn.attention`** and the sequenced build is in
-> [`nn-forward-kernels-suite.md`](nn-forward-kernels-suite.md) §7.1.
+> [`nn-forward-kernels-suite.md`](../nn-forward-kernels-suite.md) §7.1.
 
 **What.** A single scaled-dot-product-attention primitive
 `nitrix.nn.attention.scaled_dot_product_attention`, with a `jax` reference
