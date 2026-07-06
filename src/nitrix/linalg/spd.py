@@ -45,7 +45,7 @@ Public surface:
 
 from __future__ import annotations
 
-from typing import Callable, Literal, Optional, Sequence, Union
+from typing import Callable, Literal, Optional, Sequence, Union, assert_never
 
 import jax
 import jax.numpy as jnp
@@ -68,6 +68,14 @@ __all__ = [
 
 
 EigvalueClip = Union[Literal['auto', 'none'], float]
+
+#: Which recipe computes the SPD square root / inverse square root.  ``'eigh'``
+#: is the eigendecomposition map (the reference oracle; routes through
+#: :func:`safe_eigh`).  ``'newton_schulz'`` is the matmul-only coupled iteration
+#: -- cuSOLVER-free, GPU-friendly, and gradient-stable at a repeated spectrum
+#: (no eigenvector VJP).  A ``driver`` axis in the sense of the dispatch model:
+#: numerically-divergent recipes of the *same* map.
+SqrtDriver = Literal['eigh', 'newton_schulz']
 
 
 def _clip_eigvals(
@@ -332,45 +340,121 @@ def symexp(
     )
 
 
+# ---------------------------------------------------------------------------
+# Newton-Schulz (coupled Denman-Beavers) square root -- the cuSOLVER-free driver
+# ---------------------------------------------------------------------------
+
+#: Newton-Schulz iteration count.  30 covers condition numbers up to ~1e5 (well
+#: past where an SPD square root is numerically meaningful) at double precision.
+_NEWTON_SCHULZ_ITERS = 30
+
+
+def _newton_schulz_isqrt(
+    A: Float[Array, '... d d'],
+    *,
+    iters: int = _NEWTON_SCHULZ_ITERS,
+) -> tuple[Float[Array, '... d d'], Float[Array, '... d d']]:
+    r"""Coupled square root / inverse square root of an SPD batch (matmul-only).
+
+    Returns ``(A^{1/2}, A^{-1/2})`` via the Denman-Beavers coupled Newton-Schulz
+    iteration -- matrix multiplies only, no eigendecomposition.  This is
+    **cuSOLVER-free** (never lowers to the fragile solver pool) and has a finite
+    reverse-mode VJP even at a repeated spectrum (there is no eigenvector
+    sensitivity term to blow up).  The input is first scaled by an upper bound
+    on its largest eigenvalue -- a few power iterations -- into the iteration's
+    convergence region :math:`(0, 1]`.  Assumes ``A`` is SPD and reasonably
+    conditioned; ridge a near-singular covariance before calling.
+    """
+    A = symmetric(A)
+    d = A.shape[-1]
+    eye = jnp.eye(d, dtype=A.dtype)
+    # Upper bound on lambda_max (a few power iterations) to scale the spectrum
+    # into the Newton-Schulz convergence region.
+    v = jnp.ones((*A.shape[:-1], 1), A.dtype)
+    for _ in range(5):
+        v = A @ v
+        v = v / jnp.linalg.norm(v, axis=-2, keepdims=True)
+    lam = jnp.sum(v * (A @ v), axis=-2, keepdims=True)  # (..., 1, 1)
+    y = A / lam
+    z = jnp.broadcast_to(eye, y.shape)
+    for _ in range(iters):
+        t = 1.5 * eye - 0.5 * (z @ y)
+        y = y @ t
+        z = t @ z
+    sqrt_lam = jnp.sqrt(lam)
+    return symmetric(y * sqrt_lam), symmetric(z / sqrt_lam)
+
+
 def symsqrt(
     input: Float[Array, '... d d'],
     *,
+    inverse: bool = False,
+    driver: SqrtDriver = 'eigh',
     psi: float = 0.0,
     key: Optional[jax.Array] = None,
     eigvalue_clip: EigvalueClip = 'auto',
 ) -> Float[Array, '... d d']:
-    r"""Matrix square root of an SPD batch.
+    r"""Matrix square root (or inverse square root) of an SPD batch.
 
-    Applies :math:`\sqrt{\cdot}` to the eigenvalues via :func:`symmap`.  The
-    scalar square root is undefined for negative reals; the default clipping
-    handles the boundary by flooring near-zero eigenvalues.  For genuinely
-    indefinite input the result is mathematically undefined and the negative
-    eigenvalues surface as ``NaN``.
+    With ``inverse=False`` returns :math:`A^{1/2}`; with ``inverse=True`` the
+    inverse square root :math:`A^{-1/2}` (equivalent to
+    ``sympower(A, power=-0.5)`` on the ``'eigh'`` driver, and the zero-phase
+    whitening matrix).
+
+    Two ``driver`` recipes of the same map:
+
+    - ``'eigh'`` (default) -- the eigenvalue map via :func:`symmap`
+      (:math:`Q \operatorname{diag}(\lambda^{\pm 1/2}) Q^{\top}`).  The scalar
+      square root is undefined for negative reals; the default clipping floors
+      near-zero eigenvalues (genuinely indefinite input surfaces as ``NaN``).
+      Honours ``psi`` / ``key`` / ``eigvalue_clip``.
+    - ``'newton_schulz'`` -- the matmul-only coupled iteration
+      (:func:`_newton_schulz_isqrt`): **cuSOLVER-free**, GPU-friendly, and
+      differentiably stable at a repeated spectrum.  ``psi`` / ``key`` /
+      ``eigvalue_clip`` do not apply (there is no eigendecomposition to
+      recondition or clip; ridge a near-singular input instead).
 
     Parameters
     ----------
     input : Float[Array, '... d d']
         Symmetric (assumed SPD) matrix batch.
+    inverse : bool, optional
+        Return :math:`A^{-1/2}` instead of :math:`A^{1/2}`.  Default ``False``.
+    driver : {'eigh', 'newton_schulz'}, optional
+        Which recipe computes the root.  Default ``'eigh'``.
     psi : float, optional
-        Reconditioning strength forwarded to :func:`symmap`.
+        Reconditioning strength forwarded to :func:`symmap` (``'eigh'`` only).
     key : jax.Array or None, optional
-        PRNG key, required when ``psi > 0``.
+        PRNG key, required when ``psi > 0`` (``'eigh'`` only).
     eigvalue_clip : {'auto', 'none'} or float, optional
-        Eigenvalue clipping policy forwarded to :func:`symmap`.
+        Eigenvalue clipping policy forwarded to :func:`symmap` (``'eigh'``
+        only).
 
     Returns
     -------
     Float[Array, '... d d']
-        The matrix square root of each input matrix; same shape as
+        The (inverse) matrix square root of each input matrix; same shape as
         ``input``.
     """
-    return symmap(
-        input,
-        fn=jnp.sqrt,
-        psi=psi,
-        key=key,
-        eigvalue_clip=eigvalue_clip,
-    )
+    match driver:
+        case 'newton_schulz':
+            a_sqrt, a_isqrt = _newton_schulz_isqrt(input)
+            return a_isqrt if inverse else a_sqrt
+        case 'eigh':
+            fn: Callable[[Array], Array] = (
+                (lambda x: 1.0 / jnp.sqrt(x))
+                if inverse
+                else (lambda x: jnp.sqrt(x))
+            )
+            return symmap(
+                input,
+                fn=fn,
+                psi=psi,
+                key=key,
+                eigvalue_clip=eigvalue_clip,
+            )
+        case _:
+            assert_never(driver)
 
 
 def sympower(
