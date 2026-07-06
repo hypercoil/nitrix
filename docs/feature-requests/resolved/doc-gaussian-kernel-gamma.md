@@ -1,9 +1,10 @@
 # Doc-fix: `gaussian_kernel` sigma->gamma relation is wrong (½ factor)
 
-> **Status (2026-06-03): open — documentation-correctness fix (one line, no
-> behaviour change).** Provenance: surfaced matching `gaussian_kernel` to
+> **Status (2026-07-06): RESOLVED.** Fixed at `linalg/kernel.py:38` — the
+> module docstring's alias now reads `gamma = 1/(2·sigma^2)` (the code was
+> already correct). Provenance: surfaced matching `gaussian_kernel` to
 > `sklearn.metrics.pairwise.rbf_kernel` for a `nitrix-perf-bench` case; ledger
-> context in [`perf-bench-feedback.md`](perf-bench-feedback.md).
+> context in [`perf-bench-feedback.md`](../perf-bench-feedback.md).
 
 `src/nitrix/linalg/kernel.py:37` (module docstring) states that
 `gaussian_kernel` and `rbf_kernel` *"are aliases up to the ``gamma = sigma^-2``
@@ -22,6 +23,6 @@ substitution formula is wrong. (The benchmark uses the correct
 
 ## Cross-references
 
-- [`perf-bench-feedback.md`](perf-bench-feedback.md) — the perf-bench-surfaced
+- [`perf-bench-feedback.md`](../perf-bench-feedback.md) — the perf-bench-surfaced
   doc-drift ledger.
 - `src/nitrix/linalg/kernel.py:37`; nitrix-perf-bench `gaussian_kernel` case.

@@ -260,7 +260,8 @@ Ledger (framing, closed-by-design, resolved):
 ## Doc-drift / correctness fixes
 
 Ledger: [`perf-bench-feedback.md`](perf-bench-feedback.md). These are
-mechanical docstring fixes, not primitive proposals.
+mechanical docstring fixes, not primitive proposals. All below are ✅ resolved
+and archived under [`resolved/`](resolved/).
 
 | Doc | Site |
 |---|---|
@@ -270,8 +271,10 @@ mechanical docstring fixes, not primitive proposals.
 | [doc-tsconv-cross-correlation](resolved/doc-tsconv-cross-correlation.md) | `signal/tsconv.py:45` |
 | [doc-lomb-scargle-interpolate-intended-use](resolved/doc-lomb-scargle-interpolate-intended-use.md) | `signal/lomb_scargle.py:~264–359` |
 | [doc-op-matrix-inventory-gaps](resolved/doc-op-matrix-inventory-gaps.md) | `docs/op_matrix.json` (`ops`) |
-| [doc-gaussian-kernel-gamma](doc-gaussian-kernel-gamma.md) | `linalg/kernel.py:37` |
-| [doc-relaxed-modularity-newman-factor](doc-relaxed-modularity-newman-factor.md) | `graph/community.py:245` |
+| [doc-gaussian-kernel-gamma](resolved/doc-gaussian-kernel-gamma.md) | `linalg/kernel.py:38` |
+| [doc-relaxed-modularity-newman-factor](resolved/doc-relaxed-modularity-newman-factor.md) | `graph/community.py:316,445,622` (landed as a behaviour fix) |
+| [doc-iir-backend-default](resolved/doc-iir-backend-default.md) | `signal/_iir.py` (module docstring) |
+| [doc-instantaneous-frequency-narrowband-caveat](resolved/doc-instantaneous-frequency-narrowband-caveat.md) | `signal/fourier.py` (`instantaneous_phase` / `_frequency`) |
 
 ## docs/feature-requests catalogue §12 brainstorm catalogue (candidate primitives)
 
@@ -341,7 +344,7 @@ stay downstream. Needs an explicit go-ahead + a lined-up consumer.
 
 ## Resolved (archived)
 
-The 53 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/). Listed here as one flat index; topical context and the shipped-status annotation remain in the family sections above.
+The 57 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/). Listed here as one flat index; topical context and the shipped-status annotation remain in the family sections above.
 
 - [`affine-matrix-algebra`](resolved/affine-matrix-algebra.md) — Affine matrix algebra (geometric convention) — `nitrix.geometry.affine`
 - [`augment-synthetic-connectivity`](resolved/augment-synthetic-connectivity.md) — Synthetic connectivity & time-series generators in `nitrix.augment`
@@ -355,11 +358,15 @@ The 53 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/)
 - [`cubic-resample`](resolved/cubic-resample.md) — Cubic (order-3) resample — `nitrix.geometry`
 - [`dice-loss`](resolved/dice-loss.md) — Soft / binary Dice — `nitrix.metrics.dice`
 - [`distance-transform-anisotropic-sampling`](resolved/distance-transform-anisotropic-sampling.md) — B20. `distance_transform` euclidean has no `sampling=` (anisotropic spacing)
+- [`doc-gaussian-kernel-gamma`](resolved/doc-gaussian-kernel-gamma.md) — Doc-fix: `gaussian_kernel` sigma->gamma relation is wrong (½ factor)
+- [`doc-iir-backend-default`](resolved/doc-iir-backend-default.md) — doc-drift: `_iir.py` module docstring says `backend='scan' (default)`
+- [`doc-instantaneous-frequency-narrowband-caveat`](resolved/doc-instantaneous-frequency-narrowband-caveat.md) — FR (doc): instantaneous_phase / instantaneous_frequency — narrowband caveat
 - [`doc-lomb-scargle-cpu-eigh-caveat`](resolved/doc-lomb-scargle-cpu-eigh-caveat.md) — Doc-fix: `lomb_scargle_interpolate` silently runs its eigh on CPU on cuSolver-broken stacks
 - [`doc-lomb-scargle-eigh-factorisation`](resolved/doc-lomb-scargle-eigh-factorisation.md) — Doc-fix: lomb-scargle module docstring says "Cholesky"; code uses `eigh` + pseudo-inverse
 - [`doc-lomb-scargle-interpolate-intended-use`](resolved/doc-lomb-scargle-interpolate-intended-use.md) — Doc-fix: `lomb_scargle_interpolate` — document the *intended use* (spectral bridge, not durab…
 - [`doc-lomb-scargle-normalisation`](resolved/doc-lomb-scargle-normalisation.md) — Doc-fix: `lomb_scargle_periodogram` normalisation docstring is wrong
 - [`doc-op-matrix-inventory-gaps`](resolved/doc-op-matrix-inventory-gaps.md) — Doc-fix: public ops missing from the op_matrix inventory
+- [`doc-relaxed-modularity-newman-factor`](resolved/doc-relaxed-modularity-newman-factor.md) — Doc-fix: `relaxed_modularity` does not reduce to Newman modularity (½ factor)
 - [`doc-tsconv-cross-correlation`](resolved/doc-tsconv-cross-correlation.md) — Doc-fix: `tsconv` is documented as "convolution" but implements cross-correlation
 - [`field-regularisers`](resolved/field-regularisers.md) — Displacement-field regularisers — `nitrix.register.regulariser`
 - [`fixed-point-combinators`](resolved/fixed-point-combinators.md) — Fixed-point combinators — `nitrix.numerics.fixed_point`

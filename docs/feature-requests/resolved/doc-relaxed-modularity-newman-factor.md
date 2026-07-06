@@ -1,9 +1,18 @@
 # Doc-fix: `relaxed_modularity` does not reduce to Newman modularity (½ factor)
 
-> **Status (2026-06-03): open — documentation-correctness fix (one line, no
-> behaviour change).** Provenance: surfaced matching `relaxed_modularity` to
-> `networkx.algorithms.community.modularity` for a `nitrix-perf-bench` case;
-> ledger context in [`perf-bench-feedback.md`](perf-bench-feedback.md).
+> **Status (2026-07-06): RESOLVED — as a behaviour fix, not the doc-only note
+> originally proposed.** The `directed=False` branch double-corrected the
+> undirected edge count (an explicit `/2` on top of the `1/2m` normalisation),
+> so the score was `Q_Newman / 2`. `relaxed_modularity` now gates the halving on
+> the normalisation and reduces **exactly** to Newman modularity for a one-hot
+> partition with `exclude_diag=False` (`graph/community.py:445`/`:622`; the
+> un-normalised and directed paths stay byte-identical; hand-computed Newman
+> oracle added). The `exclude_diag=True` default is kept — apt for
+> correlation-like adjacencies (trivial unit diagonal) and where self-self
+> coupling differs in scale/noise from self-other. Provenance: surfaced matching
+> `relaxed_modularity` to `networkx.algorithms.community.modularity` for a
+> `nitrix-perf-bench` case; ledger context in
+> [`perf-bench-feedback.md`](../perf-bench-feedback.md).
 
 `src/nitrix/graph/community.py:245` (the `relaxed_modularity` docstring) states
 that *"For a one-hot ``C`` this reduces to the standard Newman modularity."*
@@ -48,9 +57,17 @@ this is *not* proposed here because it would silently rescale every existing
 modularity loss. The benchmark uses the verified `Q_N / 2` bridge, so coverage
 does not depend on the fix.
 
+**Update (2026-07-06): done — as *the* fix.** Revisited and implemented:
+nitrix is prealpha (no compat concern) and correctness-first, and the rescale
+is a constant, so every gradient / argmax is unchanged. The halving is now
+gated on `normalise_modularity`, so **only** the normalised path changes (to
+exact `Q_N`) while the un-normalised and directed paths stay byte-identical —
+strictly more robust than an unconditional `Q/2` drop. `exclude_diag=True`
+retained as the default.
+
 ## Cross-references
 
-- [`perf-bench-feedback.md`](perf-bench-feedback.md) — the perf-bench-surfaced
+- [`perf-bench-feedback.md`](../perf-bench-feedback.md) — the perf-bench-surfaced
   doc-drift ledger.
 - [`doc-gaussian-kernel-gamma.md`](doc-gaussian-kernel-gamma.md) — the sibling
   ½-factor docstring drift (also surfaced by a perf-bench reference match).

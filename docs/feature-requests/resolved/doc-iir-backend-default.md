@@ -1,8 +1,12 @@
 # doc-drift: `_iir.py` module docstring says `backend='scan' (default)`
 
-> **Status (2026-06-06): open — doc-drift from `nitrix-perf-bench`.** Found while
-> hardening the sosfilt/sosfiltfilt perf cases to measure the *default* engine.
-> Docstring-only; no behaviour change. Authored perf-bench-side.
+> **Status (2026-07-06): RESOLVED.** Fixed in `signal/_iir.py` (module
+> docstring): the engine list now names the `fft` driver and the
+> `driver='auto'` default (fft on GPU / scan on CPU), mirroring the function
+> docstrings + `_resolve_iir_backend`. The original stale `backend='scan'
+> (default)` line had already been refactored to the `driver=` vocabulary; the
+> header's engine list was still incomplete. Docstring-only; no behaviour
+> change.
 
 ## The drift
 
@@ -38,5 +42,5 @@ and resolves to `'fft'` on GPU / `'scan'` on CPU (mirror the function docstring
 
 - `signal/_iir.py:~22` (module docstring), vs `:60` (`_resolve_iir_backend`)
   and `:571` (`sosfilt` docstring, correct).
-- [`iir-filter-gpu-backend.md`](resolved/iir-filter-gpu-backend.md) (B12 — the shipped
+- [`iir-filter-gpu-backend.md`](iir-filter-gpu-backend.md) (B12 — the shipped
   FFT engine + auto default).

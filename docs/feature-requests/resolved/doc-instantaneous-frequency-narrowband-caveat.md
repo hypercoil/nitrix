@@ -1,8 +1,9 @@
 # FR (doc): instantaneous_phase / instantaneous_frequency — narrowband caveat
 
-**Status:** open · **Type:** documentation · **Severity:** low (correctness is
-fine in the intended regime; the gap is a missing usage caveat) · **Source:**
-nitrix-perf-bench signal cases.
+**Status:** RESOLVED (2026-07-06) · **Type:** documentation · **Severity:** low
+· **Source:** nitrix-perf-bench signal cases. Fixed in `signal/fourier.py`: a
+narrowband **Notes** caveat added to both `instantaneous_phase` and
+`instantaneous_frequency`.
 
 ## Summary
 
