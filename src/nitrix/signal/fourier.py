@@ -323,6 +323,18 @@ def instantaneous_phase(
     Float[Array, '...']
         Unwrapped phase of ``X``, same shape as ``X`` (or with the
         ``axis`` resized to ``n``).
+
+    Notes
+    -----
+    Well-posed only on a **narrowband** signal -- one with a single,
+    well-defined instantaneous frequency well below Nyquist and an
+    envelope bounded away from zero (an analytic / AM-FM signal, a chirp,
+    a band-pass-filtered band); band-pass first if necessary.  On
+    broadband or noisy input the phase is intrinsically ill-defined near
+    Nyquist (the per-sample :math:`\\pm\\pi` wrap is ambiguous) and
+    wherever the envelope nears zero; results there are unstable and not
+    bit-reproducible across precisions -- by the nature of the quantity,
+    not the implementation.
     """
     return jnp.unwrap(
         jnp.angle(analytic_signal(X, axis=axis, n=n)),
@@ -370,6 +382,18 @@ def instantaneous_frequency(
     Float[Array, '...']
         Instantaneous frequency of ``X``.  Same shape as ``X``
         except the ``axis`` is one element shorter.
+
+    Notes
+    -----
+    Estimates a *single* instantaneous frequency and is well-posed only on
+    a **narrowband** signal (see :func:`instantaneous_phase`); band-pass
+    first if necessary.  On broadband or noisy input the frequency is
+    intrinsically ill-defined near Nyquist (the per-sample phase increment
+    hits the ambiguous :math:`\\pm\\pi` wrap) and where the envelope nears
+    zero; results there are unstable and not bit-reproducible across
+    precisions -- by the nature of the quantity, not the implementation
+    (the unwrap-free conjugate-product estimator shares the same
+    ambiguity).
     """
     phase = instantaneous_phase(X, axis=axis, n=n, period=period)
     return fs * jnp.diff(phase, axis=axis) / period
