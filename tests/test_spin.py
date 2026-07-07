@@ -15,7 +15,11 @@ import pytest
 
 jax.config.update('jax_enable_x64', True)
 
-from nitrix.geometry import random_rotation, spin_surrogates  # noqa: E402
+from nitrix.geometry import (  # noqa: E402
+    parcel_centroids,
+    random_rotation,
+    spin_surrogates,
+)
 from nitrix.stats.inference import spin_test  # noqa: E402
 
 
@@ -226,3 +230,39 @@ def test_spin_surrogates_invalid_assignment_raises():
     x = jax.random.normal(jax.random.key(3), (40,))
     with pytest.raises(ValueError, match='assignment'):
         spin_surrogates(coords, x, jnp.eye(3)[None], assignment='bogus')
+
+
+# --- parcel-level spin ------------------------------------------------------
+
+
+def _parcellation(n_vert=600, n_parcels=30, seed=0):
+    rng = np.random.default_rng(seed)
+    coords = rng.standard_normal((n_vert, 3))
+    coords = coords / np.linalg.norm(coords, axis=1, keepdims=True)
+    parc = np.repeat(np.arange(n_parcels), n_vert // n_parcels)
+    return jnp.asarray(coords), jnp.asarray(parc), n_parcels
+
+
+def test_parcel_centroids():
+    coords, parc, p = _parcellation()
+    cent = parcel_centroids(coords, parc, n_parcels=p)
+    assert cent.shape == (p, 3)
+    np.testing.assert_allclose(
+        np.linalg.norm(np.asarray(cent), axis=1), 1.0, atol=1e-10
+    )
+    # centroid == unit-normalised mean of the parcel's vertices
+    m = np.asarray(coords)[:20].mean(0)
+    m = m / np.linalg.norm(m)
+    np.testing.assert_allclose(np.asarray(cent[0]), m, atol=1e-10)
+    # n_parcels=None infers P eagerly
+    assert parcel_centroids(coords, parc).shape == (p, 3)
+
+
+def test_parcel_level_spin_test():
+    coords, parc, p = _parcellation()
+    cent = parcel_centroids(coords, parc, n_parcels=p)
+    px = jnp.asarray(np.random.default_rng(1).standard_normal(p))
+    res = spin_test(px, px, cent, key=jax.random.key(1), n_spin=500)
+    assert np.isclose(float(res.statistic), 1.0)
+    assert float(res.pvalue) < 0.05
+    assert res.null_distribution.shape == (500,)

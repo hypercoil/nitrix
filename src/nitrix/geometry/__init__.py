@@ -100,6 +100,7 @@ from .sphere import (
     cartesian_to_latlong,
     is_bijective_sphere_map,
     latlong_to_cartesian,
+    parcel_centroids,
     random_rotation,
     signed_spherical_areas,
     spectral_sphere_embedding,
@@ -211,6 +212,7 @@ __all__ = [
     'surface_resample',
     'random_rotation',
     'spin_surrogates',
+    'parcel_centroids',
     # sphere_grid (parameterised regular grid)
     'sphere_grid_pad_2d',
     'sphere_grid_unpad_2d',

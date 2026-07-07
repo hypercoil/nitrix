@@ -52,6 +52,7 @@ __all__ = [
     'surface_resample',
     'random_rotation',
     'spin_surrogates',
+    'parcel_centroids',
 ]
 
 
@@ -1394,3 +1395,48 @@ def spin_surrogates(
         return x[..., jnp.argmax(sim, axis=1)]
 
     return cast(Float[Array, 'n ... V'], lax.map(one, rotations))
+
+
+def parcel_centroids(
+    coords: Float[Array, 'V 3'],
+    parcellation: Int[Array, 'V'],
+    *,
+    n_parcels: Optional[int] = None,
+) -> Float[Array, 'P 3']:
+    r"""Spherical centroid of each parcel, for parcel-level spin nulls.
+
+    A parcel's centroid is the unit-normalised mean of its vertices' sphere
+    coordinates (the resultant-vector direction). Passing these to
+    :func:`spin_surrogates` / :func:`nitrix.stats.inference.spin_test` in place
+    of vertex coordinates runs the spin test at the **parcel** level
+    (Vazquez-Rodriguez): the ``P`` centroids are rotated and each parcel takes
+    the value of the nearest rotated parcel -- far cheaper than a dense
+    vertex-level spin, and the natural resolution for a parcellated map. The
+    medial-wall (``NaN``) and per-hemisphere (per-*parcel* label) handling
+    compose unchanged.
+
+    Parameters
+    ----------
+    coords : Float[Array, 'V 3']
+        Per-vertex sphere coordinates.
+    parcellation : Int[Array, 'V']
+        Per-vertex parcel label in ``[0, P)``.
+    n_parcels : int, optional
+        The number of parcels ``P`` (static). ``None`` (default) infers it
+        eagerly from ``parcellation.max() + 1`` (unavailable under ``jit``).
+
+    Returns
+    -------
+    Float[Array, 'P 3']
+        The ``P`` unit-sphere parcel centroids.
+    """
+    if n_parcels is None:
+        n_parcels = int(parcellation.max()) + 1
+    coords = coords / jnp.linalg.norm(coords, axis=-1, keepdims=True)
+    onehot = jax.nn.one_hot(parcellation, n_parcels, dtype=coords.dtype)
+    sums = onehot.T @ coords  # (P, 3)
+    return cast(
+        Float[Array, 'P 3'],
+        sums
+        / jnp.maximum(jnp.linalg.norm(sums, axis=-1, keepdims=True), 1e-12),
+    )
