@@ -3,10 +3,10 @@
 > **Status (2026-07-07): the spin / Moran / BrainSMASH trio is SHIPPED** (on
 > the shared surrogate→test seam) — the most-common (spin), a spectral
 > (Moran), and the most-rigorous parameterized (BrainSMASH variogram) nulls.
-> The spin **medial-wall (NaN) + per-hemisphere** refinements are also SHIPPED.
-> Remaining: the BrainSMASH 'sampled' large-mesh variant; the remaining spin
-> refinements (parcel-level, Váša/Hungarian bijective); and the mesh/graph-TFCE
-> clustering half of N2. Family ledger for
+> The spin **medial-wall + per-hemisphere + Váša bijective** refinements are
+> also SHIPPED. Remaining: the BrainSMASH 'sampled' large-mesh variant;
+> parcel-level (centroid) spin; and the mesh/graph-TFCE clustering half of N2.
+> Family ledger for
 > the spatial-autocorrelation-preserving null models used to test the
 > correspondence of two brain maps. Origin: the **N2** item of the
 > [`stats-suite-audit`](stats-suite-audit.md) ("no spin test (Alexander-Bloch/
@@ -96,8 +96,10 @@ cuSolver).
    dropped pairwise over each spin's finite support); `spin_surrogates(...,
    hemisphere=)` / `spin_test(..., hemisphere=)` spin the hemispheres
    independently with the Alexander-Bloch mirror reflection and reassign
-   within-hemisphere. Remaining: parcel-level (centroid) support and the
-   Váša / Hungarian **bijective** assignment.
+   within-hemisphere. `spin_surrogates`/`spin_test(..., assignment='bijective')`
+   is the Váša (2018) greedy global-nearest **one-to-one** matching (each
+   surrogate an exact permutation of the map). Remaining: parcel-level
+   (centroid) support.
 4. ✅ **The shared `spatial_null_test` seam** — SHIPPED
    (`stats.inference.spatial_null_test` + `SpatialNullResult`); `spin_test` /
    `moran_test` are thin wrappers, and a new generator plugs straight in.

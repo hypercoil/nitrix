@@ -160,8 +160,8 @@ fits; exact log|V| cancellation) so it is not re-raised.
 map-correspondence inference (the audit's **N2**). The **spin / Moran /
 BrainSMASH trio SHIPPED** (most-common / spectral / most-rigorous-parameterized)
 on the shared `stats.inference.spatial_null_test` seam, plus the spin
-**medial-wall (NaN) + per-hemisphere** refinements. Remaining: the BrainSMASH
-large-mesh 'sampled' variant + parcel-level / bijective spin. Reference:
+**medial-wall + per-hemisphere + Váša bijective** refinements. Remaining: the
+BrainSMASH large-mesh 'sampled' variant + parcel-level spin. Reference:
 `neuromaps.nulls`.
 
 **GP / HGP pre-merge review register (2026-06-22):**
