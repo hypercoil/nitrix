@@ -1,8 +1,12 @@
 # Compensated summation / mixed-precision — `nitrix.numerics.precision`
 
-> **Status (2026-06-02): not started.** Brainstorm candidate; promotion
-> gated by the §13 acceptance protocol. Provenance:
-> `docs/feature-requests catalogue §12.10`.
+> **Status (2026-07-07): SHIPPED (`nitrix.numerics.precision`).** All four
+> proposed reducers plus a compensated dot: :func:`kahan_sum`,
+> :func:`neumaier_sum`, :func:`pairwise_sum`, :func:`compensated_dot`
+> (Ogita--Rump--Oishi ``Dot2``, FMA-free Dekker two-product verified bit-exact
+> on CPU + Ampere GPU), :func:`stochastic_round` (unbiased, fp16/bf16).
+> Standalone; not yet wired into the substrate reductions (additive, zero
+> blast radius). Provenance: `docs/feature-requests catalogue §12.10`.
 
 **What.** Pure-numerics reduction utilities any substrate reduction can drop
 in for accuracy / reproducibility / low-precision accumulation.

@@ -20,11 +20,15 @@ Submodules:
 - ``ode``        -- ODE integrators (euler / midpoint / rk4 /
   local_linearization)
   for continuous-time / neural-ODE models.
+- ``precision``  -- compensated / precision-aware reductions
+  (kahan_sum, neumaier_sum, pairwise_sum, compensated_dot,
+  stochastic_round) for accuracy / reproducibility / low-precision
+  accumulation.
 - ``fixed_point`` -- :func:`fixed_point_solve` (the implicit-VJP
   fixed-point iteration), re-exported at the package top level.
 """
 
-from . import cluster, normalize, ode, spatial, tensor_ops
+from . import cluster, normalize, ode, precision, spatial, tensor_ops
 from .cluster import (
     KMeansState,
     Similarity,
@@ -34,6 +38,13 @@ from .cluster import (
 )
 from .fixed_point import fixed_point_solve
 from .ode import euler, local_linearization, midpoint, odeint, rk4
+from .precision import (
+    compensated_dot,
+    kahan_sum,
+    neumaier_sum,
+    pairwise_sum,
+    stochastic_round,
+)
 from .spatial import (
     crop_to_multiple,
     gaussian_window,
@@ -79,6 +90,12 @@ __all__ = [
     'rk4',
     'local_linearization',
     'odeint',
+    # compensated / precision-aware reductions
+    'kahan_sum',
+    'neumaier_sum',
+    'pairwise_sum',
+    'compensated_dot',
+    'stochastic_round',
     # spatial shape / windowing
     'pad_to_multiple',
     'crop_to_multiple',
