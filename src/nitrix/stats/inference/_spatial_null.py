@@ -47,9 +47,20 @@ class SpatialNullResult(NamedTuple):
 def _pearson(
     a: Float[Array, '... V'], b: Float[Array, '... V']
 ) -> Float[Array, '...']:
-    """Pearson correlation over the trailing axis."""
-    a = a - a.mean(axis=-1, keepdims=True)
-    b = b - b.mean(axis=-1, keepdims=True)
+    """Pearson correlation over the trailing axis, ignoring non-finite entries.
+
+    Locations where either map is ``NaN`` / ``inf`` (e.g. the cortical medial
+    wall, or a spun vertex that pulled its value from the medial wall) are
+    dropped pairwise; the correlation is over the shared finite support. For
+    all-finite inputs this is the ordinary Pearson correlation.
+    """
+    mask = jnp.isfinite(a) & jnp.isfinite(b)
+    count = mask.sum(axis=-1, keepdims=True)
+    a = jnp.where(mask, a, 0.0)
+    b = jnp.where(mask, b, 0.0)
+    denom_count = jnp.maximum(count, 1.0)
+    a = jnp.where(mask, a - a.sum(axis=-1, keepdims=True) / denom_count, 0.0)
+    b = jnp.where(mask, b - b.sum(axis=-1, keepdims=True) / denom_count, 0.0)
     num = (a * b).sum(axis=-1)
     den = jnp.sqrt((a * a).sum(axis=-1) * (b * b).sum(axis=-1))
     return num / den

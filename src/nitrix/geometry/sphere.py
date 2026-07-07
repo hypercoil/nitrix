@@ -1276,6 +1276,8 @@ def spin_surrogates(
     coords: Float[Array, 'V 3'],
     x: Float[Array, '... V'],
     rotations: Float[Array, 'n 3 3'],
+    *,
+    hemisphere: Optional[Int[Array, 'V']] = None,
 ) -> Float[Array, 'n ... V']:
     r"""Spin-based surrogate maps (the Alexander-Bloch / Vazquez-Rodriguez null).
 
@@ -1286,18 +1288,37 @@ def spin_surrogates(
     autocorrelation structure -- the spatial null under which two maps'
     correspondence is tested (see :func:`nitrix.stats.inference.spin_test`).
 
+    **Medial wall.** Set medial-wall (or otherwise invalid) entries of ``x`` to
+    ``NaN``; the reassignment then carries ``NaN`` to any vertex whose nearest
+    source is a medial-wall vertex, and
+    :func:`~nitrix.stats.inference.spin_test` drops those entries pairwise from
+    the correlation (its statistic is non-finite-aware).
+
+    **Per hemisphere** (``hemisphere`` given). The two cortical hemispheres are
+    spun **independently** with the Alexander-Bloch mirror convention: the right
+    hemisphere (label ``1``) receives the rotation reflected across the midline
+    (:math:`F R F`, with :math:`F = \operatorname{diag}(-1, 1, 1)`) so the
+    left/right structure is preserved, and each vertex is reassigned only
+    *within its own hemisphere*.
+
     The nearest-neighbour assignment is *not* a bijection (values may repeat);
-    the Vasa / Hungarian bijective variant and per-hemisphere reflection
-    (Alexander-Bloch) are follow-ups.
+    the Vasa / Hungarian bijective variant is a follow-up.
 
     Parameters
     ----------
     coords : Float[Array, 'V 3']
         Vertex coordinates on the sphere (any radius; normalised internally).
+        With ``hemisphere``, each hemisphere's vertices lie on their own
+        origin-centred sphere in a common frame.
     x : Float[Array, '... V']
-        Per-vertex map(s), the vertex axis last.
+        Per-vertex map(s), the vertex axis last. Medial-wall entries may be
+        ``NaN``.
     rotations : Float[Array, 'n 3 3']
         Rotation matrices, e.g. from :func:`random_rotation`.
+    hemisphere : Int[Array, 'V'], optional
+        Per-vertex hemisphere label -- ``0`` (left, un-reflected) or ``1``
+        (right, reflected). ``None`` (default) spins the whole surface with a
+        single rotation.
 
     Returns
     -------
@@ -1314,9 +1335,25 @@ def spin_surrogates(
     """
     coords = coords / jnp.linalg.norm(coords, axis=-1, keepdims=True)
 
-    def one(rotation: Float[Array, '3 3']) -> Float[Array, '... V']:
-        rotated = coords @ rotation.T  # (V, 3), still unit
-        nearest = jnp.argmax(rotated @ coords.T, axis=1)  # (V,)
+    if hemisphere is None:
+
+        def one(rotation: Float[Array, '3 3']) -> Float[Array, '... V']:
+            rotated = coords @ rotation.T  # (V, 3), still unit
+            nearest = jnp.argmax(rotated @ coords.T, axis=1)  # (V,)
+            return x[..., nearest]
+
+        return cast(Float[Array, 'n ... V'], lax.map(one, rotations))
+
+    is_right = (hemisphere == 1)[:, None]  # (V, 1)
+    same_hemi = hemisphere[:, None] == hemisphere[None, :]  # (V, V)
+    reflect = jnp.diag(jnp.asarray([-1.0, 1.0, 1.0], dtype=coords.dtype))
+
+    def one_hemi(rotation: Float[Array, '3 3']) -> Float[Array, '... V']:
+        rotated_left = coords @ rotation.T
+        rotated_right = coords @ (reflect @ rotation @ reflect).T
+        rotated = jnp.where(is_right, rotated_right, rotated_left)  # (V, 3)
+        sim = jnp.where(same_hemi, rotated @ coords.T, -jnp.inf)  # (V, V)
+        nearest = jnp.argmax(sim, axis=1)
         return x[..., nearest]
 
-    return cast(Float[Array, 'n ... V'], lax.map(one, rotations))
+    return cast(Float[Array, 'n ... V'], lax.map(one_hemi, rotations))
