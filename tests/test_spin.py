@@ -11,6 +11,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 jax.config.update('jax_enable_x64', True)
 
@@ -166,3 +167,62 @@ def test_spin_test_medial_wall_self_is_significant():
     )
     assert np.isclose(float(res.statistic), 1.0)
     assert float(res.pvalue) < 0.05
+
+
+# --- Vasa / Hungarian bijective assignment ----------------------------------
+
+
+def test_spin_bijective_is_exact_permutation():
+    """assignment='bijective' -> each surrogate is a permutation of x."""
+    coords = _sphere(v=80)
+    x = jax.random.normal(jax.random.key(3), (80,))
+    surr = spin_surrogates(
+        coords,
+        x,
+        random_rotation(jax.random.key(0), 6),
+        assignment='bijective',
+    )
+    x_sorted = np.sort(np.asarray(x))
+    for k in range(6):
+        assert len(np.unique(np.asarray(surr[k]))) == 80  # all distinct
+        np.testing.assert_allclose(
+            np.sort(np.asarray(surr[k])), x_sorted, atol=1e-12
+        )
+
+
+def test_spin_bijective_within_hemisphere_permutation():
+    coords, hemi = _bihemi(nlh=40, nrh=40)
+    x = jnp.asarray(np.random.default_rng(0).standard_normal(80))
+    surr = spin_surrogates(
+        coords,
+        x,
+        random_rotation(jax.random.key(0), 6),
+        hemisphere=hemi,
+        assignment='bijective',
+    )
+    lh = np.sort(np.asarray(x)[:40])
+    rh = np.sort(np.asarray(x)[40:])
+    for k in range(6):
+        np.testing.assert_allclose(
+            np.sort(np.asarray(surr[k])[:40]), lh, atol=1e-12
+        )
+        np.testing.assert_allclose(
+            np.sort(np.asarray(surr[k])[40:]), rh, atol=1e-12
+        )
+
+
+def test_spin_test_bijective_self_is_significant():
+    coords = _sphere(v=80)
+    x = jax.random.normal(jax.random.key(3), (80,))
+    res = spin_test(
+        x, x, coords, key=jax.random.key(1), n_spin=200, assignment='bijective'
+    )
+    assert np.isclose(float(res.statistic), 1.0)
+    assert float(res.pvalue) < 0.05
+
+
+def test_spin_surrogates_invalid_assignment_raises():
+    coords = _sphere(v=40)
+    x = jax.random.normal(jax.random.key(3), (40,))
+    with pytest.raises(ValueError, match='assignment'):
+        spin_surrogates(coords, x, jnp.eye(3)[None], assignment='bogus')

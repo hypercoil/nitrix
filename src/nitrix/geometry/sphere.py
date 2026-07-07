@@ -1272,12 +1272,41 @@ def random_rotation(
     return jnp.stack([row0, row1, row2], axis=-2)
 
 
+def _bijective_assign(
+    similarity: Float[Array, 'V V'],
+) -> Int[Array, 'V']:
+    r"""Greedy global-nearest bijective assignment (Vasa 2018).
+
+    Repeatedly matches the closest remaining (rotated, original) pair and
+    removes both, giving a one-to-one ``perm`` (``perm[r]`` is the original
+    vertex assigned to rotated vertex ``r``) -- so a spun surrogate is an
+    *exact permutation* of the map's values, unlike the nearest-neighbour
+    assignment which may repeat. :math:`O(V^2)` memory, :math:`O(V^3)` time.
+    """
+    v = similarity.shape[0]
+    neg = jnp.asarray(-jnp.inf, similarity.dtype)
+
+    def step(
+        sim: Float[Array, 'V V'], _: None
+    ) -> tuple[Float[Array, 'V V'], tuple[Array, Array]]:
+        flat = jnp.argmax(sim)
+        r = flat // v
+        t = flat % v
+        sim = sim.at[r, :].set(neg).at[:, t].set(neg)
+        return sim, (r, t)
+
+    _, (rows, cols) = lax.scan(step, similarity, None, length=v)
+    perm = jnp.zeros(v, jnp.int32).at[rows].set(cols.astype(jnp.int32))
+    return perm
+
+
 def spin_surrogates(
     coords: Float[Array, 'V 3'],
     x: Float[Array, '... V'],
     rotations: Float[Array, 'n 3 3'],
     *,
     hemisphere: Optional[Int[Array, 'V']] = None,
+    assignment: Literal['nearest', 'bijective'] = 'nearest',
 ) -> Float[Array, 'n ... V']:
     r"""Spin-based surrogate maps (the Alexander-Bloch / Vazquez-Rodriguez null).
 
@@ -1319,6 +1348,12 @@ def spin_surrogates(
         Per-vertex hemisphere label -- ``0`` (left, un-reflected) or ``1``
         (right, reflected). ``None`` (default) spins the whole surface with a
         single rotation.
+    assignment : {'nearest', 'bijective'}, optional
+        ``'nearest'`` (default) assigns each vertex its nearest rotated source
+        (values may repeat). ``'bijective'`` uses the greedy one-to-one
+        Vasa (2018) matching, so each surrogate is an *exact permutation* of the
+        map (its value distribution is preserved), at :math:`O(V^3)` cost --
+        parcel-level, not dense vertex meshes.
 
     Returns
     -------
@@ -1333,27 +1368,29 @@ def spin_surrogates(
     dense vertex-level meshes want a chunked / kd-tree nearest-neighbour
     (a perf follow-up).
     """
+    if assignment not in ('nearest', 'bijective'):
+        raise ValueError(
+            f"assignment must be 'nearest'/'bijective'; got {assignment!r}."
+        )
     coords = coords / jnp.linalg.norm(coords, axis=-1, keepdims=True)
-
-    if hemisphere is None:
-
-        def one(rotation: Float[Array, '3 3']) -> Float[Array, '... V']:
-            rotated = coords @ rotation.T  # (V, 3), still unit
-            nearest = jnp.argmax(rotated @ coords.T, axis=1)  # (V,)
-            return x[..., nearest]
-
-        return cast(Float[Array, 'n ... V'], lax.map(one, rotations))
-
-    is_right = (hemisphere == 1)[:, None]  # (V, 1)
-    same_hemi = hemisphere[:, None] == hemisphere[None, :]  # (V, V)
     reflect = jnp.diag(jnp.asarray([-1.0, 1.0, 1.0], dtype=coords.dtype))
 
-    def one_hemi(rotation: Float[Array, '3 3']) -> Float[Array, '... V']:
-        rotated_left = coords @ rotation.T
-        rotated_right = coords @ (reflect @ rotation @ reflect).T
-        rotated = jnp.where(is_right, rotated_right, rotated_left)  # (V, 3)
-        sim = jnp.where(same_hemi, rotated @ coords.T, -jnp.inf)  # (V, V)
-        nearest = jnp.argmax(sim, axis=1)
-        return x[..., nearest]
+    def similarity_of(rotation: Float[Array, '3 3']) -> Float[Array, 'V V']:
+        # (rotated vertex i) . (original vertex j); higher = nearer on the sphere.
+        if hemisphere is None:
+            return cast(Float[Array, 'V V'], (coords @ rotation.T) @ coords.T)
+        rotated = jnp.where(
+            (hemisphere == 1)[:, None],
+            coords @ (reflect @ rotation @ reflect).T,  # right: mirror the rot
+            coords @ rotation.T,  # left
+        )
+        same_hemi = hemisphere[:, None] == hemisphere[None, :]
+        return jnp.where(same_hemi, rotated @ coords.T, -jnp.inf)
 
-    return cast(Float[Array, 'n ... V'], lax.map(one_hemi, rotations))
+    def one(rotation: Float[Array, '3 3']) -> Float[Array, '... V']:
+        sim = similarity_of(rotation)  # (V, V)
+        if assignment == 'bijective':
+            return x[..., _bijective_assign(sim)]
+        return x[..., jnp.argmax(sim, axis=1)]
+
+    return cast(Float[Array, 'n ... V'], lax.map(one, rotations))

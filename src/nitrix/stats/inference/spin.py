@@ -16,7 +16,7 @@ the reference.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
 from jaxtyping import Array, Float, Int
 
@@ -38,6 +38,7 @@ def spin_test(
     n_spin: int = 1000,
     two_sided: bool = True,
     hemisphere: Optional[Int[Array, 'V']] = None,
+    assignment: Literal['nearest', 'bijective'] = 'nearest',
 ) -> SpatialNullResult:
     r"""Spin-test spatial null for the correlation between two surface maps.
 
@@ -71,6 +72,11 @@ def spin_test(
         reflection and reassigned within-hemisphere (see
         :func:`~nitrix.geometry.spin_surrogates`). ``None`` (default) spins the
         whole surface jointly.
+    assignment : {'nearest', 'bijective'}, optional
+        Vertex reassignment: ``'nearest'`` (default) or the greedy one-to-one
+        Váša (2018) ``'bijective'`` matching, which makes each surrogate an
+        exact permutation of ``x`` (parcel-level; see
+        :func:`~nitrix.geometry.spin_surrogates`).
 
     Returns
     -------
@@ -83,5 +89,7 @@ def spin_test(
     memory is :math:`O(V^2)`; see its notes for the large-mesh caveat.
     """
     rotations = random_rotation(key, n_spin)
-    x_spun = spin_surrogates(coords, x, rotations, hemisphere=hemisphere)
+    x_spun = spin_surrogates(
+        coords, x, rotations, hemisphere=hemisphere, assignment=assignment
+    )
     return spatial_null_test(x, y, x_spun, two_sided=two_sided)
