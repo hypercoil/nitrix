@@ -1,8 +1,12 @@
 # Robust statistics — `nitrix.stats.robust`
 
-> **Status (2026-06-02): not started.** Brainstorm candidate; promotion
-> gated by the §13 acceptance protocol. Provenance:
-> `docs/feature-requests catalogue §12.7`.
+> **Status (2026-07-07): SHIPPED (`nitrix.stats.robust`).** :func:`mad`
+> (median absolute deviation, normal-consistent), :func:`huber_regress`
+> (monotone M-estimator), :func:`tukey_bisquare_regress` (redescender). Pure
+> composition: differentiable fixed-iteration IRLS (`lax.fori_loop`, matching
+> the GLM-IRLS convention) over the cuSOLVER-free `small_inv_logdet` ``(p, p)``
+> weighted-least-squares solve; single response, `vmap` for the mass-univariate
+> case. Provenance: `docs/feature-requests catalogue §12.7`.
 
 **What.** M-estimator regression and the scale estimator that pairs with it.
 

@@ -5675,6 +5675,45 @@ register(
 )
 
 
+def _robust_fixture():
+    X = jax.random.normal(_key(9), (40, 3))
+    y = X @ jnp.asarray([1.0, -0.5, 0.3]) + 0.2 * jax.random.normal(
+        _key(10), (40,)
+    )
+    return (X, y), {}
+
+
+register(
+    OpInfo(
+        'nitrix.stats.mad',
+        fixture=lambda: ((jax.random.normal(_key(9), (8, 50)),), {}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('median absolute deviation (robust scale)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.stats.huber_regress',
+        fixture=_robust_fixture,
+        diff_arg=1,
+        vmap_arg=None,
+        invariants=('Huber M-estimator IRLS', 'cuSOLVER-free'),
+        notes='returns RobustFit; grad reduces the coef leaf',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.stats.tukey_bisquare_regress',
+        fixture=_robust_fixture,
+        diff_arg=1,
+        vmap_arg=None,
+        invariants=('Tukey bisquare redescending M-estimator IRLS',),
+        notes='returns RobustFit; grad reduces the coef leaf',
+    )
+)
+
+
 # ---------------------------------------------------------------------------
 # Host snapshot
 # ---------------------------------------------------------------------------

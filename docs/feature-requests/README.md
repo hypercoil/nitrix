@@ -300,7 +300,7 @@ live code: *not started* / *partial* (some substrate shipped).
 | 12.4 | [sinkhorn-optimal-transport](sinkhorn-optimal-transport.md) | `transport` | M | not started |
 | 12.5 | [discrete-exterior-calculus](discrete-exterior-calculus.md) | `geometry.dec` | M | partial (cotangent Laplacian shipped) |
 | 12.6 | [mesh-curvature](resolved/mesh-curvature.md) | `geometry.curvature` | S | ✅ shipped (geometry suite: mean/gaussian/principal_curvatures) |
-| 12.7 | [robust-statistics](robust-statistics.md) | `stats.robust` | S | not started |
+| 12.7 | [robust-statistics](robust-statistics.md) | `stats.robust` | S | ✅ shipped (`mad`/`huber_regress`/`tukey_bisquare_regress`) |
 | 12.8 | [fixed-point-combinators](resolved/fixed-point-combinators.md) | `numerics.fixed_point` | M | ✅ shipped (`fixed_point_solve` — registration) |
 | 12.9 | [spherical-harmonic-transform](spherical-harmonic-transform.md) | `geometry.sphere.harmonics` | M | not started |
 | 12.10 | [compensated-summation](compensated-summation.md) | `numerics.precision` | S | ✅ shipped (`kahan_sum`/`neumaier_sum`/`pairwise_sum`/`compensated_dot`/`stochastic_round`) |

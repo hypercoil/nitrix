@@ -24,6 +24,8 @@ Submodules
   Angular-Central-Gaussian rejection).
 - ``glm`` -- mass-univariate generalised linear models (OLS / WLS /
   exponential-family IRLS) with t / F contrasts and goodness-of-fit.
+- ``robust`` -- outlier-resistant M-estimator regression (Huber, Tukey
+  bisquare) by IRLS, and the median-absolute-deviation scale estimator.
 - ``betareg`` / ``ordinal`` / ``gaulss`` -- additional response models: beta
   regression (rates / proportions), ordinal (cumulative-link), and the Gaussian
   location-scale (mean + variance) GAMLSS fit.
@@ -206,6 +208,12 @@ from .whitening import (
     whiten_fit,
     whiten_inverse_apply,
 )
+from .robust import (
+    RobustFit,
+    huber_regress,
+    mad,
+    tukey_bisquare_regress,
+)
 
 __all__ = [
     # covariance
@@ -380,4 +388,9 @@ __all__ = [
     'whiten_fit',
     'whiten_apply',
     'whiten_inverse_apply',
+    # robust M-estimation
+    'mad',
+    'huber_regress',
+    'tukey_bisquare_regress',
+    'RobustFit',
 ]
