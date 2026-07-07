@@ -231,7 +231,7 @@ roadmap ([`ode-integrators`](ode-integrators.md), the seed), fixed-point /
 implicit combinators ([`fixed-point-combinators`](resolved/fixed-point-combinators.md)),
 Krylov solvers ([`krylov-solvers`](krylov-solvers.md), the non-symmetric resolvent
 for spectral DCM), matrix functions ([`matrix-functions`](matrix-functions.md)),
-heat-kernel diffusion ([`heat-kernel-diffusion`](heat-kernel-diffusion.md), linear
+heat-kernel diffusion ([`heat-kernel-diffusion`](resolved/heat-kernel-diffusion.md), linear
 network spreading).
 
 ## Internal engineering backlog
@@ -286,7 +286,7 @@ live code: *not started* / *partial* (some substrate shipped).
 |---|---|---|---|---|
 | 12.1 | [krylov-solvers](krylov-solvers.md) | `linalg.krylov` | M | partial (`cg` shipped — registration) |
 | 12.2 | [matrix-functions](matrix-functions.md) | `linalg.matrix_function` | S | partial (`sym*` + `matrix_exp` shipped) |
-| 12.3 | [heat-kernel-diffusion](heat-kernel-diffusion.md) | `graph.diffusion` | S | partial (`diffusion_embedding` shipped) |
+| 12.3 | [heat-kernel-diffusion](resolved/heat-kernel-diffusion.md) | `graph.heat_kernel` | S | ✅ shipped (`heat_kernel` exp/eigh; `diffusion_embedding`) |
 | 12.4 | [sinkhorn-optimal-transport](sinkhorn-optimal-transport.md) | `transport` | M | not started |
 | 12.5 | [discrete-exterior-calculus](discrete-exterior-calculus.md) | `geometry.dec` | M | partial (cotangent Laplacian shipped) |
 | 12.6 | [mesh-curvature](resolved/mesh-curvature.md) | `geometry.curvature` | S | ✅ shipped (geometry suite: mean/gaussian/principal_curvatures) |
@@ -343,7 +343,7 @@ stay downstream. Needs an explicit go-ahead + a lined-up consumer.
 
 ## Resolved (archived)
 
-The 71 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/). Listed here as one flat index; topical context and the shipped-status annotation remain in the family sections above.
+The 72 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/). Listed here as one flat index; topical context and the shipped-status annotation remain in the family sections above.
 
 - [`affine-matrix-algebra`](resolved/affine-matrix-algebra.md) — Affine matrix algebra (geometric convention) — `nitrix.geometry.affine`
 - [`attention-kernels`](resolved/attention-kernels.md) — attention-kernels — scaled dot-product / flash attention
@@ -380,6 +380,7 @@ The 71 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/)
 - [`glmm-random-slope-robust-solver`](resolved/glmm-random-slope-robust-solver.md) — GLMM random-slope robust solver — joint-Schur PQL + REML-EM — `nitrix.stats.glmm`
 - [`gpu-cusolver-first-call-handle-failure`](resolved/gpu-cusolver-first-call-handle-failure.md) — GPU availability: cuSOLVER `gpusolverDnCreate` fails for a Cholesky/eigh-first program on the…
 - [`graphical-lasso`](resolved/graphical-lasso.md) — Graphical LASSO — `nitrix.stats.glasso`
+- [`heat-kernel-diffusion`](resolved/heat-kernel-diffusion.md) — Heat-kernel & diffusion-map embedding — `nitrix.graph.diffusion`
 - [`iir-filter-gpu-backend`](resolved/iir-filter-gpu-backend.md) — B12. IIR `sosfilt`/`sosfiltfilt` GPU backend — default + missing associative path
 - [`intensity-augmentation-ops`](resolved/intensity-augmentation-ops.md) — Intensity-augmentation ops — `nitrix.augment.intensity`
 - [`intensity-normalize-variants`](resolved/intensity-normalize-variants.md) — Intensity-normalize variants — `nitrix.numerics.normalize`

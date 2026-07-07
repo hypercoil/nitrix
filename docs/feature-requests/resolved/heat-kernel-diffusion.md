@@ -1,6 +1,17 @@
 # Heat-kernel & diffusion-map embedding — `nitrix.graph.diffusion`
 
-> **Status (2026-06-02): partial — `diffusion_embedding` (Coifman & Lafon
+> **Status (2026-07-07): SHIPPED.** `graph.heat_kernel(A, t, *,
+> normalisation='symmetric', method='exp'|'eigh')` returns the dense heat
+> kernel `K_t = exp(-tL)` (composing the shipped `linalg.matrix_exp` +
+> `graph.laplacian`); `method='eigh'` gives the symmetric-exact
+> `Q exp(-tΛ) Qᵀ` via the cuSolver-robust `safe_eigh`. Homed in `graph`
+> (adjacency-in, so it owns the Laplacian assembly + conditioning), **not** a
+> new `graph.diffusion` module. For a **mesh** heat kernel (HKS on the
+> cotangent Laplacian) compose `linalg.matrix_exp(-t * L)` directly — the mesh
+> heat-diffusion *smoother* (implicit-Euler step on a signal) is
+> `geometry.surface_smooth`. 7 tests; GPU-verified.
+>
+> **Original (2026-06-02): partial — `diffusion_embedding` (Coifman & Lafon
 > 2006) is shipped; the explicit heat-kernel operator `K_t = exp(−tL)` is
 > not.** Brainstorm candidate; promotion gated by the §13 acceptance
 > protocol. Provenance: `docs/feature-requests catalogue §12.3`.
@@ -9,7 +20,7 @@
 heat-kernel-mass-normalised diffusion-map embedding.
 
 **Composition.** `K_t = exp(−tL)` is a matrix function of the Laplacian
-(composes [`matrix-functions.md`](matrix-functions.md) §12.2 `matrix_exp` +
+(composes [`matrix-functions.md`](../matrix-functions.md) §12.2 `matrix_exp` +
 `graph.laplacian`); a truncated eigendecomposition gives a finite-rank
 approximation. Diffusion-map embedding is the weighted eigenmap normalised
 by the heat-kernel mass.
@@ -32,5 +43,5 @@ just its leading eigenspace.
 ## Cross-references
 
 - `docs/feature-requests catalogue §12.3` — origin entry; `§13` — acceptance protocol.
-- [`matrix-functions.md`](matrix-functions.md) — `matrix_exp` dependency.
+- [`matrix-functions.md`](../matrix-functions.md) — `matrix_exp` dependency.
 - `src/nitrix/graph/connectopy.py` — the shipped `diffusion_embedding`.

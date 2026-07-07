@@ -263,7 +263,7 @@ DE-suite relevance + current status. **Add to the linked doc, not here.**
 | Fixed-point / implicit combinators | [`fixed-point-combinators.md`](resolved/fixed-point-combinators.md) | ✅ `fixed_point_solve` shipped | backbone for an **implicit ODE step** and the **continuous-adjoint** fixed-point solve |
 | Krylov solvers (CG ✅; MINRES/GMRES/BiCGStab deferred) | [`krylov-solvers.md`](krylov-solvers.md) | CG shipped; non-symmetric family deferred | the **non-symmetric resolvent** `(iωI − J)⁻¹` for spectral DCM transfer functions |
 | Matrix functions | [`matrix-functions.md`](matrix-functions.md) | `matrix_exp`/`matrix_log` ✅; `expm_multiply` action open | exponential integrator (DS-3) + large-graph `expm(A)·v` (network diffusion) |
-| Heat-kernel diffusion | [`heat-kernel-diffusion.md`](heat-kernel-diffusion.md) | partial (`diffusion_embedding` shipped) | `exp(−tL)` on the connectome = **linear network-diffusion spreading** |
+| Heat-kernel diffusion | [`heat-kernel-diffusion.md`](resolved/heat-kernel-diffusion.md) | partial (`diffusion_embedding` shipped) | `exp(−tL)` on the connectome = **linear network-diffusion spreading** |
 | Gaussian-process models | [`gaussian-process-models.md`](gaussian-process-models.md) | ✅ `gp_fit`/HSGP shipped | **priors over model parameters** for Bayesian inversion |
 | Graphical lasso | [`graphical-lasso.md`](resolved/graphical-lasso.md) | ✅ `glasso` shipped | sparse **effective-connectivity** priors / structure |
 | Continuous / graph wavelet transform | [`continuous-wavelet-transform.md`](continuous-wavelet-transform.md), [`graph-wavelet-transform.md`](graph-wavelet-transform.md) | filed | time-frequency analysis of **simulated** output (post-sim) |
@@ -497,7 +497,7 @@ a TVB/Hopf/digital-twin module is filed.
 - **Inversion / solve dependencies.** [`fixed-point-combinators.md`](resolved/fixed-point-combinators.md)
   (implicit step + continuous-adjoint solve), [`krylov-solvers.md`](krylov-solvers.md)
   (non-symmetric resolvent for spectral DCM), [`matrix-functions.md`](matrix-functions.md)
-  (`expm` action), [`heat-kernel-diffusion.md`](heat-kernel-diffusion.md)
+  (`expm` action), [`heat-kernel-diffusion.md`](resolved/heat-kernel-diffusion.md)
   (`exp(−tL)` network diffusion).
 - **Prior / structure dependencies.** [`gaussian-process-models.md`](gaussian-process-models.md),
   [`graphical-lasso.md`](resolved/graphical-lasso.md).

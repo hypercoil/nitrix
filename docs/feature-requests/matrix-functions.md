@@ -31,7 +31,7 @@ gradient).
 
 **Likely consumer.** Heat-kernel signatures, ChebNet,
 [`graph-wavelet-transform.md`](graph-wavelet-transform.md) (§12.13),
-[`heat-kernel-diffusion.md`](heat-kernel-diffusion.md) (§12.3), group-level
+[`heat-kernel-diffusion.md`](resolved/heat-kernel-diffusion.md) (§12.3), group-level
 fMRI dynamic-connectivity factorisations.
 
 **Effort.** S.
@@ -44,7 +44,7 @@ general `matrix_function`, `matrix_exp`, `matrix_polynomial`, or
 ## Cross-references
 
 - `docs/feature-requests catalogue §12.2` — origin entry; `§13` — acceptance protocol.
-- [`heat-kernel-diffusion.md`](heat-kernel-diffusion.md) and
+- [`heat-kernel-diffusion.md`](resolved/heat-kernel-diffusion.md) and
   [`graph-wavelet-transform.md`](graph-wavelet-transform.md) — depend on
   `matrix_exp` / `matrix_polynomial`.
 - `src/nitrix/linalg/spd.py` — the `sym*` family this generalises.

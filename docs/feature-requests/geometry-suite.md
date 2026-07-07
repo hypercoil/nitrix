@@ -213,7 +213,7 @@ here.**
 | Vertex normals | [compute-vertex-normals](resolved/compute-vertex-normals.md) | — | ✅ shipped (`compute_vertex_normals`) | normals for deformation / mapping |
 | Uniform Laplacian smoothing | [mesh-laplacian-smoothing](resolved/mesh-laplacian-smoothing.md) | — | ✅ shipped (`mesh_laplacian_smooth`) | `mris_smooth` analogue |
 | Adaptive area-weighted bary resample | [surface-resample-adap-bary](resolved/surface-resample-adap-bary.md) | 12.15 | partial (icosphere bary shipped; arbitrary-mesh `ADAP_BARY_AREA` missing) | **HCP** `fs_LR_32k` downsampling; `fsaverage`↔`fs_LR` |
-| Heat-kernel diffusion | [heat-kernel-diffusion](heat-kernel-diffusion.md) | 12.3 | partial (`diffusion_embedding` shipped) | geodesic surface smoothing substrate (**GS-12**) |
+| Heat-kernel diffusion | [heat-kernel-diffusion](resolved/heat-kernel-diffusion.md) | 12.3 | partial (`diffusion_embedding` shipped) | geodesic surface smoothing substrate (**GS-12**) |
 | Spherical harmonic transform | [spherical-harmonic-transform](spherical-harmonic-transform.md) | 12.9 | not started | spectral surface analysis; atlas bases |
 | Surface boundary map | [surface-boundary-map](resolved/surface-boundary-map.md) | 12.16 | not started (composes shipped prims) | functional parcellation (aparc-adjacent) |
 | Mesh watershed | [mesh-watershed](resolved/mesh-watershed.md) | 12.17 | not started | parcellation from boundary map |
