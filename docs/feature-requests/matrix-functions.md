@@ -1,13 +1,17 @@
 # Matrix functions — `nitrix.linalg.matrix_function`
 
-> **Status (2026-06-08): partial — `matrix_exp` SHIPPED** (`linalg.matrix_exp`,
-> general non-symmetric matrix exponential via pure-matmul Taylor
-> scaling-and-squaring — GPU-native, no cuSolver), graduated by the
-> registration suite (the affine generator; see `docs/design/registration.md`
-> and `IMPLEMENTATION_PLAN.md §10.3`). The `sym*` family was already shipped.
-> Still open: a general `matrix_function(A, fn)` entry point, `matrix_log`,
-> `matrix_polynomial`, `frechet_derivative`. Remaining items gated by the §13
-> acceptance protocol. Provenance: `docs/feature-requests catalogue §12.2`.
+> **Status (2026-07-07): SHIPPED (`nitrix.linalg`).** The full surface is now
+> live: `matrix_exp` / `matrix_log` (general non-symmetric, pure-matmul
+> scaling-and-squaring — GPU-native, no cuSolver; graduated by the registration
+> suite) and the new symmetric-spectral family — `matrix_function(A, fn)` (the
+> general unclipped eigenvalue-map entry point, delegating to the shipped `symmap`
+> workhorse rather than reimplementing it), `matrix_polynomial(A, coeffs, domain=)`
+> (Chebyshev matrix polynomial via the pure-matmul three-term recurrence, eigh-free
+> and jit-clean), `chebyshev_apply(op, x, coeffs)` (the shared operator-form
+> Chebyshev recurrence — the same kernel the dense polynomial and the spectral-graph
+> filters both use, so a filter costs `K` matvecs not an eigensolve), and
+> `frechet_derivative(A, fn, E)` (Daleckii–Krein / Loewner). The `sym*` family was
+> already shipped. Provenance: `docs/feature-requests catalogue §12.2`.
 
 **What.** A general `matrix_function(A, fn)` — apply `fn` to the
 eigenvalues of a symmetric `A`, reassemble — plus three named

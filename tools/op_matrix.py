@@ -5455,7 +5455,7 @@ def _mixed_predict_setup():
 
 _MIXED_OPS = _mixed_predict_setup()
 
-for _qn, _key, _inv in (
+for _qn, _mixkey, _inv in (
     (
         'nitrix.stats.lme.lme_predict',
         'lme_predict',
@@ -5465,7 +5465,7 @@ for _qn, _key, _inv in (
     ('nitrix.stats.lme.ranef', 'ranef', 'random-effect modes (BLUPs)'),
     ('nitrix.stats.ranef', 'ranef', 'random-effect modes (BLUPs)'),
 ):
-    _mop, _mfx = _MIXED_OPS[_key]
+    _mop, _mfx = _MIXED_OPS[_mixkey]
     register(
         OpInfo(
             _qn,
@@ -5710,6 +5710,63 @@ register(
         vmap_arg=None,
         invariants=('Tukey bisquare redescending M-estimator IRLS',),
         notes='returns RobustFit; grad reduces the coef leaf',
+    )
+)
+
+from nitrix.linalg import (  # noqa: E402
+    chebyshev_apply,
+    frechet_derivative,
+    matrix_function,
+)
+
+
+def _matfun_sym(seed):
+    m = jax.random.normal(_key(seed), (5, 5))
+    return m + m.T
+
+
+_CHEB_A = _matfun_sym(11) / 6.0
+_CHEB_C = jnp.asarray([0.3, -0.5, 0.2, 0.1])
+
+register(
+    OpInfo(
+        'nitrix.linalg.matrix_function',
+        fixture=lambda: ((_matfun_sym(12),), {}),
+        fn_override=lambda A: matrix_function(A, jnp.exp),
+        diff_arg=0,
+        vmap_arg=None,
+        skip_jit=True,  # eager eigh (safe_eigh), like symexp / pca_fit
+        invariants=('eigenvalue-map spectral function',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.linalg.matrix_polynomial',
+        fixture=lambda: ((_matfun_sym(13) / 6.0, _CHEB_C), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('Chebyshev matrix polynomial (pure matmul)', 'cuSOLVER-free'),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.linalg.chebyshev_apply',
+        fixture=lambda: ((jax.random.normal(_key(14), (5,)),), {}),
+        fn_override=lambda x: chebyshev_apply(lambda v: _CHEB_A @ v, x, _CHEB_C),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('Chebyshev operator recurrence (matvec)', 'cuSOLVER-free'),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.linalg.frechet_derivative',
+        fixture=lambda: ((_matfun_sym(15), _matfun_sym(16)), {}),
+        fn_override=lambda A, E: frechet_derivative(A, jnp.exp, E),
+        diff_arg=0,
+        vmap_arg=None,
+        skip_jit=True,  # eager eigh (safe_eigh)
+        invariants=('Daleckii-Krein Frechet derivative',),
     )
 )
 

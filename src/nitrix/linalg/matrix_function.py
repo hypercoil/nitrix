@@ -43,12 +43,24 @@ round-trip-through-:func:`matrix_exp` guard (see :func:`matrix_log`).
 
 from __future__ import annotations
 
+from typing import Callable, Optional, Sequence, Tuple, Union
+
+import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from ._solver import safe_inv
+from ._solver import safe_eigh, safe_inv
+from .matrix import symmetric
+from .spd import symmap
 
-__all__ = ['matrix_exp', 'matrix_log']
+__all__ = [
+    'chebyshev_apply',
+    'frechet_derivative',
+    'matrix_exp',
+    'matrix_function',
+    'matrix_log',
+    'matrix_polynomial',
+]
 
 # Relative round-trip residual ``‖exp(log A) − A‖ / ‖A‖`` above which
 # ``matrix_log`` returns NaN rather than a silently-wrong finite log (B3): the
@@ -235,3 +247,207 @@ def matrix_log(
     )
     ok = (residual <= _LOG_RECON_RTOL)[..., None, None]
     return jnp.where(ok, log_a, jnp.asarray(jnp.nan, dtype=a.dtype))
+
+
+# ---------------------------------------------------------------------------
+# Symmetric spectral functions: the general eigenvalue-map entry point and the
+# Frechet derivative (eigh-based), plus the eigh-free Chebyshev operator family
+# (pure matmul / matvec -- GPU-native, cuSOLVER-free) that the spectral-graph
+# filters build on.
+# ---------------------------------------------------------------------------
+
+
+def matrix_function(
+    a: Float[Array, '... n n'],
+    fn: Callable[[Array], Array],
+    *,
+    psi: float = 0.0,
+    key: Optional[Array] = None,
+) -> Float[Array, '... n n']:
+    r"""Apply a scalar function to the eigenvalues of a symmetric matrix.
+
+    Eigendecomposes the (symmetrised) input :math:`A = Q \Lambda Q^{\top}` and
+    reassembles :math:`f(A) = Q\, \operatorname{diag}(f(\lambda))\, Q^{\top}`.
+    This is the **general** entry point of which
+    :func:`~nitrix.linalg.spd.symexp` / :func:`~nitrix.linalg.spd.symlog` /
+    :func:`~nitrix.linalg.spd.symsqrt` are named specialisations. It is
+    :func:`~nitrix.linalg.spd.symmap` with the SPD eigenvalue clipping switched
+    off (``eigvalue_clip='none'``) -- so ``fn`` sees the raw spectrum, negative
+    eigenvalues included, and must itself be well-defined there -- delegating to
+    that shipped workhorse rather than reimplementing the eigendecomposition and
+    its VJP.
+
+    Parameters
+    ----------
+    a : Float[Array, '... n n']
+        Symmetric matrix batch (symmetrised internally).
+    fn : Callable[[Array], Array]
+        Elementwise scalar function applied to the eigenvalue array, e.g.
+        ``jnp.exp`` or ``lambda x: jnp.exp(-t * x)`` for a heat kernel. A
+        ``NaN`` from ``fn`` propagates rather than being silently zeroed.
+    psi : float, optional
+        Reconditioning strength for the eigendecomposition VJP; ``psi > 0``
+        stabilises the gradient at near-degenerate spectra (see
+        :func:`~nitrix.linalg.spd.symmap`). Default ``0.0``.
+    key : Array, optional
+        PRNG key, required when ``psi > 0``.
+
+    Returns
+    -------
+    Float[Array, '... n n']
+        The symmetric matrix :math:`f(A)`.
+
+    Notes
+    -----
+    Routed through :func:`~nitrix.linalg._solver.safe_eigh` (GPU-native on a
+    healthy stack, CPU-fallback on a wedged-cuSOLVER box; the fallback is
+    eager-only). For a polynomial ``fn`` prefer the eigh-free
+    :func:`matrix_polynomial`, which stays on the device under ``jit``.
+    """
+    return symmap(a, fn=fn, psi=psi, key=key, eigvalue_clip='none')
+
+
+def chebyshev_apply(
+    op: Callable[[Array], Array],
+    x: Array,
+    coeffs: Union[Sequence[float], Float[Array, 'k']],
+) -> Array:
+    r"""Apply a Chebyshev series of a linear operator to an operand.
+
+    Evaluates :math:`\big(\sum_{k=0}^{K} c_k\, T_k(\mathcal{L})\big)\, x` by the
+    three-term recurrence :math:`T_0 = I`, :math:`T_1 = \mathcal{L}`,
+    :math:`T_{k+1} = 2\mathcal{L}\,T_k - T_{k-1}`, using only applications of
+    ``op`` -- no eigendecomposition. This is the shared kernel behind
+    :func:`matrix_polynomial` (``op`` a dense left-multiply, ``x`` the identity)
+    and the spectral-graph filters (``op`` a sparse Laplacian matvec, ``x`` a
+    signal), so a filter costs :math:`K` operator applications rather than an
+    :math:`O(n^3)` eigensolve.
+
+    Parameters
+    ----------
+    op : Callable[[Array], Array]
+        The linear operator :math:`\mathcal{L}`, as a callable ``op(v)``. Its
+        spectrum **must already lie in** :math:`[-1, 1]` (the domain of the
+        Chebyshev polynomials); rescale a raw operator first (see
+        :func:`matrix_polynomial` for the dense rescaling).
+    x : Array
+        The operand ``op`` is applied to -- an identity matrix (giving the dense
+        polynomial), a vector, or a batch of signals.
+    coeffs : sequence of float or Float[Array, 'k']
+        Chebyshev-basis coefficients :math:`c_0, \dots, c_K` (the plain basis;
+        if using a Chebyshev *series* with the :math:`c_0/2` convention, pass
+        ``c_0/2`` as the first entry).
+
+    Returns
+    -------
+    Array
+        :math:`\sum_k c_k\, T_k(\mathcal{L})\, x`, the shape of ``x``.
+    """
+    c = jnp.asarray(coeffs)
+    order = c.shape[0]
+    t_prev = x
+    acc = c[0] * t_prev
+    if order == 1:
+        return acc
+    t_curr = op(x)
+    acc = acc + c[1] * t_curr
+    for k in range(2, order):
+        t_next = 2.0 * op(t_curr) - t_prev
+        acc = acc + c[k] * t_next
+        t_prev, t_curr = t_curr, t_next
+    return acc
+
+
+def matrix_polynomial(
+    a: Float[Array, '... n n'],
+    coeffs: Union[Sequence[float], Float[Array, 'k']],
+    *,
+    domain: Optional[Tuple[float, float]] = None,
+) -> Float[Array, '... n n']:
+    r"""Chebyshev matrix polynomial :math:`\sum_k c_k\, T_k(A)` (eigh-free).
+
+    Evaluates the Chebyshev-basis polynomial of ``a`` by the pure-matmul
+    three-term recurrence -- GPU-native, ``jit`` / ``grad``-clean, and free of
+    any eigendecomposition or solve. With ``domain=(lambda_min, lambda_max)`` the
+    matrix is first affinely rescaled so that interval maps onto :math:`[-1, 1]`
+    (:math:`\tilde A = (2A - (\lambda_{\min}+\lambda_{\max})I) /
+    (\lambda_{\max}-\lambda_{\min})`), the standard conditioning for a spectral
+    filter over a known spectral range (e.g. a graph Laplacian's
+    :math:`[0, \lambda_{\max}]`).
+
+    Parameters
+    ----------
+    a : Float[Array, '... n n']
+        Square matrix batch (real spectrum assumed when ``domain`` is given).
+    coeffs : sequence of float or Float[Array, 'k']
+        Chebyshev-basis coefficients :math:`c_0, \dots, c_K`.
+    domain : tuple of float, optional
+        ``(lambda_min, lambda_max)`` bounding the spectrum; the matrix is
+        rescaled onto :math:`[-1, 1]` before the recurrence. ``None`` (default)
+        assumes the spectrum already lies in :math:`[-1, 1]`.
+
+    Returns
+    -------
+    Float[Array, '... n n']
+        The matrix polynomial :math:`\sum_k c_k\, T_k(\tilde A)`.
+    """
+    n = a.shape[-1]
+    eye = jnp.broadcast_to(jnp.eye(n, dtype=a.dtype), a.shape)
+    if domain is not None:
+        lo, hi = domain
+        a = (2.0 * a - (lo + hi) * eye) / (hi - lo)
+    return chebyshev_apply(lambda m: a @ m, eye, coeffs)
+
+
+def frechet_derivative(
+    a: Float[Array, '... n n'],
+    fn: Callable[[Array], Array],
+    e: Float[Array, '... n n'],
+    *,
+    dfn: Optional[Callable[[Array], Array]] = None,
+) -> Float[Array, '... n n']:
+    r"""Frechet (directional) derivative of a symmetric matrix function.
+
+    The derivative of :math:`f(A)` in the direction :math:`E`,
+    :math:`L_f(A)[E] = \lim_{h\to 0} \tfrac{f(A + hE) - f(A)}{h}`, computed by
+    the Daleckii--Krein formula: in the eigenbasis :math:`A = Q\Lambda
+    Q^{\top}`, :math:`L_f(A)[E] = Q\,\big(\Psi \odot (Q^{\top} E Q)\big)\,
+    Q^{\top}` where :math:`\Psi` is the Loewner matrix of divided differences
+    :math:`\Psi_{ij} = \frac{f(\lambda_i) - f(\lambda_j)}{\lambda_i -
+    \lambda_j}` (and :math:`\Psi_{ii} = f'(\lambda_i)` on the diagonal / for
+    degenerate eigenvalues).
+
+    Parameters
+    ----------
+    a : Float[Array, '... n n']
+        Symmetric matrix batch (symmetrised internally).
+    fn : Callable[[Array], Array]
+        Elementwise scalar function (as in :func:`matrix_function`).
+    e : Float[Array, '... n n']
+        Direction matrix, same shape as ``a``.
+    dfn : Callable[[Array], Array], optional
+        The elementwise derivative :math:`f'`. Default ``None`` obtains it by
+        :func:`jax.grad` of ``fn`` (requires ``fn`` to be a scalar-to-scalar
+        differentiable function).
+
+    Returns
+    -------
+    Float[Array, '... n n']
+        The Frechet derivative :math:`L_f(A)[E]`, a symmetric matrix.
+    """
+    lam, q = safe_eigh(symmetric(a))
+    f_lam = fn(lam)
+    grad_fn = jax.grad(fn) if dfn is None else dfn
+    df_lam = jax.vmap(grad_fn)(lam.reshape(-1)).reshape(lam.shape)
+
+    diff = lam[..., :, None] - lam[..., None, :]
+    num = f_lam[..., :, None] - f_lam[..., None, :]
+    diag = 0.5 * (df_lam[..., :, None] + df_lam[..., None, :])
+    tol = jnp.sqrt(jnp.finfo(a.dtype).eps) * (jnp.max(jnp.abs(lam)) + 1.0)
+    degenerate = jnp.abs(diff) <= tol
+    safe_diff = jnp.where(degenerate, 1.0, diff)
+    loewner = jnp.where(degenerate, diag, num / safe_diff)
+
+    qt = jnp.swapaxes(q, -1, -2)
+    e_eig = qt @ symmetric(e) @ q
+    return q @ (loewner * e_eig) @ qt

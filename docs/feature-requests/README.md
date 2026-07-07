@@ -295,7 +295,7 @@ live code: *not started* / *partial* (some substrate shipped).
 | § | Doc | Proposed module | Effort | Status |
 |---|---|---|---|---|
 | 12.1 | [krylov-solvers](krylov-solvers.md) | `linalg.krylov` | M | partial (`cg` shipped — registration) |
-| 12.2 | [matrix-functions](matrix-functions.md) | `linalg.matrix_function` | S | partial (`sym*` + `matrix_exp` shipped) |
+| 12.2 | [matrix-functions](matrix-functions.md) | `linalg.matrix_function` | S | ✅ shipped (`matrix_function`/`matrix_polynomial`/`chebyshev_apply`/`frechet_derivative` + `matrix_exp`/`matrix_log`/`sym*`) |
 | 12.3 | [heat-kernel-diffusion](resolved/heat-kernel-diffusion.md) | `graph.heat_kernel` | S | ✅ shipped (`heat_kernel` exp/eigh; `diffusion_embedding`) |
 | 12.4 | [sinkhorn-optimal-transport](sinkhorn-optimal-transport.md) | `transport` | M | not started |
 | 12.5 | [discrete-exterior-calculus](discrete-exterior-calculus.md) | `geometry.dec` | M | partial (cotangent Laplacian shipped) |

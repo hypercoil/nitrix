@@ -53,7 +53,14 @@ from .matrix import (
 )
 from .decompose import randomized_svd
 from .krylov import cg
-from .matrix_function import matrix_exp, matrix_log
+from .matrix_function import (
+    chebyshev_apply,
+    frechet_derivative,
+    matrix_exp,
+    matrix_function,
+    matrix_log,
+    matrix_polynomial,
+)
 from .optimize import (
     OptimizeResult,
     gauss_newton,
@@ -97,6 +104,10 @@ __all__ = [
     # matrix functions
     'matrix_exp',
     'matrix_log',
+    'matrix_function',
+    'matrix_polynomial',
+    'chebyshev_apply',
+    'frechet_derivative',
     # decomposition
     'randomized_svd',
     # optimisation (nonlinear least squares)
