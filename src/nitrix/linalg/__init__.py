@@ -55,6 +55,7 @@ from .decompose import randomized_svd
 from .krylov import cg
 from .matrix_function import (
     chebyshev_apply,
+    chebyshev_coefficients,
     frechet_derivative,
     matrix_exp,
     matrix_function,
@@ -107,6 +108,7 @@ __all__ = [
     'matrix_function',
     'matrix_polynomial',
     'chebyshev_apply',
+    'chebyshev_coefficients',
     'frechet_derivative',
     # decomposition
     'randomized_svd',

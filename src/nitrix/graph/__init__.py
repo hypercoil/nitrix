@@ -33,6 +33,11 @@ Parcellation
     (connectivity-profile boundary detection) and :func:`eta_squared`
     similarity, together with :func:`mesh_watershed` (host-side
     priority-flood basins on a vertex field).
+
+Spectral graph wavelets
+    The Chebyshev-approximated spectral graph wavelet transform
+    :func:`graph_wavelet_transform` (matvec-only, no eigensolve) and its default
+    band-pass :func:`mexican_hat_kernel`.
 """
 
 from .laplacian import (
@@ -61,6 +66,7 @@ from .parcellation import (
     mesh_watershed,
     surface_boundary_map,
 )
+from .wavelet import graph_wavelet_transform, mexican_hat_kernel
 
 __all__ = [
     # laplacian
@@ -85,4 +91,7 @@ __all__ = [
     'eta_squared',
     'surface_boundary_map',
     'mesh_watershed',
+    # spectral graph wavelets (SGWT)
+    'graph_wavelet_transform',
+    'mexican_hat_kernel',
 ]

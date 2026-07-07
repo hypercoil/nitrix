@@ -93,6 +93,11 @@ EXCLUDE: frozenset[str] = frozenset(
         #    'cosine','correlation']`` (a similarity-metric selector consumed by
         #    the cataloged kmeans / normalized_cut). --------------------------------
         'numerics.Similarity',
+        # -- Coefficient-design helper, not an array op: chebyshev_coefficients
+        #    takes a scalar function + static order and returns filter
+        #    coefficients (no array input to benchmark); it feeds the cataloged
+        #    chebyshev_apply / matrix_polynomial / graph_wavelet_transform. --------
+        'linalg.chebyshev_coefficients',
         # -- Pure structural / shape-layout helpers: ~free, no cross-framework ----
         #    baseline.
         'numerics.apply_mask',

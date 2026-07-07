@@ -49,12 +49,17 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
+# A scalar bound that may be a Python float or a traced 0-d array (e.g. a
+# power-iteration lmax estimate), used for the Chebyshev spectral domain.
+_ScalarLike = Union[float, Float[Array, '']]
+
 from ._solver import safe_eigh, safe_inv
 from .matrix import symmetric
 from .spd import symmap
 
 __all__ = [
     'chebyshev_apply',
+    'chebyshev_coefficients',
     'frechet_derivative',
     'matrix_exp',
     'matrix_function',
@@ -358,11 +363,64 @@ def chebyshev_apply(
     return acc
 
 
+def chebyshev_coefficients(
+    fn: Callable[[Array], Array],
+    order: int,
+    *,
+    domain: Tuple[_ScalarLike, _ScalarLike] = (-1.0, 1.0),
+    n_nodes: Optional[int] = None,
+) -> Float[Array, 'order_plus_1']:
+    r"""Chebyshev-series coefficients approximating a scalar function.
+
+    Returns the coefficients :math:`c_0, \dots, c_K` of the degree-``order``
+    Chebyshev approximation :math:`f(\lambda) \approx \sum_{k=0}^{K} c_k\,
+    T_k(\tilde\lambda)` on ``domain`` :math:`= [\lambda_{\min},
+    \lambda_{\max}]`, where :math:`\tilde\lambda` rescales that interval onto
+    :math:`[-1, 1]`. The coefficients are obtained by the discrete cosine
+    quadrature at the Chebyshev nodes and are returned **apply-ready**: the
+    first coefficient already carries the :math:`c_0/2` series convention, so
+    they feed directly into :func:`chebyshev_apply` (with the operator rescaled
+    to the same ``domain``) or :func:`matrix_polynomial` (with the same
+    ``domain=``). This is the coefficient half of the spectral-filter family --
+    it turns a filter response :math:`f(\lambda)` into the polynomial a graph
+    filter applies by matvec (Hammond--Vandergheynst--Gribonval 2011).
+
+    Parameters
+    ----------
+    fn : Callable[[Array], Array]
+        The scalar function of the (un-rescaled) variable :math:`\lambda`,
+        evaluated on the Chebyshev nodes of ``domain``.
+    order : int
+        Polynomial degree :math:`K`; ``order + 1`` coefficients are returned.
+    domain : tuple of float, optional
+        ``(lambda_min, lambda_max)`` the approximation is built on. Default
+        ``(-1.0, 1.0)``.
+    n_nodes : int, optional
+        Number of quadrature nodes. Default ``None`` uses ``order + 1`` (exact
+        interpolation at the Chebyshev points); more nodes over-sample.
+
+    Returns
+    -------
+    Float[Array, 'order_plus_1']
+        The ``order + 1`` apply-ready Chebyshev coefficients.
+    """
+    nodes = order + 1 if n_nodes is None else n_nodes
+    j = jnp.arange(nodes)
+    theta = jnp.pi * (j + 0.5) / nodes
+    lo, hi = domain
+    lam = 0.5 * (hi - lo) * jnp.cos(theta) + 0.5 * (hi + lo)
+    f = fn(lam)
+    k = jnp.arange(order + 1)
+    basis = jnp.cos(k[:, None] * theta[None, :])
+    c = (2.0 / nodes) * (basis @ f)
+    return c.at[0].multiply(0.5)
+
+
 def matrix_polynomial(
     a: Float[Array, '... n n'],
     coeffs: Union[Sequence[float], Float[Array, 'k']],
     *,
-    domain: Optional[Tuple[float, float]] = None,
+    domain: Optional[Tuple[_ScalarLike, _ScalarLike]] = None,
 ) -> Float[Array, '... n n']:
     r"""Chebyshev matrix polynomial :math:`\sum_k c_k\, T_k(A)` (eigh-free).
 

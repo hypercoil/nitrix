@@ -305,8 +305,8 @@ live code: *not started* / *partial* (some substrate shipped).
 | 12.9 | [spherical-harmonic-transform](spherical-harmonic-transform.md) | `geometry.sphere.harmonics` | M | not started |
 | 12.10 | [compensated-summation](compensated-summation.md) | `numerics.precision` | S | ✅ shipped (`kahan_sum`/`neumaier_sum`/`pairwise_sum`/`compensated_dot`/`stochastic_round`) |
 | 12.11 | [ode-integrators](ode-integrators.md) | `numerics.ode` | L | partial (`integrate_velocity_field` shipped) |
-| 12.12 | [continuous-wavelet-transform](continuous-wavelet-transform.md) | `signal.cwt` | S | not started |
-| 12.13 | [graph-wavelet-transform](graph-wavelet-transform.md) | `graph.wavelet` | S | not started (blocked on 12.2) |
+| 12.12 | [continuous-wavelet-transform](continuous-wavelet-transform.md) | `signal.cwt` | S | ✅ shipped (`cwt`: morlet/ricker/paul) |
+| 12.13 | [graph-wavelet-transform](graph-wavelet-transform.md) | `graph.wavelet` | S | ✅ shipped (`graph_wavelet_transform` + `chebyshev_coefficients`; 12.2 dep resolved) |
 | 12.14 | [graphical-lasso](resolved/graphical-lasso.md) | `stats.glasso` | M | ✅ shipped (`glasso` / `glasso_path`, v2 Phase 3) |
 | 12.15 | [surface-resample-adap-bary](resolved/surface-resample-adap-bary.md) | `geometry.sphere.resample` | M | ✅ shipped (`surface_resample` `adap_bary_area` + `barycentric`) |
 | 12.16 | [surface-boundary-map](resolved/surface-boundary-map.md) | `graph.parcellation.boundary` | S | ✅ shipped (`surface_boundary_map`) |

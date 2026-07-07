@@ -21,6 +21,7 @@ import numpy.polynomial.chebyshev as C  # noqa: E402
 
 from nitrix.linalg import (  # noqa: E402
     chebyshev_apply,
+    chebyshev_coefficients,
     frechet_derivative,
     matrix_exp,
     matrix_function,
@@ -156,6 +157,39 @@ def test_frechet_matches_jvp_and_fd():
         - matrix_function(A - h * E, jnp.exp)
     ) / (2 * h)
     np.testing.assert_allclose(np.asarray(fr), np.asarray(fd), atol=1e-6)
+
+
+def test_chebyshev_coefficients_reconstruct_matrix_function():
+    # matrix_polynomial with fitted coefficients approximates matrix_function.
+    A = _sym(n=6, seed=7)
+    w = np.linalg.eigvalsh(np.asarray(A))
+    lo, hi = w.min() - 0.2, w.max() + 0.2
+
+    def fn(lam):
+        return jnp.exp(-0.3 * lam)
+
+    coeffs = chebyshev_coefficients(fn, 24, domain=(lo, hi))
+    np.testing.assert_allclose(
+        np.asarray(matrix_polynomial(A, coeffs, domain=(lo, hi))),
+        np.asarray(matrix_function(A, fn)),
+        atol=1e-10,
+    )
+
+
+def test_chebyshev_coefficients_scalar_series():
+    # The apply-ready coefficients reproduce the scalar function via the T_k sum.
+    def fn(x):
+        return jnp.sin(2.0 * x)
+
+    coeffs = chebyshev_coefficients(fn, 30, domain=(-1.0, 1.0))
+    xs = jnp.linspace(-0.9, 0.9, 50)
+    # 1x1 "matrices" -> matrix_polynomial degenerates to the scalar polynomial
+    approx = jnp.stack(
+        [matrix_polynomial(x[None, None], coeffs)[0, 0] for x in xs]
+    )
+    np.testing.assert_allclose(
+        np.asarray(approx), np.asarray(fn(xs)), atol=1e-10
+    )
 
 
 def test_frechet_degenerate_spectrum():

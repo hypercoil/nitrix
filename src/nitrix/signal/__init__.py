@@ -45,6 +45,7 @@ from .fourier import (
     product_filter,
     product_filtfilt,
 )
+from .cwt import cwt
 from .interpolate import linear_interpolate
 from .lomb_scargle import (
     lomb_scargle_interpolate,
@@ -56,6 +57,7 @@ from .window import sample_windows
 __all__ = [
     'analytic_signal',
     'bandpass',
+    'cwt',
     'bandstop',
     'butterworth_sos',
     'env_inst',

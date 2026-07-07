@@ -5771,6 +5771,48 @@ register(
 )
 
 
+def _gwt_fixture():
+    p = jax.random.normal(_key(18), (24, 24))
+    g = jnp.abs(p @ p.T)
+    adj = g - jnp.diag(jnp.diag(g))
+    signal = jax.random.normal(_key(19), (24,))
+    return (adj, signal, jnp.asarray([1.0, 3.0])), {}
+
+
+register(
+    OpInfo(
+        'nitrix.signal.cwt',
+        fixture=lambda: (
+            (jax.random.normal(_key(17), (128,)), jnp.asarray([4.0, 8.0, 16.0])),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        reducer=lambda W: jnp.sum(jnp.abs(W) ** 2),
+        invariants=('Fourier-domain scaled-wavelet bank',),
+        notes='complex scalogram; grad reduces |W|^2',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.graph.graph_wavelet_transform',
+        fixture=_gwt_fixture,
+        diff_arg=1,
+        vmap_arg=None,
+        invariants=('Chebyshev spectral graph wavelets (matvec)', 'cuSOLVER-free'),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.graph.mexican_hat_kernel',
+        fixture=lambda: ((jax.random.uniform(_key(20), (50,)),), {}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('spectral Mexican-hat band-pass g(x)=x e^{-x}',),
+    )
+)
+
+
 # ---------------------------------------------------------------------------
 # Host snapshot
 # ---------------------------------------------------------------------------

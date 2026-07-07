@@ -1,7 +1,10 @@
 # Continuous wavelet transform — `nitrix.signal.cwt`
 
-> **Status (2026-06-02): not started.** Brainstorm candidate; promotion
-> gated by the §13 acceptance protocol. Provenance:
+> **Status (2026-07-07): SHIPPED (`nitrix.signal.cwt`).** `cwt(x, scales, *,
+> wavelet=)` — an FFT-domain scaled-wavelet bank (Torrence–Compo normalisation)
+> with the complex analytic **Morlet** (default), the real **Ricker**
+> (Mexican-hat / DOG-2), and the complex **Paul** mother wavelets; returns the
+> complex scalogram, batches over leading dims, jit/grad-clean. Provenance:
 > `docs/feature-requests catalogue §12.12`.
 
 **What.** Continuous-wavelet analysis at user-specified mother wavelets

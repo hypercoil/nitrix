@@ -1,8 +1,15 @@
 # Graph wavelet transforms (SGWT) — `nitrix.graph.wavelet`
 
-> **Status (2026-06-02): not started — blocked on `matrix_polynomial`
-> (§12.2).** Brainstorm candidate; promotion gated by the §13 acceptance
-> protocol. Provenance: `docs/feature-requests catalogue §12.13`.
+> **Status (2026-07-07): SHIPPED (`nitrix.graph.graph_wavelet_transform`).**
+> Hammond et al.'s spectral graph wavelet transform: band-pass filtering in the
+> Laplacian eigenspectrum via a Chebyshev approximation applied by **matvec only**
+> (`laplacian_matvec` + the shipped `linalg.chebyshev_apply`/`chebyshev_coefficients`
+> — the §12.2 dependency, now shipped), with power-iteration λmax estimation. No
+> eigendecomposition → GPU-native and jit-clean on dense cortical graphs; the
+> Chebyshev basis is built once (`O(order)` matvecs) and recombined per scale.
+> Default band-pass `mexican_hat_kernel` (`g(x)=x e^{-x}`); verified against a
+> dense eigendecomposition to machine precision. Provenance:
+> `docs/feature-requests catalogue §12.13`.
 
 **What.** Hammond et al.'s Spectral Graph Wavelet Transform — Chebyshev-
 polynomial approximations of band-pass filters in the Laplacian
