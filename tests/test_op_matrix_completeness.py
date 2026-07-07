@@ -89,6 +89,10 @@ EXCLUDE: frozenset[str] = frozenset(
         'register.ConvergenceMode',
         'register.apply_transform',
         'register.syn_pipeline',
+        # -- A type alias, not an op: ``Similarity`` is ``Literal['euclidean',
+        #    'cosine','correlation']`` (a similarity-metric selector consumed by
+        #    the cataloged kmeans / normalized_cut). --------------------------------
+        'numerics.Similarity',
         # -- Pure structural / shape-layout helpers: ~free, no cross-framework ----
         #    baseline.
         'numerics.apply_mask',

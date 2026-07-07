@@ -5479,6 +5479,203 @@ for _qn, _key, _inv in (
 
 
 # ---------------------------------------------------------------------------
+# Backfill: ops that shipped after the catalogue was last swept (clustering,
+# spatial-null surrogate generators, spectral graph ops).  Label-returning /
+# random / construction ops carry diff_arg=None; the eigh-based generators are
+# eager-only (safe_eigh), so skip_jit=True.
+# ---------------------------------------------------------------------------
+
+from nitrix.geometry import (  # noqa: E402
+    parcel_centroids,
+    random_rotation,
+    spin_surrogates,  # noqa: F401  (resolved by qualname)
+)
+from nitrix.graph import (  # noqa: E402
+    heat_kernel,  # noqa: F401
+    moran_surrogates,
+    normalized_cut,
+)
+from nitrix.numerics import (  # noqa: E402
+    kmeans,
+    kmeans_fit,
+    kmeans_predict,
+    stochastic_round,
+)
+
+
+def _cluster_data():
+    return jax.random.normal(_key(1), (30, 4))
+
+
+_KMEANS_STATE = [None]
+
+
+def _kmeans_state():
+    if _KMEANS_STATE[0] is None:
+        _KMEANS_STATE[0] = kmeans_fit(_cluster_data(), 3, key=_key())
+    return _KMEANS_STATE[0]
+
+
+def _unit_sphere_points(n):
+    p = jax.random.normal(_key(6), (n, 3))
+    return p / jnp.linalg.norm(p, axis=-1, keepdims=True)
+
+
+def _sym_affinity(n):
+    m = jax.random.uniform(_key(7), (n, n))
+    a = 0.5 * (m + m.T)
+    return a - jnp.diag(jnp.diag(a))  # symmetric, non-negative, zero diagonal
+
+
+register(
+    OpInfo(
+        'nitrix.numerics.kmeans',
+        fixture=lambda: ((_cluster_data(),), {}),
+        fn_override=lambda X: kmeans(X, 3, key=_key()),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('Lloyd k-means hard assignment',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.numerics.kmeans_fit',
+        fixture=lambda: ((_cluster_data(),), {}),
+        fn_override=lambda X: kmeans_fit(X, 3, key=_key()),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('k-means fit -> centroid state (fit/apply seam)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.numerics.kmeans_predict',
+        fixture=lambda: ((_cluster_data(),), {}),
+        fn_override=lambda X: kmeans_predict(X, _kmeans_state()),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('nearest-centroid assignment (apply)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.parcel_centroids',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(), (20, 3)),
+                jax.random.randint(_key(2), (20,), 0, 5),
+            ),
+            {},
+        ),
+        fn_override=lambda coords, parc: parcel_centroids(
+            coords, parc, n_parcels=5
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('per-parcel centroid (segment mean)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.random_rotation',
+        fixture=lambda: ((_key(),), {}),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('uniform SO(3) via Shoemake quaternion',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.spin_surrogates',
+        fixture=lambda: (
+            (
+                _unit_sphere_points(24),
+                jax.random.normal(_key(3), (24,)),
+                random_rotation(_key(4), 3),
+            ),
+            {},
+        ),
+        diff_arg=1,
+        vmap_arg=None,
+        invariants=('spherical spin-rotation surrogate maps',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.graph.heat_kernel',
+        fixture=lambda: ((_sym_affinity(8), 1.0), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('matrix-exponential graph heat kernel',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.graph.moran_surrogates',
+        fixture=lambda: (
+            (_sym_affinity(8), jax.random.normal(_key(5), (8,))),
+            {},
+        ),
+        fn_override=lambda A, x: moran_surrogates(A, x, 10, _key()),
+        diff_arg=None,
+        vmap_arg=None,
+        skip_jit=True,
+        invariants=('Moran spectral-randomisation surrogates (eager eigh)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.graph.normalized_cut',
+        fixture=lambda: ((_sym_affinity(12),), {}),
+        fn_override=lambda A: normalized_cut(A, 3, key=_key()),
+        diff_arg=None,
+        vmap_arg=None,
+        skip_jit=True,
+        invariants=('spectral normalised-cut clustering (eager eigh)',),
+    )
+)
+
+
+def _precision_vec():
+    return jax.random.normal(_key(8), (256,))
+
+
+for _pname, _pinv in (
+    ('kahan_sum', 'Kahan compensated summation'),
+    ('neumaier_sum', 'Neumaier compensated summation'),
+    ('pairwise_sum', 'balanced log-depth tree summation'),
+):
+    register(
+        OpInfo(
+            f'nitrix.numerics.{_pname}',
+            fixture=lambda: ((_precision_vec(),), {}),
+            diff_arg=0,
+            vmap_arg=0,
+            invariants=(_pinv,),
+        )
+    )
+register(
+    OpInfo(
+        'nitrix.numerics.compensated_dot',
+        fixture=lambda: ((_precision_vec(), _precision_vec()), {}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('Ogita-Rump-Oishi Dot2 compensated inner product',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.numerics.stochastic_round',
+        fixture=lambda: ((_precision_vec().astype(jnp.float32),), {}),
+        fn_override=lambda x: stochastic_round(x, jnp.float16, key=_key()),
+        diff_arg=None,
+        vmap_arg=0,
+        invariants=('unbiased stochastic rounding to lower precision',),
+    )
+)
+
+
+# ---------------------------------------------------------------------------
 # Host snapshot
 # ---------------------------------------------------------------------------
 
