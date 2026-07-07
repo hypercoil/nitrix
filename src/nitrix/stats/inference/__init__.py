@@ -53,6 +53,7 @@ from .multiple_comparisons import (
 )
 from .permutation import permutations, sign_flips
 from ._spatial_null import SpatialNullResult, spatial_null_test
+from .brainsmash import brainsmash_surrogates, brainsmash_test, variogram
 from .moran import moran_test
 from .randomise import PermResult, gpd_pvalue, permutation_test
 from .spin import SpinTestResult, spin_test
@@ -70,6 +71,9 @@ __all__ = [
     'spin_test',
     'SpinTestResult',
     'moran_test',
+    'brainsmash_test',
+    'brainsmash_surrogates',
+    'variogram',
     'spatial_null_test',
     'SpatialNullResult',
     'fdr',
