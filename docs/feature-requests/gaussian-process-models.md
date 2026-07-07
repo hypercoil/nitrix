@@ -1,9 +1,15 @@
 # Gaussian-process & hierarchical-GP models — `nitrix.stats.gp`
 
-> **Status (2026-06-20, rev. HSGP-primary): proposed — substrate ~70% shipped;
-> the model wrappers + hyperparameter estimation + kernel spectral densities are
-> the net-new work.** A single-covariate kriging GP *smooth* already fits today
-> (`gp_basis` + `gam_fit`). **Primary reduced-rank engine: the Hilbert-space
+> **Status (2026-07-07): SHIPPED (`nitrix.stats.gp` + `nitrix.stats.hgp`).**
+> The full headline scope is built, exported, and tested: kernel spectral
+> densities (`se_spectral_density` / `matern_spectral_density`), the HSGP basis
+> (`hsgp_basis` / `hsgp_basis_nd`, ARD), the standalone `gp_fit` / `GPResult` /
+> `gp_predict` (HSGP + exact engines, MAP-`ρ` priors, non-Gaussian PQL-REML),
+> AR1/CAR1/CS residual composition (`corr=`), the factor-smooth + hierarchical /
+> nested `hgp_fit` / `HGPResult` / `hgp_predict`, and `gp_aic` / `gp_bic`.
+> **Residual (deferred, minor):** the optional periodic kernel (1 of 5) and an
+> optional perf-bench case. This doc is retained as the family ledger. **Primary
+> reduced-rank engine: the Hilbert-space
 > approximate GP (HSGP; Solin–Särkkä 2020, Riutort-Mayol/Bürkner 2023)** — a
 > fixed Laplace-eigenfunction basis whose hyperparameters enter *only* as a
 > diagonal spectral reweighting, so lengthscale `ρ` estimation stays `eigh`-free

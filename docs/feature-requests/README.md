@@ -137,7 +137,8 @@ shared-λ; randomise cluster-extent/mass + F-contrast + GPD tail) and the
 regularised connectivity estimators **Ledoit-Wolf / OAS** and **graphical
 LASSO**.
 
-**v3 (proposed):** [`stats-modelling-suite-v3.md`](stats-modelling-suite-v3.md)
+**v3 (✅ shipped — ledger):**
+[`stats-modelling-suite-v3.md`](stats-modelling-suite-v3.md)
 — GL(A)MM completeness driven by the **`nwx`** DSL (`gramform`): general
 multi-/correlated random-effects REML, **GAMM surfacing** (the `re`/`fs` basis
 v1 claimed but never exposed), mixed-model fixed-effect inference
@@ -174,7 +175,7 @@ OOM cliff), each with a stable ID and Status column, sequenced into Round 1 (thi
 Round 4. Records the **2 refuted claims** so they are not re-raised, and cross-references the
 standing audit (CV1 = its **N2** surface-TFCE; MC4 deepens its **M1**).
 
-**GP / HGP models (proposed, 2026-06-20, rev. HSGP-primary):**
+**GP / HGP models (✅ shipped — ledger, 2026-07-07):**
 [`gaussian-process-models.md`](gaussian-process-models.md) — Gaussian-process
 regression as a first-class family (`nitrix.stats.gp`) and its **hierarchical**
 (multi-level, mixed-model sense) extension. Substrate is ~70 % shipped: a 1-D
