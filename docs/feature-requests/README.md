@@ -157,10 +157,10 @@ fits; exact log|V| cancellation) so it is not re-raised.
 
 **Spatial null models (family ledger, 2026-07-07):**
 [`spatial-null-models.md`](spatial-null-models.md) — SA-preserving nulls for
-map-correspondence inference (the audit's **N2**). **Spin test SHIPPED**
-(`geometry.random_rotation`/`spin_surrogates` + `stats.inference.spin_test`);
-**Moran** spectral randomization (composes `laplacian_eigenmap`) and the
-**variogram/BrainSMASH** generative model are the follow-ups. Reference:
+map-correspondence inference (the audit's **N2**). **Spin + Moran SHIPPED**
+(`geometry.random_rotation`/`spin_surrogates` + `graph.moran_surrogates`, on the
+shared `stats.inference.spatial_null_test` seam); the **variogram/BrainSMASH**
+generative model (the most rigorous parameterized null) is next. Reference:
 `neuromaps.nulls`.
 
 **GP / HGP pre-merge review register (2026-06-22):**
