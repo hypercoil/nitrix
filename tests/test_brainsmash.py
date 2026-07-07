@@ -17,7 +17,9 @@ jax.config.update('jax_enable_x64', True)
 from nitrix.stats.inference import (  # noqa: E402
     SpatialNullResult,
     brainsmash_surrogates,
+    brainsmash_surrogates_sampled,
     brainsmash_test,
+    brainsmash_test_sampled,
     spatial_null_test,
     variogram,
 )
@@ -35,6 +37,14 @@ def _smooth_field(n=120, seed=0):
         + 0.1 * rng.standard_normal(n)
     )
     return jnp.asarray(x), dist
+
+
+def _knn_from_dense(dist, k):
+    """Per-vertex k nearest neighbours (self excluded) from a dense matrix."""
+    d = np.asarray(dist)
+    order = np.argsort(d, axis=1)[:, 1 : k + 1]  # drop self at column 0
+    nd = np.take_along_axis(d, order, axis=1)
+    return jnp.asarray(order), jnp.asarray(nd)
 
 
 def test_variogram_rises_for_a_smooth_map():
@@ -124,4 +134,116 @@ def test_brainsmash_test_jit():
             ).pvalue
         )
     )(x, y, dist)
+    assert bool(jnp.isfinite(p))
+
+
+# -----------------------------------------------------------------------------
+# 'Sampled' (memory-lean, k-nearest-neighbour) variant
+# -----------------------------------------------------------------------------
+
+
+def test_sampled_resample_preserves_marginal():
+    x, dist = _smooth_field()
+    nbr, nbr_d = _knn_from_dense(dist, k=30)
+    surr = brainsmash_surrogates_sampled(
+        x, nbr, nbr_d, 20, jax.random.key(0), n_bins=15
+    )
+    assert surr.shape == (20, x.shape[0])
+    x_sorted = np.sort(np.asarray(x))
+    for k in range(5):
+        np.testing.assert_allclose(
+            np.sort(np.asarray(surr[k])), x_sorted, atol=1e-9
+        )
+
+
+def test_sampled_reintroduces_spatial_autocorrelation():
+    """KNN-smoothed surrogates have a rising variogram vs a bare permutation."""
+    x, dist = _smooth_field()
+    nbr, nbr_d = _knn_from_dense(dist, k=40)
+    surr = brainsmash_surrogates_sampled(
+        x, nbr, nbr_d, 30, jax.random.key(0), n_bins=15
+    )
+    # validate against the ground-truth dense variogram
+    v_surr = np.mean(
+        [np.asarray(variogram(surr[k], dist, n_bins=15)) for k in range(30)], 0
+    )
+    assert v_surr[-1] > v_surr[0]  # rising = SA present
+    perm = jnp.asarray(np.random.default_rng(2).permutation(np.asarray(x)))
+    perm_v = np.asarray(variogram(perm, dist, n_bins=15))
+    assert v_surr[0] < 0.9 * perm_v.mean()
+
+
+def test_sampled_no_resample_matches_moments():
+    x, dist = _smooth_field()
+    nbr, nbr_d = _knn_from_dense(dist, k=30)
+    surr = brainsmash_surrogates_sampled(
+        x, nbr, nbr_d, 10, jax.random.key(0), n_bins=15, resample=False
+    )
+    np.testing.assert_allclose(
+        np.asarray(surr).mean(1), float(x.mean()), atol=1e-6
+    )
+    np.testing.assert_allclose(
+        np.asarray(surr).std(1), float(x.std()), rtol=1e-3
+    )
+
+
+def test_sampled_subsamples_seed_vertices():
+    """n_samples < n draws a seed subset yet still yields valid surrogates."""
+    x, dist = _smooth_field(n=200)
+    nbr, nbr_d = _knn_from_dense(dist, k=30)
+    surr = brainsmash_surrogates_sampled(
+        x, nbr, nbr_d, 8, jax.random.key(3), n_samples=50, n_bins=15
+    )
+    assert surr.shape == (8, 200)
+    x_sorted = np.sort(np.asarray(x))
+    np.testing.assert_allclose(
+        np.sort(np.asarray(surr[0])), x_sorted, atol=1e-9
+    )
+
+
+def test_sampled_test_self_is_significant():
+    x, dist = _smooth_field()
+    nbr, nbr_d = _knn_from_dense(dist, k=40)
+    res = brainsmash_test_sampled(
+        x, x, nbr, nbr_d, key=jax.random.key(1), n_surrogates=200, n_bins=15
+    )
+    assert np.isclose(float(res.statistic), 1.0)
+    assert float(res.pvalue) < 0.05
+    assert isinstance(res, SpatialNullResult)
+
+
+def test_sampled_test_matches_manual_composition():
+    x, dist = _smooth_field()
+    nbr, nbr_d = _knn_from_dense(dist, k=30)
+    y = jnp.asarray(np.random.default_rng(9).standard_normal(x.shape[0]))
+    key = jax.random.key(5)
+    res = brainsmash_test_sampled(
+        x, y, nbr, nbr_d, key=key, n_surrogates=80, n_bins=15
+    )
+    surr = brainsmash_surrogates_sampled(x, nbr, nbr_d, 80, key, n_bins=15)
+    manual = spatial_null_test(x, y, surr)
+    np.testing.assert_allclose(
+        res.null_distribution, manual.null_distribution, atol=1e-12
+    )
+    assert 1.0 / 81.0 <= float(res.pvalue) <= 1.0
+
+
+def test_sampled_test_jit():
+    """KNN path is also cuSolver-free -> jit/vmap-clean."""
+    x, dist = _smooth_field()
+    nbr, nbr_d = _knn_from_dense(dist, k=30)
+    y = jnp.asarray(np.random.default_rng(9).standard_normal(x.shape[0]))
+    p = jax.jit(
+        lambda x, y, nbr, nbr_d: (
+            brainsmash_test_sampled(
+                x,
+                y,
+                nbr,
+                nbr_d,
+                key=jax.random.key(0),
+                n_surrogates=100,
+                n_bins=15,
+            ).pvalue
+        )
+    )(x, y, nbr, nbr_d)
     assert bool(jnp.isfinite(p))

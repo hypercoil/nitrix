@@ -4,8 +4,9 @@
 > the shared surrogate→test seam) — the most-common (spin), a spectral
 > (Moran), and the most-rigorous parameterized (BrainSMASH variogram) nulls.
 > The spin refinements are **complete** (medial-wall, per-hemisphere, Váša
-> bijective, parcel-level). Remaining: the BrainSMASH 'sampled' large-mesh
-> variant, and the mesh/graph-TFCE clustering half of N2. Family ledger for
+> bijective, parcel-level) and the BrainSMASH **'sampled'** large-mesh (KNN,
+> memory-lean) variant is now shipped. Remaining: the mesh/graph-TFCE
+> clustering half of N2. Family ledger for
 > the spatial-autocorrelation-preserving null models used to test the
 > correspondence of two brain maps. Origin: the **N2** item of the
 > [`stats-suite-audit`](stats-suite-audit.md) ("no spin test (Alexander-Bloch/
@@ -88,8 +89,11 @@ cuSolver).
    + `stats.inference.moran_test`; sign-flip the doubly-centred weight-matrix
    eigen-coefficients). Needs no coords; surface *or* volume.
 2. ✅ **Variogram / BrainSMASH (Burt 2020)** — SHIPPED (`variogram` +
-   `brainsmash_surrogates` + `brainsmash_test`). The 'sampled' large-mesh subset
-   variant (memory-lean for dense vertex meshes) remains a follow-up.
+   `brainsmash_surrogates` + `brainsmash_test`). The **'sampled'** large-mesh
+   subset variant is also shipped (`brainsmash_surrogates_sampled` +
+   `brainsmash_test_sampled`): memory-lean :math:`O(nk)` surrogates from each
+   vertex's `k` nearest neighbours (index + distance arrays), variogram
+   estimated over a random seed subset — no dense :math:`n \times n` matrix.
 3. ✅ **Spin refinements — COMPLETE.** Medial-wall (the shared
    `spatial_null_test` statistic is non-finite-aware, dropping `NaN` pairwise
    over each spin's finite support); per-hemisphere (`spin_surrogates` /
