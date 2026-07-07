@@ -5812,6 +5812,36 @@ register(
     )
 )
 
+from nitrix.geometry import sht_forward  # noqa: E402
+
+register(
+    OpInfo(
+        'nitrix.geometry.sht_forward',
+        fixture=lambda: ((jax.random.normal(_key(21), (9, 17)),), {}),
+        fn_override=lambda f: sht_forward(f, band_limit=8),
+        diff_arg=0,
+        vmap_arg=None,
+        reducer=lambda c: jnp.sum(jnp.abs(c) ** 2),
+        invariants=('Gauss-Legendre spherical harmonic analysis',),
+        notes='complex coefficients; grad reduces |c|^2',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.sht_inverse',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(22), (9, 17))
+                + 1j * jax.random.normal(_key(23), (9, 17)),
+            ),
+            {},
+        ),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('spherical harmonic synthesis',),
+    )
+)
+
 
 # ---------------------------------------------------------------------------
 # Host snapshot

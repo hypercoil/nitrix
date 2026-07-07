@@ -302,7 +302,7 @@ live code: *not started* / *partial* (some substrate shipped).
 | 12.6 | [mesh-curvature](resolved/mesh-curvature.md) | `geometry.curvature` | S | ✅ shipped (geometry suite: mean/gaussian/principal_curvatures) |
 | 12.7 | [robust-statistics](robust-statistics.md) | `stats.robust` | S | ✅ shipped (`mad`/`huber_regress`/`tukey_bisquare_regress`) |
 | 12.8 | [fixed-point-combinators](resolved/fixed-point-combinators.md) | `numerics.fixed_point` | M | ✅ shipped (`fixed_point_solve` — registration) |
-| 12.9 | [spherical-harmonic-transform](spherical-harmonic-transform.md) | `geometry.sphere.harmonics` | M | not started |
+| 12.9 | [spherical-harmonic-transform](spherical-harmonic-transform.md) | `geometry.harmonics` | M | ✅ shipped (`sht_forward`/`sht_inverse`/`sht_grid`; Wigner-D deferred) |
 | 12.10 | [compensated-summation](compensated-summation.md) | `numerics.precision` | S | ✅ shipped (`kahan_sum`/`neumaier_sum`/`pairwise_sum`/`compensated_dot`/`stochastic_round`) |
 | 12.11 | [ode-integrators](ode-integrators.md) | `numerics.ode` | L | partial (`integrate_velocity_field` shipped) |
 | 12.12 | [continuous-wavelet-transform](continuous-wavelet-transform.md) | `signal.cwt` | S | ✅ shipped (`cwt`: morlet/ricker/paul) |

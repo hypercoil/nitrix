@@ -1,7 +1,15 @@
 # Spherical harmonic transforms — `nitrix.geometry.sphere.harmonics`
 
-> **Status (2026-06-02): not started.** Brainstorm candidate; promotion
-> gated by the §13 acceptance protocol. Provenance:
+> **Status (2026-07-07): SHIPPED — analysis/synthesis (`nitrix.geometry`).**
+> `sht_forward` / `sht_inverse` / `sht_grid`: exact spherical-harmonic transform
+> on a **Gauss–Legendre** grid (`L+1` GL colatitudes × `2L+1` equiangular
+> longitudes), FFT over longitude + a fully-normalised associated-Legendre matmul
+> over colatitude (the grid + Legendre table precomputed host-side from the static
+> band-limit, so the data path is pure FFT + contraction). Orthonormal
+> Condon–Shortley `Y_lm`; verified against `scipy.special.sph_harm_y` (unit
+> coefficient per harmonic), round-trip + Parseval exact to machine precision;
+> jit/grad/batch clean. **Remaining follow-up:** `sht_rotation_matrix` (Wigner-D)
+> and a Driscoll–Healy equiangular-grid variant. Provenance:
 > `docs/feature-requests catalogue §12.9`.
 
 **What.** Classical spherical-harmonic synthesis and analysis at arbitrary

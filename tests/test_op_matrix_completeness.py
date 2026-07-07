@@ -98,6 +98,10 @@ EXCLUDE: frozenset[str] = frozenset(
         #    coefficients (no array input to benchmark); it feeds the cataloged
         #    chebyshev_apply / matrix_polynomial / graph_wavelet_transform. --------
         'linalg.chebyshev_coefficients',
+        # -- Grid-construction helper: sht_grid takes a static band-limit and
+        #    returns the sampling points (no array input to benchmark); the
+        #    cataloged sht_forward / sht_inverse are the transforms. --------------
+        'geometry.sht_grid',
         # -- Pure structural / shape-layout helpers: ~free, no cross-framework ----
         #    baseline.
         'numerics.apply_mask',

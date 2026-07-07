@@ -28,6 +28,10 @@ Submodules
   :func:`sphere_grid_unpad_2d` with pole-flip and longitudinal-wrap
   padding. Distinct from ``sphere`` because the parameterised-grid case
   and the mesh case have different storage and adjacency models.
+- ``harmonics`` -- the spherical harmonic transform (:func:`sht_forward` /
+  :func:`sht_inverse` / :func:`sht_grid`): exact analysis / synthesis on a
+  Gauss--Legendre grid, FFT over longitude and an associated-Legendre matmul
+  over colatitude.
 - ``coords`` -- coordinate utilities: :func:`center_of_mass_points`,
   the displacement-from-reference helpers, and
   :func:`compactness_penalty`.
@@ -113,6 +117,12 @@ from .sphere import (
 from .sphere_grid import (
     sphere_grid_pad_2d,
     sphere_grid_unpad_2d,
+)
+from .harmonics import (
+    SHTGrid,
+    sht_forward,
+    sht_grid,
+    sht_inverse,
 )
 from .coords import (
     center_of_mass_points,
@@ -216,6 +226,11 @@ __all__ = [
     # sphere_grid (parameterised regular grid)
     'sphere_grid_pad_2d',
     'sphere_grid_unpad_2d',
+    # spherical harmonic transform
+    'sht_forward',
+    'sht_inverse',
+    'sht_grid',
+    'SHTGrid',
     # coords
     'center_of_mass_points',
     'compactness_penalty',
