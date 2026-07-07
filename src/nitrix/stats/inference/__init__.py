@@ -53,6 +53,7 @@ from .multiple_comparisons import (
 )
 from .permutation import permutations, sign_flips
 from .randomise import PermResult, gpd_pvalue, permutation_test
+from .spin import SpinTestResult, spin_test
 from .tfce import tfce
 
 __all__ = [
@@ -64,6 +65,8 @@ __all__ = [
     'permutation_test',
     'PermResult',
     'gpd_pvalue',
+    'spin_test',
+    'SpinTestResult',
     'fdr',
     'fdr_bh',
     'fdr_by',

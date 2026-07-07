@@ -50,6 +50,8 @@ __all__ = [
     'spectral_sphere_embedding',
     'spherical_parameterize',
     'surface_resample',
+    'random_rotation',
+    'spin_surrogates',
 ]
 
 
@@ -1202,3 +1204,119 @@ def surface_resample(
     if squeeze:
         resampled = resampled[:, 0]
     return op, resampled
+
+
+# ---------------------------------------------------------------------------
+# Spin-based spatial nulls (Alexander-Bloch / Vazquez-Rodriguez)
+# ---------------------------------------------------------------------------
+
+
+def random_rotation(
+    key: Array,
+    n: Optional[int] = None,
+) -> Float[Array, '*n 3 3']:
+    r"""Uniform (Haar) random rotation(s) in :math:`SO(3)`.
+
+    Sampled by Shoemake's subgroup method -- a uniform unit quaternion mapped
+    to a rotation matrix -- so it is **factorisation-free** (no ``qr`` / ``svd``,
+    hence cuSolver-independent) and ``jit`` / ``vmap``-clean, unlike an
+    Euler-angle draw (which is *not* uniform on the group).
+
+    Parameters
+    ----------
+    key : Array
+        A :func:`jax.random.key`.
+    n : int, optional
+        Number of rotations. ``None`` (default) returns a single ``(3, 3)``
+        matrix; an integer returns ``(n, 3, 3)``.
+
+    Returns
+    -------
+    Float[Array, '*n 3 3']
+        Proper rotation matrix / matrices (orthonormal, :math:`\det = +1`).
+    """
+    shape: tuple[int, ...] = () if n is None else (n,)
+    u = jax.random.uniform(key, (*shape, 3))
+    u1, u2, u3 = u[..., 0], u[..., 1], u[..., 2]
+    two_pi = 2.0 * jnp.pi
+    r1 = jnp.sqrt(1.0 - u1)
+    r2 = jnp.sqrt(u1)
+    w = r2 * jnp.cos(two_pi * u3)
+    qx = r1 * jnp.sin(two_pi * u2)
+    qy = r1 * jnp.cos(two_pi * u2)
+    qz = r2 * jnp.sin(two_pi * u3)
+    row0 = jnp.stack(
+        [
+            1 - 2 * (qy**2 + qz**2),
+            2 * (qx * qy - w * qz),
+            2 * (qx * qz + w * qy),
+        ],
+        axis=-1,
+    )
+    row1 = jnp.stack(
+        [
+            2 * (qx * qy + w * qz),
+            1 - 2 * (qx**2 + qz**2),
+            2 * (qy * qz - w * qx),
+        ],
+        axis=-1,
+    )
+    row2 = jnp.stack(
+        [
+            2 * (qx * qz - w * qy),
+            2 * (qy * qz + w * qx),
+            1 - 2 * (qx**2 + qy**2),
+        ],
+        axis=-1,
+    )
+    return jnp.stack([row0, row1, row2], axis=-2)
+
+
+def spin_surrogates(
+    coords: Float[Array, 'V 3'],
+    x: Float[Array, '... V'],
+    rotations: Float[Array, 'n 3 3'],
+) -> Float[Array, 'n ... V']:
+    r"""Spin-based surrogate maps (the Alexander-Bloch / Vazquez-Rodriguez null).
+
+    Rotates the unit-sphere vertex coordinates by each rotation and reassigns
+    every vertex the value of the original vertex **nearest its rotated
+    position** (nearest-neighbour on the sphere is the maximal dot product).
+    This randomises a map's alignment while preserving its spatial-
+    autocorrelation structure -- the spatial null under which two maps'
+    correspondence is tested (see :func:`nitrix.stats.inference.spin_test`).
+
+    The nearest-neighbour assignment is *not* a bijection (values may repeat);
+    the Vasa / Hungarian bijective variant and per-hemisphere reflection
+    (Alexander-Bloch) are follow-ups.
+
+    Parameters
+    ----------
+    coords : Float[Array, 'V 3']
+        Vertex coordinates on the sphere (any radius; normalised internally).
+    x : Float[Array, '... V']
+        Per-vertex map(s), the vertex axis last.
+    rotations : Float[Array, 'n 3 3']
+        Rotation matrices, e.g. from :func:`random_rotation`.
+
+    Returns
+    -------
+    Float[Array, 'n ... V']
+        One surrogate map per rotation.
+
+    Notes
+    -----
+    Each rotation forms a dense ``(V, V)`` similarity, so peak memory is
+    :math:`O(V^2)` (the rotations are streamed with :func:`jax.lax.map`, so it
+    does not scale with ``n``). Fine at parcel or moderate-mesh resolution;
+    dense vertex-level meshes want a chunked / kd-tree nearest-neighbour
+    (a perf follow-up).
+    """
+    coords = coords / jnp.linalg.norm(coords, axis=-1, keepdims=True)
+
+    def one(rotation: Float[Array, '3 3']) -> Float[Array, '... V']:
+        rotated = coords @ rotation.T  # (V, 3), still unit
+        nearest = jnp.argmax(rotated @ coords.T, axis=1)  # (V,)
+        return x[..., nearest]
+
+    return cast(Float[Array, 'n ... V'], lax.map(one, rotations))
