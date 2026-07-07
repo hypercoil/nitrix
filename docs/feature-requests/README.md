@@ -155,6 +155,14 @@ items, each with a stable ID and Status column. Records the **empirical
 refutation of the one Critical claim** (C1 "gappy labels bias REML" — bit-identical
 fits; exact log|V| cancellation) so it is not re-raised.
 
+**Spatial null models (family ledger, 2026-07-07):**
+[`spatial-null-models.md`](spatial-null-models.md) — SA-preserving nulls for
+map-correspondence inference (the audit's **N2**). **Spin test SHIPPED**
+(`geometry.random_rotation`/`spin_surrogates` + `stats.inference.spin_test`);
+**Moran** spectral randomization (composes `laplacian_eigenmap`) and the
+**variogram/BrainSMASH** generative model are the follow-ups. Reference:
+`neuromaps.nulls`.
+
 **GP / HGP pre-merge review register (2026-06-22):**
 [`stats-suite-review-gp.md`](stats-suite-review-gp.md) — consolidated findings from a
 seven-lens, 13-reviewer / 53-agent **adversarially-verified** fan-out review of the
