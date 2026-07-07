@@ -1,8 +1,11 @@
 # Spatial null models (spin / Moran / variogram) — `nitrix.stats.inference` + `nitrix.geometry.sphere`
 
-> **Status (2026-07-07): PARTIAL — spin + Moran SHIPPED (with the shared
-> surrogate→test seam); the variogram/BrainSMASH generative model is next.**
-> Family ledger for
+> **Status (2026-07-07): the spin / Moran / BrainSMASH trio is SHIPPED** (on
+> the shared surrogate→test seam) — the most-common (spin), a spectral
+> (Moran), and the most-rigorous parameterized (BrainSMASH variogram) nulls.
+> Remaining: the BrainSMASH 'sampled' large-mesh variant + spin refinements
+> (per-hemisphere Alexander-Bloch, medial-wall, parcel-level, bijective). Family
+> ledger for
 > the spatial-autocorrelation-preserving null models used to test the
 > correspondence of two brain maps. Origin: the **N2** item of the
 > [`stats-suite-audit`](stats-suite-audit.md) ("no spin test (Alexander-Bloch/
@@ -59,8 +62,24 @@ stat) -> (observed, p)` — generator pluggable, test shared (mirrors the shippe
   aliases `SpatialNullResult`.
 - `stats.inference.moran_test(x, y, adjacency, *, key, n_surrogates, two_sided)`.
 
-22 tests total (spin 9 + Moran/seam 13); spin GPU-verified, Moran eager-verified
-on GPU (`safe_eigh`'s device fallback is eager-only → `jit`-eigh needs a healthy
+## Shipped — BrainSMASH variogram-matched generative null (2026-07-07)
+
+The most general / rigorous parameterized null (Burt 2020): reproduces the map's
+empirical **variogram** from a distance matrix, so it works for surface *and*
+volume without a sphere or a graph.
+
+- `stats.inference.variogram(x, D, *, n_bins)` — binned empirical semivariogram.
+- `stats.inference.brainsmash_surrogates(x, D, n, key, *, deltas, kernel,
+  resample)` — permute → multi-bandwidth distance-kernel smooth → NNLS-match the
+  target variogram (projected-gradient, **cuSolver-free**) → rank-resample to
+  the target marginal (default).
+- `stats.inference.brainsmash_test`.
+
+Fully `jit`/`vmap`-clean on **any** backend (no `eigh`), unlike Moran.
+
+31 tests total (spin 9 + Moran/seam 6 CPU-effective + BrainSMASH 8, plus the seam
+mechanics); spin + BrainSMASH GPU-verified incl. `jit`, Moran eager-verified on
+GPU (`safe_eigh`'s device fallback is eager-only → `jit`-eigh needs a healthy
 cuSolver).
 
 ## Roadmap (want at least the most-common + a rigorous parameterized model)
@@ -68,11 +87,9 @@ cuSolver).
 1. ✅ **Moran spectral randomization (MSR)** — SHIPPED (`graph.moran_surrogates`
    + `stats.inference.moran_test`; sign-flip the doubly-centred weight-matrix
    eigen-coefficients). Needs no coords; surface *or* volume.
-2. **Variogram / BrainSMASH (Burt 2020)** — *next.* The generative model that
-   explicitly matches the empirical variogram (SA structure), general to surface
-   *and* volume geometry. Usually held up as the **most rigorous** parameterized
-   null; the larger build (variogram fit + distance-binned smoothing of a
-   permuted map). Composes the geometry distance machinery + smoothing.
+2. ✅ **Variogram / BrainSMASH (Burt 2020)** — SHIPPED (`variogram` +
+   `brainsmash_surrogates` + `brainsmash_test`). The 'sampled' large-mesh subset
+   variant (memory-lean for dense vertex meshes) remains a follow-up.
 3. **Spin refinements** — per-hemisphere independent rotation with the mirror
    reflection (full Alexander-Bloch), medial-wall / NaN handling, parcel-level
    (centroid) support, and the Váša / Hungarian **bijective** assignment.
