@@ -301,8 +301,8 @@ live code: *not started* / *partial* (some substrate shipped).
 | 12.15 | [surface-resample-adap-bary](resolved/surface-resample-adap-bary.md) | `geometry.sphere.resample` | M | ✅ shipped (`surface_resample` `adap_bary_area` + `barycentric`) |
 | 12.16 | [surface-boundary-map](resolved/surface-boundary-map.md) | `graph.parcellation.boundary` | S | ✅ shipped (`surface_boundary_map`) |
 | 12.17 | [mesh-watershed](resolved/mesh-watershed.md) | `graph.parcellation.watershed` | M | ✅ shipped (`mesh_watershed`) |
-| 12.18 | [clustering-primitives](clustering-primitives.md) | `numerics.cluster` | S/M | not started |
-| 12.19 | [normalised-cut](normalised-cut.md) | `graph.ncut` | XS | not started (blocked on 12.18) |
+| 12.18 | [clustering-primitives](clustering-primitives.md) | `numerics.cluster` | S/M | partial (`kmeans` shipped; `ward_linkage`/`nmf` deferred) |
+| 12.19 | [normalised-cut](resolved/normalised-cut.md) | `graph.normalized_cut` | XS | ✅ shipped (`normalized_cut` = eigenmap + kmeans) |
 
 **§12.20** (functional-parcellation strategy survey) is informational — a
 strategy→primitive mapping table, not a primitive — and stays in
@@ -343,7 +343,7 @@ stay downstream. Needs an explicit go-ahead + a lined-up consumer.
 
 ## Resolved (archived)
 
-The 72 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/). Listed here as one flat index; topical context and the shipped-status annotation remain in the family sections above.
+The 73 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/). Listed here as one flat index; topical context and the shipped-status annotation remain in the family sections above.
 
 - [`affine-matrix-algebra`](resolved/affine-matrix-algebra.md) — Affine matrix algebra (geometric convention) — `nitrix.geometry.affine`
 - [`attention-kernels`](resolved/attention-kernels.md) — attention-kernels — scaled dot-product / flash attention
@@ -398,6 +398,7 @@ The 72 FRs below are fully shipped/resolved and live in [`resolved/`](resolved/)
 - [`nimox-histogram-match-fit-apply`](resolved/nimox-histogram-match-fit-apply.md) — Two-phase `histogram_match` (fit reference landmarks once, apply to many)
 - [`nimox-mesh-loss-geometry`](resolved/nimox-mesh-loss-geometry.md) — nimox mesh-loss geometry → `nitrix.geometry` (consolidation handoff)
 - [`nimox-stats-response-predict`](resolved/nimox-stats-response-predict.md) — Public `*_predict` for the response-regression fitters (Beta / Ordinal / GauLSS / GAM)
+- [`normalised-cut`](resolved/normalised-cut.md) — Normalised-cut spectral clustering — `nitrix.graph.ncut`
 - [`pad-to-multiple`](resolved/pad-to-multiple.md) — `pad_to_multiple` / `crop_to_multiple` (+ unpad) — `nitrix.numerics`
 - [`pallas-attention-nonpot-fallback`](resolved/pallas-attention-nonpot-fallback.md) — Pallas attention: automatic fallback on non-power-of-2 token counts
 - [`pca-svd`](resolved/pca-svd.md) — PCA fit / transform / inverse (SVD) — `nitrix.stats.pca`
