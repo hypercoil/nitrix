@@ -79,11 +79,12 @@ from __future__ import annotations
 from typing import Literal, Optional, Tuple, Union
 
 import jax.numpy as jnp
-from jaxtyping import Array, Float, Num
+from jaxtyping import Array, Float, Int, Num
 
 from ..linalg import matrix_exp
 from ..linalg._eigsolve import SolverSpec, eigsolve_top_k
 from ..linalg._solver import safe_eigh
+from ..numerics.cluster import Similarity, kmeans
 from ..sparse import ELL, SectionedELL
 from .laplacian import (
     _is_sparse,
@@ -92,7 +93,12 @@ from .laplacian import (
     symmetric_degree_vector,
 )
 
-__all__ = ['laplacian_eigenmap', 'diffusion_embedding', 'heat_kernel']
+__all__ = [
+    'laplacian_eigenmap',
+    'diffusion_embedding',
+    'heat_kernel',
+    'normalized_cut',
+]
 
 
 _Solver = Literal['auto', 'eigh', 'lobpcg', 'shift_invert']
@@ -771,4 +777,64 @@ def heat_kernel(
         raise ValueError(f"method={method!r}; expected 'exp' or 'eigh'.")
     return matrix_exp(
         -t * lap, n_squarings=n_squarings, taylor_order=taylor_order
+    )
+
+
+def normalized_cut(
+    A: _GraphInput,
+    k: int,
+    *,
+    key: Array,
+    similarity: Similarity = 'cosine',
+    n_init: int = 1,
+    max_iter: int = 100,
+    tol: float = 1e-4,
+    solver: _Solver = 'auto',
+) -> Int[Array, 'n']:
+    r"""Normalised-cut spectral clustering (Shi--Malik / Ng--Jordan--Weiss).
+
+    Embeds the nodes in the bottom-``k`` non-trivial eigenspace of the
+    symmetric normalised Laplacian (:func:`laplacian_eigenmap`) and clusters
+    that spectral embedding with k-means. The default ``similarity='cosine'``
+    row-normalises the embedding before assignment -- the Ng--Jordan--Weiss
+    variant; ``'euclidean'`` clusters the raw Shi--Malik embedding.
+
+    Composes the shipped spectral embedding with
+    :func:`nitrix.numerics.kmeans`; the eigensolver is cuSolver-free and
+    differentiable, though the k-means assignment itself is discrete.
+
+    Parameters
+    ----------
+    A : Num[Array, '... n n'] or ELL or SectionedELL
+        (Non-negative) affinity / adjacency; treated as symmetric.
+    k : int
+        Number of clusters, and the spectral-embedding dimensionality.
+    key : Array
+        A :func:`jax.random.key` for the k-means initialisation.
+    similarity : {'cosine', 'euclidean', 'correlation'}, optional
+        k-means metric on the embedding. Default ``'cosine'``
+        (Ng--Jordan--Weiss row-normalisation).
+    n_init : int, optional
+        k-means restarts (best-inertia kept). Default ``1``.
+    max_iter : int, optional
+        Maximum Lloyd sweeps. Default ``100``.
+    tol : float, optional
+        k-means convergence tolerance. Default ``1e-4``.
+    solver : optional
+        Eigensolver for :func:`laplacian_eigenmap` (``'auto'`` default).
+
+    Returns
+    -------
+    Int[Array, 'n']
+        The cluster index of each node.
+    """
+    embedding, _ = laplacian_eigenmap(A, n_components=k, solver=solver)
+    return kmeans(
+        embedding,
+        k,
+        key=key,
+        similarity=similarity,
+        n_init=n_init,
+        max_iter=max_iter,
+        tol=tol,
     )

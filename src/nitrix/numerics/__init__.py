@@ -24,7 +24,14 @@ Submodules:
   fixed-point iteration), re-exported at the package top level.
 """
 
-from . import normalize, ode, spatial, tensor_ops
+from . import cluster, normalize, ode, spatial, tensor_ops
+from .cluster import (
+    KMeansState,
+    Similarity,
+    kmeans,
+    kmeans_fit,
+    kmeans_predict,
+)
 from .fixed_point import fixed_point_solve
 from .ode import euler, local_linearization, midpoint, odeint, rk4
 from .spatial import (
@@ -58,6 +65,12 @@ from .tensor_ops import (
 )
 
 __all__ = [
+    # clustering
+    'kmeans',
+    'kmeans_fit',
+    'kmeans_predict',
+    'KMeansState',
+    'Similarity',
     # fixed point
     'fixed_point_solve',
     # ode integrators
