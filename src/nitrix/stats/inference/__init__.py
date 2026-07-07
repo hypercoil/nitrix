@@ -52,6 +52,8 @@ from .multiple_comparisons import (
     storey_pi0,
 )
 from .permutation import permutations, sign_flips
+from ._spatial_null import SpatialNullResult, spatial_null_test
+from .moran import moran_test
 from .randomise import PermResult, gpd_pvalue, permutation_test
 from .spin import SpinTestResult, spin_test
 from .tfce import tfce
@@ -67,6 +69,9 @@ __all__ = [
     'gpd_pvalue',
     'spin_test',
     'SpinTestResult',
+    'moran_test',
+    'spatial_null_test',
+    'SpatialNullResult',
     'fdr',
     'fdr_bh',
     'fdr_by',

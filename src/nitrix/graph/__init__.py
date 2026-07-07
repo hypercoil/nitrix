@@ -53,6 +53,7 @@ from .connectopy import (
     diffusion_embedding,
     heat_kernel,
     laplacian_eigenmap,
+    moran_surrogates,
     normalized_cut,
 )
 from .parcellation import (
@@ -78,6 +79,7 @@ __all__ = [
     'diffusion_embedding',
     'heat_kernel',
     'laplacian_eigenmap',
+    'moran_surrogates',
     'normalized_cut',
     # parcellation (functional boundary map -> watershed)
     'eta_squared',

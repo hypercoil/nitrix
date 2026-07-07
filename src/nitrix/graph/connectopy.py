@@ -78,6 +78,7 @@ from __future__ import annotations
 
 from typing import Literal, Optional, Tuple, Union
 
+import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Int, Num
 
@@ -98,6 +99,7 @@ __all__ = [
     'diffusion_embedding',
     'heat_kernel',
     'normalized_cut',
+    'moran_surrogates',
 ]
 
 
@@ -838,3 +840,54 @@ def normalized_cut(
         max_iter=max_iter,
         tol=tol,
     )
+
+
+def moran_surrogates(
+    A: Num[Array, 'n n'],
+    x: Float[Array, 'n'],
+    n_surrogates: int,
+    key: Array,
+) -> Float[Array, 'n_surrogates n']:
+    r"""Moran spectral-randomisation surrogate maps (Wagner & Dray 2015).
+
+    Spatial-autocorrelation-preserving surrogates of a graph signal ``x``:
+    project the mean-centred map onto the **Moran eigenvectors** of the
+    doubly-centred weight matrix :math:`B = C A C` (with
+    :math:`C = I - \mathbf{1}\mathbf{1}^{\top} / n`), randomly flip the
+    coefficient signs, and reconstruct. Sign-flipping preserves each
+    eigenvector's power -- hence the Moran's-``I`` spectrum, i.e. the spatial-
+    autocorrelation structure -- while randomising the map's spatial
+    arrangement. The mean and variance of ``x`` are preserved.
+
+    Unlike the spin null (:func:`nitrix.geometry.spin_surrogates`) this needs
+    **no coordinates**: it applies to any symmetric, non-negative adjacency /
+    weight matrix (surface *or* volume graph). Dense, via the cuSolver-robust
+    :func:`~nitrix.linalg.safe_eigh` -- whose device fallback is *eager* only,
+    so under ``jit`` on a GPU with a broken cuSolver the dense ``eigh`` cannot
+    reroute to the CPU (run eagerly, on CPU, or on a healthy-cuSolver GPU).
+
+    Parameters
+    ----------
+    A : Num[Array, 'n n']
+        Symmetric non-negative weight / adjacency matrix (symmetrised here).
+    x : Float[Array, 'n']
+        The map to generate surrogates of.
+    n_surrogates : int
+        Number of surrogate maps.
+    key : Array
+        A :func:`jax.random.key` for the sign flips.
+
+    Returns
+    -------
+    Float[Array, 'n_surrogates n']
+        One spatial-autocorrelation-matched surrogate per row.
+    """
+    A = 0.5 * (A + jnp.swapaxes(A, -1, -2))
+    row = A.mean(axis=-1, keepdims=True)
+    col = A.mean(axis=-2, keepdims=True)
+    grand = A.mean(axis=(-2, -1), keepdims=True)
+    doubly_centred = A - row - col + grand
+    _, vecs = safe_eigh(doubly_centred)  # (n,), (n, n)
+    coef = vecs.T @ (x - x.mean())  # (n,)
+    signs = jax.random.rademacher(key, (n_surrogates, x.shape[-1]))
+    return x.mean() + (signs.astype(x.dtype) * coef[None, :]) @ vecs.T
