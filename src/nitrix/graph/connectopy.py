@@ -81,11 +81,18 @@ from typing import Literal, Optional, Tuple, Union
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Num
 
+from ..linalg import matrix_exp
 from ..linalg._eigsolve import SolverSpec, eigsolve_top_k
+from ..linalg._solver import safe_eigh
 from ..sparse import ELL, SectionedELL
-from .laplacian import _is_sparse, degree_vector, symmetric_degree_vector
+from .laplacian import (
+    _is_sparse,
+    degree_vector,
+    laplacian,
+    symmetric_degree_vector,
+)
 
-__all__ = ['laplacian_eigenmap', 'diffusion_embedding']
+__all__ = ['laplacian_eigenmap', 'diffusion_embedding', 'heat_kernel']
 
 
 _Solver = Literal['auto', 'eigh', 'lobpcg', 'shift_invert']
@@ -690,3 +697,78 @@ def _scale_by_lambda_t(
         -(jnp.abs(vals) ** t),
     )
     return vecs * scale[None, :]
+
+
+def heat_kernel(
+    A: Num[Array, '... n n'],
+    t: Union[float, Float[Array, '']],
+    *,
+    normalisation: Literal[
+        'combinatorial', 'symmetric', 'random_walk'
+    ] = 'symmetric',
+    method: Literal['exp', 'eigh'] = 'exp',
+    n_squarings: int = 8,
+    taylor_order: int = 12,
+) -> Float[Array, '... n n']:
+    r"""Graph heat kernel :math:`K_t = \exp(-t L)`.
+
+    The matrix exponential of the negated, time-scaled graph Laplacian: the
+    propagator of the graph heat equation :math:`\partial_t u = -L u`, so that
+    :math:`u(t) = K_t\, u(0)`. The entry :math:`(K_t)_{ij}` is the heat at node
+    :math:`i` after time :math:`t` from a unit impulse at node :math:`j`.
+
+    *Dense only.* For the leading diffusion eigenspace on large or sparse
+    graphs use :func:`diffusion_embedding` (which never materialises the
+    kernel); to apply an approximate heat *step* to a signal on a triangle
+    mesh -- the Laplace--Beltrami analogue -- use
+    :func:`nitrix.geometry.surface_smooth`.
+
+    Parameters
+    ----------
+    A : Num[Array, '... n n']
+        (Weighted) adjacency matrix, batched over the leading axes.
+    t : float or Float[Array, '']
+        Diffusion time :math:`t \geq 0`; may be a traced scalar. ``t = 0``
+        gives the identity.
+    normalisation : {'symmetric', 'combinatorial', 'random_walk'}, optional
+        Laplacian normalisation, forwarded to :func:`laplacian`. Default
+        ``'symmetric'``: its spectrum lies in :math:`[0, 2]`, keeping
+        :math:`\|t L\|` small so the fixed-order scaling-and-squaring of
+        ``method='exp'`` stays accurate. ``'combinatorial'`` (:math:`L = D -
+        A`) is the classical *mass-conserving* heat kernel (:math:`K_t
+        \mathbf{1} = \mathbf{1}`, i.e. rows sum to 1) but has an unbounded
+        spectrum, so pair it with ``method='eigh'`` at large :math:`t`.
+    method : {'exp', 'eigh'}, optional
+        ``'exp'`` (default) forms :math:`\exp(-t L)` by
+        :func:`nitrix.linalg.matrix_exp` (scaling-and-squaring; cuSolver-free).
+        ``'eigh'`` diagonalises the symmetric Laplacian once,
+        :math:`L = Q \Lambda Q^{\top}`, and returns
+        :math:`Q\,\exp(-t \Lambda)\,Q^{\top}` -- exact, symmetric-PSD by
+        construction, and graceful for large :math:`t L`, at the cost of a
+        dense, cuSolver-robust eigendecomposition. Requires a symmetric
+        Laplacian, so it is incompatible with ``normalisation='random_walk'``.
+    n_squarings, taylor_order : int, optional
+        Scaling-and-squaring parameters forwarded to
+        :func:`nitrix.linalg.matrix_exp` (``method='exp'`` only).
+
+    Returns
+    -------
+    Float[Array, '... n n']
+        The heat kernel :math:`K_t = \exp(-t L)`, one per batch element.
+    """
+    lap = laplacian(A, normalisation=normalisation)
+    if method == 'eigh':
+        if normalisation == 'random_walk':
+            raise ValueError(
+                "method='eigh' needs a symmetric Laplacian; it is "
+                "incompatible with normalisation='random_walk' (use "
+                "method='exp')."
+            )
+        w, vecs = safe_eigh(lap)
+        scaled = vecs * jnp.exp(-t * w)[..., None, :]
+        return scaled @ jnp.swapaxes(vecs, -1, -2)
+    if method != 'exp':
+        raise ValueError(f"method={method!r}; expected 'exp' or 'eigh'.")
+    return matrix_exp(
+        -t * lap, n_squarings=n_squarings, taylor_order=taylor_order
+    )

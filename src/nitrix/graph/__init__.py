@@ -51,6 +51,7 @@ from .community import (
 )
 from .connectopy import (
     diffusion_embedding,
+    heat_kernel,
     laplacian_eigenmap,
 )
 from .parcellation import (
@@ -74,6 +75,7 @@ __all__ = [
     'relaxed_modularity',
     # connectopy
     'diffusion_embedding',
+    'heat_kernel',
     'laplacian_eigenmap',
     # parcellation (functional boundary map -> watershed)
     'eta_squared',

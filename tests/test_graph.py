@@ -34,6 +34,7 @@ from nitrix.graph import (
     degree_vector,
     diffusion_embedding,
     girvan_newman_null,
+    heat_kernel,
     laplacian,
     laplacian_eigenmap,
     laplacian_matvec,
@@ -1298,3 +1299,66 @@ def test_diffusion_embedding_lobpcg_dense_differentiable():
 
     g = jax.grad(loss)(A)
     assert bool(jnp.all(jnp.isfinite(g)))
+
+
+# ---------------------------------------------------------------------------
+# heat_kernel
+# ---------------------------------------------------------------------------
+
+
+def test_heat_kernel_t0_is_identity():
+    A = jnp.asarray(_two_cluster_adjacency(n_per_cluster=6))
+    n = A.shape[0]
+    for method in ('exp', 'eigh'):
+        np.testing.assert_allclose(
+            heat_kernel(A, 0.0, method=method), np.eye(n), atol=1e-10
+        )
+
+
+def test_heat_kernel_exp_matches_eigh():
+    """The two methods agree on the symmetric (well-conditioned) Laplacian."""
+    A = jnp.asarray(_two_cluster_adjacency(n_per_cluster=6))
+    ke = heat_kernel(A, 0.5, method='exp')
+    kg = heat_kernel(A, 0.5, method='eigh')
+    np.testing.assert_allclose(ke, kg, atol=1e-10)
+
+
+def test_heat_kernel_eigh_matches_eigendecomposition():
+    r"""``eigh`` == :math:`Q \exp(-t\Lambda) Q^\top` of the Laplacian."""
+    A = _two_cluster_adjacency(n_per_cluster=6)
+    L = np.asarray(laplacian(jnp.asarray(A), normalisation='symmetric'))
+    w, vecs = np.linalg.eigh(L)
+    K = vecs @ np.diag(np.exp(-0.7 * w)) @ vecs.T
+    np.testing.assert_allclose(
+        heat_kernel(jnp.asarray(A), 0.7, method='eigh'), K, atol=1e-10
+    )
+
+
+def test_heat_kernel_combinatorial_conserves_mass():
+    """Combinatorial ``L @ 1 = 0`` => ``K_t @ 1 = 1`` (heat is conserved)."""
+    A = jnp.asarray(_two_cluster_adjacency(n_per_cluster=6))
+    n = A.shape[0]
+    K = heat_kernel(A, 0.7, normalisation='combinatorial', method='eigh')
+    np.testing.assert_allclose(K @ jnp.ones(n), jnp.ones(n), atol=1e-10)
+
+
+def test_heat_kernel_symmetric_and_psd():
+    A = jnp.asarray(_two_cluster_adjacency(n_per_cluster=6))
+    K = heat_kernel(A, 0.7, method='eigh')
+    np.testing.assert_allclose(K, K.T, atol=1e-10)
+    assert float(np.linalg.eigvalsh(np.asarray(K)).min()) > 0.0
+
+
+def test_heat_kernel_eigh_rejects_random_walk():
+    A = jnp.asarray(_two_cluster_adjacency(n_per_cluster=6))
+    with pytest.raises(ValueError, match='random_walk'):
+        heat_kernel(A, 0.5, normalisation='random_walk', method='eigh')
+
+
+def test_heat_kernel_differentiable():
+    A = jnp.asarray(_two_cluster_adjacency(n_per_cluster=6))
+
+    def loss(t):
+        return heat_kernel(A, t, method='exp').sum()
+
+    assert bool(jnp.isfinite(jax.grad(loss)(0.5)))
