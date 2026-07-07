@@ -159,8 +159,9 @@ fits; exact log|V| cancellation) so it is not re-raised.
 [`spatial-null-models.md`](spatial-null-models.md) — SA-preserving nulls for
 map-correspondence inference (the audit's **N2**). The **spin / Moran /
 BrainSMASH trio SHIPPED** (most-common / spectral / most-rigorous-parameterized)
-on the shared `stats.inference.spatial_null_test` seam. Remaining: the
-BrainSMASH large-mesh 'sampled' variant + spin refinements. Reference:
+on the shared `stats.inference.spatial_null_test` seam, plus the spin
+**medial-wall (NaN) + per-hemisphere** refinements. Remaining: the BrainSMASH
+large-mesh 'sampled' variant + parcel-level / bijective spin. Reference:
 `neuromaps.nulls`.
 
 **GP / HGP pre-merge review register (2026-06-22):**
