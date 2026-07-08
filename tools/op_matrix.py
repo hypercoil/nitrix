@@ -5904,6 +5904,39 @@ register(
         notes='returns HodgeDecomposition; grad reduces the exact leaf',
     )
 )
+
+from nitrix.geometry import (  # noqa: E402
+    sht_rotation_matrix,
+)
+
+register(
+    OpInfo(
+        'nitrix.geometry.sht_rotation_matrix',
+        fixture=lambda: ((random_rotation(_key(29)),), {}),
+        fn_override=lambda r: sht_rotation_matrix(r, band_limit=6),
+        diff_arg=0,
+        vmap_arg=None,
+        reducer=lambda d: jnp.sum(jnp.abs(d) ** 2),
+        invariants=('Wigner-D rotation matrices (matrix_exp of J_y)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.sht_rotate',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(30), (7, 13))
+                + 1j * jax.random.normal(_key(31), (7, 13)),
+                random_rotation(_key(29)),
+            ),
+            {},
+        ),
+        diff_arg=1,
+        vmap_arg=None,
+        reducer=lambda c: jnp.sum(jnp.abs(c) ** 2),
+        invariants=('coefficient-space rotation (Wigner-D)',),
+    )
+)
 register(
     OpInfo(
         'nitrix.geometry.sht_inverse',

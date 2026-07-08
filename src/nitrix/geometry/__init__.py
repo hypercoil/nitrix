@@ -129,6 +129,8 @@ from .harmonics import (
     sht_forward,
     sht_grid,
     sht_inverse,
+    sht_rotate,
+    sht_rotation_matrix,
 )
 from .dec import (
     HodgeDecomposition,
@@ -246,6 +248,8 @@ __all__ = [
     'sht_grid',
     'real_sht_forward',
     'real_sht_inverse',
+    'sht_rotation_matrix',
+    'sht_rotate',
     'SHTGrid',
     # discrete exterior calculus
     'mesh_gradient',

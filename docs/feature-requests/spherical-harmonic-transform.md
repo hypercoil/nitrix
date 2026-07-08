@@ -12,8 +12,12 @@
 > `real_sht_inverse` — the redundancy-free real-SH basis, e.g. dMRI FOD) and the
 > **Driscoll–Healy equiangular grid** (`grid='driscoll_healy'` — the uniform
 > sampling SH-equivariant spherical CNNs use) are now shipped too (2026-07-08),
-> both round-tripping to machine precision. **Remaining follow-up:**
-> `sht_rotation_matrix` (Wigner-D). Provenance:
+> both round-tripping to machine precision. **Wigner-D coefficient rotation**
+> (`sht_rotation_matrix` / `sht_rotate` — rotate SH coefficients by an SO(3)
+> rotation, the small-d block as a matrix exponential of the angular-momentum
+> generator, no recurrence; gimbal-lock handled) is now shipped too (2026-07-08),
+> validated against direct field rotation (~1e-13), unitarity, and the group
+> homomorphism `D(R2 R1) = D(R2) D(R1)`. **The suite is complete.** Provenance:
 > `docs/feature-requests catalogue §12.9`.
 
 **What.** Classical spherical-harmonic synthesis and analysis at arbitrary

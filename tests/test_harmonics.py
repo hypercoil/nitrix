@@ -22,6 +22,8 @@ from nitrix.geometry import (  # noqa: E402
     sht_forward,
     sht_grid,
     sht_inverse,
+    sht_rotate,
+    sht_rotation_matrix,
 )
 
 
@@ -228,3 +230,90 @@ def test_dh_real_round_trip():
 def test_invalid_grid_raises():
     with pytest.raises(ValueError):
         sht_grid(4, grid='healpix')
+
+
+# --- Wigner-D coefficient rotation -------------------------------------------
+
+
+def _rotation(seed):
+    # a rotation matrix via a QR of a random matrix (det +1)
+    rng = np.random.default_rng(seed)
+    q, r = np.linalg.qr(rng.standard_normal((3, 3)))
+    q = q * np.sign(np.diag(r))
+    if np.linalg.det(q) < 0:
+        q[:, 0] = -q[:, 0]
+    return jnp.asarray(q)
+
+
+def test_rotate_by_identity_is_a_no_op():
+    L = 8
+    c = _random_bandlimited_coeffs(L)
+    np.testing.assert_array_equal(
+        np.asarray(sht_rotate(c, jnp.eye(3))), np.asarray(c)
+    )
+
+
+def test_rotation_preserves_per_degree_norm():
+    L = 8
+    c = _random_bandlimited_coeffs(L)
+    cr = sht_rotate(c, _rotation(1))
+    for ell in range(L + 1):
+        got = float(jnp.sum(jnp.abs(cr[ell]) ** 2))
+        want = float(jnp.sum(jnp.abs(c[ell]) ** 2))
+        np.testing.assert_allclose(got, want, atol=1e-10)
+
+
+def test_rotation_composition():
+    L = 6
+    c = _random_bandlimited_coeffs(L)
+    r1, r2 = _rotation(1), _rotation(2)
+    lhs = sht_rotate(sht_rotate(c, r1), r2)
+    rhs = sht_rotate(c, r2 @ r1)
+    np.testing.assert_allclose(np.asarray(lhs), np.asarray(rhs), atol=1e-10)
+
+
+def test_rotation_matches_direct_field_rotation():
+    sp = pytest.importorskip('scipy.special')
+    L = 8
+    c = np.asarray(_random_bandlimited_coeffs(L))
+    r = _rotation(3)
+    c_rot = sht_rotate(jnp.asarray(c), r)
+    field = np.asarray(sht_inverse(c_rot))
+    # direct: f_rot(x) = f(R^{-1} x) = sum c_lm Y_lm(R^{-1} x) at the grid points
+    g = sht_grid(L)
+    th, ph = np.meshgrid(
+        np.asarray(g.colatitude), np.asarray(g.longitude), indexing='ij'
+    )
+    xyz = np.stack(
+        [np.sin(th) * np.cos(ph), np.sin(th) * np.sin(ph), np.cos(th)], -1
+    )
+    xr = xyz @ np.asarray(r)  # R^{-1} x  (rows)
+    thr = np.arccos(np.clip(xr[..., 2], -1, 1))
+    phr = np.arctan2(xr[..., 1], xr[..., 0])
+    direct = np.zeros_like(th, complex)
+    for ell in range(L + 1):
+        for m in range(-ell, ell + 1):
+            direct += c[ell, m + L] * sp.sph_harm_y(ell, m, thr, phr)
+    np.testing.assert_allclose(field, direct, atol=1e-9)
+
+
+def test_rotation_matrix_is_block_diagonal():
+    L = 5
+    d = sht_rotation_matrix(_rotation(4), band_limit=L)
+    assert d.shape == (L + 1, 2 * L + 1, 2 * L + 1)
+    for ell in range(L + 1):
+        block = np.asarray(d[ell])
+        # entries outside the [-ell, ell] block are zero
+        mask = np.ones((2 * L + 1, 2 * L + 1), bool)
+        mask[L - ell : L + ell + 1, L - ell : L + ell + 1] = False
+        assert np.max(np.abs(block[mask]), initial=0.0) < 1e-12
+
+
+def test_rotation_jit_and_grad():
+    L = 6
+    c = _random_bandlimited_coeffs(L)
+    r = _rotation(5)
+    d = jax.jit(lambda r: sht_rotation_matrix(r, band_limit=L))(r)
+    assert bool(jnp.all(jnp.isfinite(jnp.abs(d))))
+    g = jax.grad(lambda r: jnp.sum(jnp.abs(sht_rotate(c, r)) ** 2))(r)
+    assert bool(jnp.all(jnp.isfinite(g)))

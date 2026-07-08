@@ -40,11 +40,9 @@ the Gauss--Legendre grid (default) or the **Driscoll--Healy** equiangular grid
 (``grid='driscoll_healy'``, the uniform sampling SH-equivariant spherical CNNs
 use).
 
-Notes
------
-The Wigner-D rotation of coefficients (``sht_rotation_matrix``) is a separate
-follow-up; this module ships the complex + real analysis / synthesis pairs and
-the two grids.
+Coefficients are rotated in place by a 3-D rotation via the Wigner-D matrices
+(:func:`sht_rotation_matrix` / :func:`sht_rotate`), computed as a matrix
+exponential of the angular-momentum generator.
 
 References
 ----------
@@ -61,6 +59,8 @@ import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array, Complex, Float
 
+from ..linalg import matrix_exp
+
 Grid = Literal['gauss', 'driscoll_healy']
 
 __all__ = [
@@ -70,6 +70,8 @@ __all__ = [
     'sht_forward',
     'sht_grid',
     'sht_inverse',
+    'sht_rotate',
+    'sht_rotation_matrix',
 ]
 
 
@@ -368,3 +370,113 @@ def real_sht_inverse(
         The real field on the sampling grid.
     """
     return jnp.real(sht_inverse(_real_to_complex(coeffs), grid=grid))
+
+
+def _wigner_generator(degree: int) -> np.ndarray:
+    """The real antisymmetric angular-momentum-y generator :math:`-i J_y`.
+
+    A ``(2l+1, 2l+1)`` tridiagonal matrix (rows/cols index :math:`m = -l..l`)
+    whose exponential :math:`\\exp(\\beta\\,A)` is the Wigner (small-)d matrix
+    :math:`d^l(\\beta)`. Host-side constant of the degree only.
+    """
+    dim = 2 * degree + 1
+    a = np.zeros((dim, dim))
+    for m in range(-degree, degree):
+        c = np.sqrt(degree * (degree + 1) - m * (m + 1)) / 2.0
+        a[(m + 1) + degree, m + degree] = -c
+        a[m + degree, (m + 1) + degree] = c
+    return a
+
+
+def sht_rotation_matrix(
+    rotation: Float[Array, '3 3'],
+    *,
+    band_limit: int,
+) -> Complex[Array, 'l_dim m_dim m_dim']:
+    r"""Wigner-D matrices rotating spherical-harmonic coefficients.
+
+    Builds the block-diagonal Wigner-D representation of a 3-D rotation ``R`` in
+    the spherical-harmonic basis, up to degree ``band_limit``. Rotating a field
+    by ``R`` mixes only the coefficients within each degree :math:`\ell`:
+    :math:`c'_{\ell m} = \sum_{m'} D^\ell_{m m'}(R)\, c_{\ell m'}`
+    (:func:`sht_rotate`).
+
+    The Wigner-d part :math:`d^\ell(\beta)` is computed as the matrix exponential
+    :math:`\exp(\beta A^\ell)` of the (real, antisymmetric) angular-momentum-y
+    generator -- pure matmul (:func:`~nitrix.linalg.matrix_exp`), no recurrence --
+    with the ZYZ Euler angles read off ``R``; the azimuthal phases
+    :math:`e^{-i m \alpha}`, :math:`e^{-i m' \gamma}` complete
+    :math:`D^\ell_{m m'} = e^{-i m \alpha}\, d^\ell_{m m'}(\beta)\,
+    e^{-i m' \gamma}`. Differentiable in ``R``.
+
+    Parameters
+    ----------
+    rotation : Float[Array, '3 3']
+        A rotation matrix :math:`R \in \mathrm{SO}(3)`.
+    band_limit : int
+        Maximum degree :math:`L`.
+
+    Returns
+    -------
+    Complex[Array, 'l_dim m_dim m_dim']
+        The stacked blocks ``(L+1, 2L+1, 2L+1)``, indexed
+        ``[ell, m + L, m' + L]`` and zero-padded outside the degree-``ell`` block.
+    """
+    band = band_limit
+    beta = jnp.arccos(jnp.clip(rotation[2, 2], -1.0, 1.0))
+    # Gimbal lock at beta ~ 0 / pi: the ZYZ split of alpha and gamma is
+    # degenerate (only their combination is defined and the z-column carries no
+    # azimuth), so recover the combined z-rotation from the top-left block.
+    sin_beta = jnp.sqrt(jnp.clip(1.0 - rotation[2, 2] ** 2, 0.0, 1.0))
+    generic = sin_beta > 1e-6
+    alpha = jnp.where(
+        generic,
+        jnp.arctan2(rotation[1, 2], rotation[0, 2]),
+        jnp.arctan2(rotation[1, 0], rotation[0, 0]),
+    )
+    gamma = jnp.where(
+        generic, jnp.arctan2(rotation[2, 1], -rotation[2, 0]), 0.0
+    )
+
+    blocks = []
+    for ell in range(band + 1):
+        gen = jnp.asarray(_wigner_generator(ell), dtype=beta.dtype)
+        d = matrix_exp(beta * gen)  # (2l+1, 2l+1) real Wigner-d
+        m = jnp.arange(-ell, ell + 1)
+        phase = jnp.exp(-1j * m * alpha)[:, None] * jnp.exp(-1j * m * gamma)
+        block = d * phase
+        padded = jnp.zeros((2 * band + 1, 2 * band + 1), dtype=block.dtype)
+        padded = padded.at[
+            band - ell : band + ell + 1, band - ell : band + ell + 1
+        ].set(block)
+        blocks.append(padded)
+    return jnp.stack(blocks)
+
+
+def sht_rotate(
+    coeffs: Complex[Array, '... l_dim m_dim'],
+    rotation: Float[Array, '3 3'],
+) -> Complex[Array, '... l_dim m_dim']:
+    r"""Rotate spherical-harmonic coefficients by a 3-D rotation.
+
+    Applies the Wigner-D representation (:func:`sht_rotation_matrix`) of
+    ``rotation`` to ``coeffs``, degree by degree
+    (:math:`c'_{\ell m} = \sum_{m'} D^\ell_{m m'}\, c_{\ell m'}`) -- the exact
+    coefficient-space rotation, equivalent to resampling the synthesised field on
+    the rotated sphere but without any interpolation loss.
+
+    Parameters
+    ----------
+    coeffs : Complex[Array, '... l_dim m_dim']
+        Coefficients ``(..., L+1, 2L+1)`` (as from :func:`sht_forward`).
+    rotation : Float[Array, '3 3']
+        A rotation matrix :math:`R \in \mathrm{SO}(3)`.
+
+    Returns
+    -------
+    Complex[Array, '... l_dim m_dim']
+        The rotated coefficients, same shape as ``coeffs``.
+    """
+    band_limit = coeffs.shape[-2] - 1
+    wigner = sht_rotation_matrix(rotation, band_limit=band_limit)
+    return jnp.einsum('lmk,...lk->...lm', wigner, coeffs)
