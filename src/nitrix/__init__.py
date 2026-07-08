@@ -43,6 +43,8 @@ Top-level subpackages (full surface in each ``__init__.py``):
 - ``nn``       -- functional neural-network forward-block kernels
                   (scaled_dot_product_attention; selective_scan and fused
                   norms planned) behind the pallas-cuda / jax dispatch.
+- ``transport`` -- entropic optimal transport (Sinkhorn / Wasserstein /
+                  barycentric map), composed over the ``LOG`` semiring.
 
 Library-wide reproducibility (the ``driver`` axis -- see
 ``docs/feature-requests/reproducible-dispatch.md``): where an op has more than

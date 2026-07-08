@@ -1,9 +1,17 @@
 # Sinkhorn / optimal transport — `nitrix.transport`
 
-> **Status (2026-06-02): not started.** Brainstorm candidate; promotion
-> gated by the §13 acceptance protocol. A new top-level subpackage — §14
-> requires a clear substrate-composition story before one is added; the LOG
-> semiring supplies it (see below). Provenance: `docs/feature-requests catalogue §12.4`.
+> **Status (2026-07-08): SHIPPED (`nitrix.transport`).** `sinkhorn` (entropic
+> OT plan + dual potentials), `wasserstein_distance` (the plan's transport cost),
+> `barycentric_map` (the OT pushforward map). The new top-level subpackage clears
+> the §14 bar via the promised substrate-composition story: each Sinkhorn
+> half-step is a log-domain softmin against the cost, computed as a **`LOG`
+> semiring matmul** (`semiring_matmul`) — no new kernel, inheriting the semiring's
+> streaming reduction; the loop is fixed-iteration (differentiable) and stays in
+> the log domain (stable for small `epsilon`). Verified: marginals recovered,
+> plan non-negative, entropic cost approaches the exact linear-assignment OT as
+> `epsilon → 0` (<5% at `epsilon=0.002`), self-transport ~0; jit/grad clean.
+> Transport *distances* are numerical primitives; a transport *loss* stays
+> downstream. Provenance: `docs/feature-requests catalogue §12.4`.
 
 **What.** Entropic optimal transport via Sinkhorn iteration — the flagship
 use case for the `LOG` semiring.

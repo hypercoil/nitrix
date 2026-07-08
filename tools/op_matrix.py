@@ -5843,6 +5843,48 @@ register(
 )
 
 
+def _ot_fixture():
+    cost = jax.random.uniform(_key(24), (6, 8))
+    return (cost, jnp.full((6,), 1.0 / 6), jnp.full((8,), 1.0 / 8)), {}
+
+
+register(
+    OpInfo(
+        'nitrix.transport.sinkhorn',
+        fixture=_ot_fixture,
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('entropic OT via LOG-semiring Sinkhorn',),
+        notes='returns SinkhornResult; grad reduces the plan leaf',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.transport.wasserstein_distance',
+        fixture=_ot_fixture,
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('entropic optimal transport cost',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.transport.barycentric_map',
+        fixture=lambda: (
+            (
+                jax.random.uniform(_key(25), (6, 8)),
+                jnp.full((6,), 1.0 / 6),
+                jax.random.normal(_key(26), (8, 2)),
+            ),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('barycentric projection (OT pushforward map)',),
+    )
+)
+
+
 # ---------------------------------------------------------------------------
 # Host snapshot
 # ---------------------------------------------------------------------------
