@@ -25,8 +25,9 @@ The longitude integral is a fast Fourier transform; the colatitude integral is a
 matmul against the fully-normalised associated Legendre functions
 :math:`\bar P_\ell^m` evaluated at the Gauss--Legendre nodes. Those nodes,
 weights and the Legendre table depend only on the (static) band-limit, so they
-are precomputed once (host-side) as a fixed plan and the data path is a pure
-FFT + contraction.
+are assembled once (host-side) by :func:`sht_plan` and reused across transforms;
+the data path -- :func:`sht_forward` / :func:`sht_inverse` given that plan -- is
+a pure FFT + contraction that runs under :func:`jax.jit`.
 
 Coefficient layout: coefficients are returned as ``(..., L+1, 2L+1)``, indexed
 ``[..., ell, m + L]`` for :math:`m \in [-\ell, \ell]`; entries with
@@ -57,7 +58,7 @@ from typing import Literal, NamedTuple, Tuple
 
 import jax.numpy as jnp
 import numpy as np
-from jaxtyping import Array, Complex, Float
+from jaxtyping import Array, Complex, Float, Int
 
 from ..linalg import matrix_exp
 
@@ -65,11 +66,13 @@ Grid = Literal['gauss', 'driscoll_healy']
 
 __all__ = [
     'SHTGrid',
+    'SHTPlan',
     'real_sht_forward',
     'real_sht_inverse',
     'sht_forward',
     'sht_grid',
     'sht_inverse',
+    'sht_plan',
     'sht_rotate',
     'sht_rotation_matrix',
 ]
@@ -128,11 +131,38 @@ def _fnalp(x: np.ndarray, band_limit: int) -> np.ndarray:
     return table
 
 
-class _Plan(NamedTuple):
-    weight: Array  # (n_lat,) Gauss-Legendre weights
-    legendre: Array  # (L+1, 2L+1, n_lat) associated Legendre table
-    m_to_fft: Array  # (2L+1,) index of order m in the FFT spectrum
-    n_lon: int
+class SHTPlan(NamedTuple):
+    r"""The fixed transform plan for a band-limit and grid (the fit state).
+
+    Everything the forward / inverse transforms need that depends only on the
+    (static) band-limit and grid choice -- the sampling nodes, the quadrature
+    weights, the fully-normalised associated Legendre table and the FFT-order
+    map -- assembled once by :func:`sht_plan`. Passing it to :func:`sht_forward`
+    / :func:`sht_inverse` runs the transform under :func:`jax.jit` without
+    rebuilding the :math:`O(L^2)` Legendre table. A superset of
+    :class:`SHTGrid`: it also carries the sampling grid a field is evaluated on.
+
+    Attributes
+    ----------
+    colatitude : Float[Array, 'n_lat']
+        The colatitudes :math:`\theta \in [0, \pi]` (as :class:`SHTGrid`).
+    longitude : Float[Array, 'n_lon']
+        The equiangular longitudes :math:`\phi \in [0, 2\pi)`; its length is the
+        FFT width ``n_lon``.
+    weight : Float[Array, 'n_lat']
+        The latitude-quadrature weights.
+    legendre : Float[Array, 'l_dim m_dim n_lat']
+        The fully-normalised associated Legendre table
+        :math:`\bar P_\ell^m(\cos\theta_j)`, shape ``(L+1, 2L+1, n_lat)``.
+    m_to_fft : Int[Array, 'm_dim']
+        The index of order :math:`m` in the FFT spectrum, shape ``(2L+1,)``.
+    """
+
+    colatitude: Float[Array, 'n_lat']
+    longitude: Float[Array, 'n_lon']
+    weight: Float[Array, 'n_lat']
+    legendre: Float[Array, 'l_dim m_dim n_lat']
+    m_to_fft: Int[Array, 'm_dim']
 
 
 def _dh_nodes(band_limit: int) -> Tuple[np.ndarray, np.ndarray, int]:
@@ -155,25 +185,47 @@ def _dh_nodes(band_limit: int) -> Tuple[np.ndarray, np.ndarray, int]:
     return np.cos(theta), weight, 2 * b
 
 
-def _plan(band_limit: int, grid: str) -> _Plan:
-    """Precompute the sampling nodes, weights and Legendre table for a grid."""
+def _nodes(band_limit: int, grid: str) -> Tuple[np.ndarray, np.ndarray, int]:
+    """Colatitude cosine-nodes, quadrature weights and longitude count."""
     if grid == 'gauss':
         x, w = np.polynomial.legendre.leggauss(band_limit + 1)
-        n_lon = 2 * band_limit + 1
-    elif grid == 'driscoll_healy':
-        x, w, n_lon = _dh_nodes(band_limit)
-    else:
-        raise ValueError(
-            f"grid must be 'gauss'/'driscoll_healy'; got {grid!r}."
-        )
+        return x, w, 2 * band_limit + 1
+    if grid == 'driscoll_healy':
+        return _dh_nodes(band_limit)
+    raise ValueError(f"grid must be 'gauss'/'driscoll_healy'; got {grid!r}.")
+
+
+def sht_plan(band_limit: int, *, grid: Grid = 'gauss') -> SHTPlan:
+    r"""Build the transform plan (the fit state) for a band-limit and grid.
+
+    The construction half of the transform's fit/apply pair: precomputes the
+    nodes, quadrature weights, Legendre table and FFT-order map once
+    (host-side) so that :func:`sht_forward` / :func:`sht_inverse` -- which take
+    this plan -- run under :func:`jax.jit` and reuse it across many fields.
+
+    Parameters
+    ----------
+    band_limit : int
+        Maximum spherical-harmonic degree :math:`L`.
+    grid : {'gauss', 'driscoll_healy'}, optional
+        The sampling grid (see :func:`sht_grid`). Default ``'gauss'``.
+
+    Returns
+    -------
+    SHTPlan
+        The reusable transform plan.
+    """
+    x, w, n_lon = _nodes(band_limit, grid)
     table = _fnalp(x, band_limit)
     orders = np.arange(-band_limit, band_limit + 1)
     m_to_fft = np.where(orders >= 0, orders, orders + n_lon)
-    return _Plan(
+    lon = 2.0 * np.pi * np.arange(n_lon) / n_lon
+    return SHTPlan(
+        colatitude=jnp.asarray(np.arccos(x)),
+        longitude=jnp.asarray(lon),
         weight=jnp.asarray(w),
         legendre=jnp.asarray(table),
         m_to_fft=jnp.asarray(m_to_fft),
-        n_lon=n_lon,
     )
 
 
@@ -198,15 +250,7 @@ def sht_grid(band_limit: int, *, grid: Grid = 'gauss') -> SHTGrid:
         The colatitudes and longitudes (``L+1`` by ``2L+1`` for ``'gauss'``,
         ``2(L+1)`` by ``2(L+1)`` for ``'driscoll_healy'``).
     """
-    if grid == 'gauss':
-        x, _ = np.polynomial.legendre.leggauss(band_limit + 1)
-        n_lon = 2 * band_limit + 1
-    elif grid == 'driscoll_healy':
-        x, _, n_lon = _dh_nodes(band_limit)
-    else:
-        raise ValueError(
-            f"grid must be 'gauss'/'driscoll_healy'; got {grid!r}."
-        )
+    x, _, n_lon = _nodes(band_limit, grid)
     lon = 2.0 * np.pi * np.arange(n_lon) / n_lon
     return SHTGrid(
         colatitude=jnp.asarray(np.arccos(x)), longitude=jnp.asarray(lon)
@@ -215,26 +259,23 @@ def sht_grid(band_limit: int, *, grid: Grid = 'gauss') -> SHTGrid:
 
 def sht_forward(
     f: Float[Array, '... n_lat n_lon'],
-    *,
-    band_limit: int,
-    grid: Grid = 'gauss',
+    plan: SHTPlan,
 ) -> Complex[Array, '... l_dim m_dim']:
     r"""Forward spherical harmonic transform (analysis).
 
-    Projects a field sampled on the :func:`sht_grid` onto the orthonormal
-    spherical harmonics up to degree ``band_limit``.
+    Projects a field sampled on the plan's grid (:func:`sht_grid` /
+    :func:`sht_plan`) onto the orthonormal spherical harmonics. The apply half
+    of the transform's fit/apply pair: as ``plan`` is a plain-array pytree, this
+    call is fully jittable and differentiable with respect to ``f``.
 
     Parameters
     ----------
     f : Float[Array, '... n_lat n_lon']
-        The field on the Gauss--Legendre grid (``L + 1`` colatitudes by
-        ``2L + 1`` longitudes), batching over leading dimensions. Real or
-        complex.
-    band_limit : int
-        Maximum degree :math:`L` (a static argument -- it sets the grid).
-    grid : {'gauss', 'driscoll_healy'}, optional
-        The sampling grid ``f`` lives on (must match :func:`sht_grid`). Default
-        ``'gauss'``.
+        The field on the plan's grid (``n_lat`` colatitudes by ``n_lon``
+        longitudes), batching over leading dimensions. Real or complex.
+    plan : SHTPlan
+        The transform plan from :func:`sht_plan`; it sets the band-limit
+        :math:`L` and the sampling grid.
 
     Returns
     -------
@@ -242,10 +283,10 @@ def sht_forward(
         Coefficients ``(..., L+1, 2L+1)``, indexed ``[..., ell, m + L]``; zero
         where :math:`|m| > \ell`.
     """
-    plan = _plan(band_limit, grid)
+    n_lon = plan.longitude.shape[0]
     f_hat = jnp.fft.fft(f, axis=-1)  # (..., n_lat, n_lon)
     f_hat_m = f_hat[..., plan.m_to_fft]  # reorder to m in [-L, L]
-    dphi = 2.0 * np.pi / plan.n_lon
+    dphi = 2.0 * np.pi / n_lon
     coeffs = dphi * jnp.einsum(
         'j,lmj,...jm->...lm', plan.weight, plan.legendre, f_hat_m
     )
@@ -254,21 +295,21 @@ def sht_forward(
 
 def sht_inverse(
     coeffs: Complex[Array, '... l_dim m_dim'],
-    *,
-    grid: Grid = 'gauss',
+    plan: SHTPlan,
 ) -> Complex[Array, '... n_lat n_lon']:
     r"""Inverse spherical harmonic transform (synthesis).
 
-    Reconstructs the field on the :func:`sht_grid` from its coefficients. The
-    band-limit :math:`L` is inferred from the coefficient shape
-    (``coeffs.shape[-2] == L + 1``).
+    Reconstructs the field on the plan's grid from its coefficients. The apply
+    half of the transform's fit/apply pair; jittable and differentiable with
+    respect to ``coeffs``.
 
     Parameters
     ----------
     coeffs : Complex[Array, '... l_dim m_dim']
         Coefficients ``(..., L+1, 2L+1)`` as returned by :func:`sht_forward`.
-    grid : {'gauss', 'driscoll_healy'}, optional
-        The sampling grid to synthesise on. Default ``'gauss'``.
+    plan : SHTPlan
+        The transform plan from :func:`sht_plan` (its band-limit must match
+        ``coeffs``).
 
     Returns
     -------
@@ -277,15 +318,14 @@ def sht_inverse(
         coefficients carry the Hermitian symmetry
         :math:`f_{\ell,-m} = (-1)^m \overline{f_{\ell m}}` of a real field.
     """
-    band_limit = coeffs.shape[-2] - 1
-    plan = _plan(band_limit, grid)
+    n_lon = plan.longitude.shape[0]
     g_m = jnp.einsum('...lm,lmj->...jm', coeffs, plan.legendre)
     spectrum = (
-        jnp.zeros(g_m.shape[:-1] + (plan.n_lon,), dtype=g_m.dtype)
+        jnp.zeros(g_m.shape[:-1] + (n_lon,), dtype=g_m.dtype)
         .at[..., plan.m_to_fft]
         .set(g_m)
     )
-    field = plan.n_lon * jnp.fft.ifft(spectrum, axis=-1)
+    field = n_lon * jnp.fft.ifft(spectrum, axis=-1)
     return field
 
 
@@ -320,9 +360,7 @@ def _real_to_complex(
 
 def real_sht_forward(
     f: Float[Array, '... n_lat n_lon'],
-    *,
-    band_limit: int,
-    grid: Grid = 'gauss',
+    plan: SHTPlan,
 ) -> Float[Array, '... l_dim m_dim']:
     r"""Forward transform onto the **real** spherical harmonics.
 
@@ -336,40 +374,41 @@ def real_sht_forward(
     Parameters
     ----------
     f : Float[Array, '... n_lat n_lon']
-        The real field on the :func:`sht_grid`.
-    band_limit : int
-        Maximum degree :math:`L`.
+        The real field on the plan's grid.
+    plan : SHTPlan
+        The transform plan from :func:`sht_plan`.
 
     Returns
     -------
     Float[Array, '... l_dim m_dim']
         Real coefficients ``(..., L+1, 2L+1)``.
     """
-    return _complex_to_real(sht_forward(f, band_limit=band_limit, grid=grid))
+    return _complex_to_real(sht_forward(f, plan))
 
 
 def real_sht_inverse(
     coeffs: Float[Array, '... l_dim m_dim'],
-    *,
-    grid: Grid = 'gauss',
+    plan: SHTPlan,
 ) -> Float[Array, '... n_lat n_lon']:
     r"""Inverse transform from **real** spherical-harmonic coefficients.
 
     The real-valued analogue of :func:`sht_inverse`; reconstructs the real field
-    on the :func:`sht_grid` from real coefficients as returned by
+    on the plan's grid from real coefficients as returned by
     :func:`real_sht_forward`.
 
     Parameters
     ----------
     coeffs : Float[Array, '... l_dim m_dim']
         Real coefficients ``(..., L+1, 2L+1)``.
+    plan : SHTPlan
+        The transform plan from :func:`sht_plan`.
 
     Returns
     -------
     Float[Array, '... n_lat n_lon']
         The real field on the sampling grid.
     """
-    return jnp.real(sht_inverse(_real_to_complex(coeffs), grid=grid))
+    return jnp.real(sht_inverse(_real_to_complex(coeffs), plan))
 
 
 def _wigner_generator(degree: int) -> np.ndarray:

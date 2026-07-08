@@ -124,11 +124,13 @@ from .sphere_grid import (
 )
 from .harmonics import (
     SHTGrid,
+    SHTPlan,
     real_sht_forward,
     real_sht_inverse,
     sht_forward,
     sht_grid,
     sht_inverse,
+    sht_plan,
     sht_rotate,
     sht_rotation_matrix,
 )
@@ -249,6 +251,7 @@ __all__ = [
     'sphere_grid_pad_2d',
     'sphere_grid_unpad_2d',
     # spherical harmonic transform
+    'sht_plan',
     'sht_forward',
     'sht_inverse',
     'sht_grid',
@@ -257,6 +260,7 @@ __all__ = [
     'sht_rotation_matrix',
     'sht_rotate',
     'SHTGrid',
+    'SHTPlan',
     # discrete exterior calculus
     'mesh_gradient',
     'mesh_curl',

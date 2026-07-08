@@ -5917,13 +5917,21 @@ register(
     )
 )
 
-from nitrix.geometry import real_sht_forward, sht_forward  # noqa: E402
+from nitrix.geometry import (  # noqa: E402
+    real_sht_forward,
+    real_sht_inverse,
+    sht_forward,
+    sht_inverse,
+    sht_plan,
+)
+
+_SHT_PLAN8 = sht_plan(8)
 
 register(
     OpInfo(
         'nitrix.geometry.sht_forward',
         fixture=lambda: ((jax.random.normal(_key(21), (9, 17)),), {}),
-        fn_override=lambda f: sht_forward(f, band_limit=8),
+        fn_override=lambda f: sht_forward(f, _SHT_PLAN8),
         diff_arg=0,
         vmap_arg=None,
         reducer=lambda c: jnp.sum(jnp.abs(c) ** 2),
@@ -5935,7 +5943,7 @@ register(
     OpInfo(
         'nitrix.geometry.real_sht_forward',
         fixture=lambda: ((jax.random.normal(_key(21), (9, 17)),), {}),
-        fn_override=lambda f: real_sht_forward(f, band_limit=8),
+        fn_override=lambda f: real_sht_forward(f, _SHT_PLAN8),
         diff_arg=0,
         vmap_arg=None,
         invariants=('real spherical harmonic analysis',),
@@ -5945,6 +5953,7 @@ register(
     OpInfo(
         'nitrix.geometry.real_sht_inverse',
         fixture=lambda: ((jax.random.normal(_key(27), (9, 17)),), {}),
+        fn_override=lambda c: real_sht_inverse(c, _SHT_PLAN8),
         diff_arg=0,
         vmap_arg=None,
         invariants=('real spherical harmonic synthesis',),
@@ -6029,6 +6038,7 @@ register(
             ),
             {},
         ),
+        fn_override=lambda c: sht_inverse(c, _SHT_PLAN8),
         diff_arg=None,
         vmap_arg=None,
         invariants=('spherical harmonic synthesis',),
