@@ -208,6 +208,13 @@ EXCLUDE: frozenset[str] = frozenset(
         'geometry.find_self_intersections',
         'geometry.remove_self_intersections',
         'geometry.is_bijective_sphere_map',
+        # -- Host-side DEC operator constructors: build an ELL from the mesh
+        #    topology (combinatorial, no array input to benchmark); the cataloged
+        #    hodge_decompose is the array op that applies them. ------------------
+        'geometry.mesh_gradient',
+        'geometry.mesh_curl',
+        'geometry.mesh_divergence',
+        'geometry.mesh_star_k',
         # -- Priority-flood watershed: inherently serial, host-orchestrated -------
         #    segmentation over mesh adjacency (host-side -> JAX array pattern).
         'graph.mesh_watershed',

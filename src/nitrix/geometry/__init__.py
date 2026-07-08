@@ -32,6 +32,10 @@ Submodules
   :func:`sht_inverse` / :func:`sht_grid`): exact analysis / synthesis on a
   Gauss--Legendre grid, FFT over longitude and an associated-Legendre matmul
   over colatitude.
+- ``dec`` -- discrete exterior calculus on triangle meshes: the exterior
+  derivatives :func:`mesh_gradient` (:math:`d_0`) / :func:`mesh_curl`
+  (:math:`d_1`), the Hodge stars :func:`mesh_star_k`, the divergence
+  :func:`mesh_divergence`, and the Helmholtz--Hodge :func:`hodge_decompose`.
 - ``coords`` -- coordinate utilities: :func:`center_of_mass_points`,
   the displacement-from-reference helpers, and
   :func:`compactness_penalty`.
@@ -125,6 +129,14 @@ from .harmonics import (
     sht_forward,
     sht_grid,
     sht_inverse,
+)
+from .dec import (
+    HodgeDecomposition,
+    hodge_decompose,
+    mesh_curl,
+    mesh_divergence,
+    mesh_gradient,
+    mesh_star_k,
 )
 from .coords import (
     center_of_mass_points,
@@ -235,6 +247,13 @@ __all__ = [
     'real_sht_forward',
     'real_sht_inverse',
     'SHTGrid',
+    # discrete exterior calculus
+    'mesh_gradient',
+    'mesh_curl',
+    'mesh_divergence',
+    'mesh_star_k',
+    'hodge_decompose',
+    'HodgeDecomposition',
     # coords
     'center_of_mass_points',
     'compactness_penalty',

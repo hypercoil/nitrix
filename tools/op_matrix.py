@@ -5886,6 +5886,24 @@ register(
         invariants=('real spherical harmonic synthesis',),
     )
 )
+
+from nitrix.geometry import hodge_decompose, mesh_gradient  # noqa: E402
+from nitrix.sparse import icosphere as _icosphere  # noqa: E402
+
+_HODGE_MESH = _icosphere(1)
+_HODGE_E = mesh_gradient(_HODGE_MESH).n_rows
+
+register(
+    OpInfo(
+        'nitrix.geometry.hodge_decompose',
+        fixture=lambda: ((jax.random.normal(_key(28), (_HODGE_E,)),), {}),
+        fn_override=lambda omega: hodge_decompose(omega, _HODGE_MESH),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('Helmholtz-Hodge decomposition (matrix-free cg)',),
+        notes='returns HodgeDecomposition; grad reduces the exact leaf',
+    )
+)
 register(
     OpInfo(
         'nitrix.geometry.sht_inverse',

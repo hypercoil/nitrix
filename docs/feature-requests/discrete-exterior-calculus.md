@@ -1,8 +1,14 @@
 # Discrete differential geometry — `nitrix.geometry.dec`
 
-> **Status (2026-06-02): partial — `mesh_cotangent_laplacian` is shipped;
-> the full DEC operator stack is not.** Brainstorm candidate; promotion
-> gated by the §13 acceptance protocol. Provenance:
+> **Status (2026-07-08): SHIPPED (`nitrix.geometry.dec`).** The full DEC
+> operator stack on triangle meshes: `mesh_gradient` (d_0) / `mesh_curl` (d_1)
+> exterior derivatives, `mesh_star_k` (Hodge stars 0/1/2), `mesh_divergence`
+> (codifferential), and `hodge_decompose` (Helmholtz–Hodge, two matrix-free
+> `cg` Poisson solves). Every operator an `ELL`, built host-side like the
+> cotangent Laplacian. Validated against the DEC identities: `d_1 d_0 == 0`
+> exactly, `d_0^T star_1 d_0 == mesh_cotangent_laplacian`, and the Hodge parts
+> sum + are star_1-orthogonal + the sphere harmonic part vanishes (~1e-8);
+> `hodge_decompose` is differentiable in the 1-form. Provenance:
 > `docs/feature-requests catalogue §12.5`.
 
 **What.** Generalise the cotangent Laplacian to the full discrete-exterior-
