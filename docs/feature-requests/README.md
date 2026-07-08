@@ -311,7 +311,7 @@ live code: *not started* / *partial* (some substrate shipped).
 | 12.15 | [surface-resample-adap-bary](resolved/surface-resample-adap-bary.md) | `geometry.sphere.resample` | M | ✅ shipped (`surface_resample` `adap_bary_area` + `barycentric`) |
 | 12.16 | [surface-boundary-map](resolved/surface-boundary-map.md) | `graph.parcellation.boundary` | S | ✅ shipped (`surface_boundary_map`) |
 | 12.17 | [mesh-watershed](resolved/mesh-watershed.md) | `graph.parcellation.watershed` | M | ✅ shipped (`mesh_watershed`) |
-| 12.18 | [clustering-primitives](clustering-primitives.md) | `numerics.cluster` | S/M | partial (`kmeans` shipped; `ward_linkage`/`nmf` deferred) |
+| 12.18 | [clustering-primitives](clustering-primitives.md) | `numerics.cluster` | S/M | ✅ shipped (`kmeans` + `ward_linkage` + `nmf`; GMM routes to stats) |
 | 12.19 | [normalised-cut](resolved/normalised-cut.md) | `graph.normalized_cut` | XS | ✅ shipped (`normalized_cut` = eigenmap + kmeans) |
 
 **§12.20** (functional-parcellation strategy survey) is informational — a

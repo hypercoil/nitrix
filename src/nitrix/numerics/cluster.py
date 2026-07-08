@@ -28,20 +28,25 @@ in the iteration count).
 from __future__ import annotations
 
 import dataclasses
-from typing import Literal, Tuple
+from typing import Literal, NamedTuple, Tuple
 
 import jax
+import jax.lax as lax
 import jax.numpy as jnp
+import numpy as np
 from jaxtyping import Array, Float, Int
 
 from .normalize import l2_normalize
 
 __all__ = [
     'KMeansState',
+    'NMFResult',
     'Similarity',
     'kmeans',
     'kmeans_fit',
     'kmeans_predict',
+    'nmf',
+    'ward_linkage',
 ]
 
 Similarity = Literal['euclidean', 'cosine', 'correlation']
@@ -253,3 +258,154 @@ def kmeans(
             tol=tol,
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Ward agglomerative clustering (host-side, combinatorial)
+# ---------------------------------------------------------------------------
+
+
+def ward_linkage(
+    X: Float[Array, 'n p'],
+    *,
+    k: int,
+) -> Int[Array, ' n']:
+    r"""Ward (minimum-variance) agglomerative clustering into ``k`` clusters.
+
+    Repeatedly merges the pair of clusters whose union increases the total
+    within-cluster sum of squares the least (Ward's criterion), until ``k``
+    clusters remain, and returns the flat cluster label of each point. Distances
+    are updated by the Lance--Williams recurrence, so the exact partition matches
+    a full Ward dendrogram cut at ``k``.
+
+    This is an inherently sequential combinatorial algorithm (``n - k`` global
+    merges over an :math:`(n, n)` distance matrix), so it runs **host-side** and
+    returns a device array of labels; it is not differentiable or ``jit``-able
+    (like :func:`~nitrix.graph.mesh_watershed`). Cost is :math:`O(n^2)` memory and
+    :math:`O(n^2 (n-k))` time -- apt at parcel / moderate-``n`` scale (Ward on a
+    clustering-stability matrix, e.g. the MIST / Bellec parcellations).
+
+    Parameters
+    ----------
+    X : Float[Array, 'n p']
+        The ``n`` points to cluster (rows), in a ``p``-dimensional feature space.
+    k : int
+        Number of clusters (``1 <= k <= n``).
+
+    Returns
+    -------
+    Int[Array, ' n']
+        The cluster label ``0..k-1`` of each point.
+    """
+    x = np.asarray(X, dtype=np.float64)
+    n = x.shape[0]
+    if k < 1 or k > n:
+        raise ValueError(f'ward_linkage: k={k} must satisfy 1 <= k <= n={n}.')
+    dist = np.sum((x[:, None, :] - x[None, :, :]) ** 2, axis=-1)
+    np.fill_diagonal(dist, np.inf)
+    size = np.ones(n)
+    active = np.ones(n, dtype=bool)
+    label = np.arange(n)
+    for _ in range(n - k):
+        masked = np.where(active[:, None] & active[None, :], dist, np.inf)
+        i, j = divmod(int(np.argmin(masked)), n)
+        if i > j:
+            i, j = j, i
+        others = active.copy()
+        others[i] = others[j] = False
+        idx = np.where(others)[0]
+        si, sj, sm = size[i], size[j], size[idx]
+        merged = (
+            (si + sm) * dist[i, idx]
+            + (sj + sm) * dist[j, idx]
+            - sm * dist[i, j]
+        ) / (si + sj + sm)
+        dist[i, idx] = merged
+        dist[idx, i] = merged
+        size[i] += size[j]
+        active[j] = False
+        dist[j, :] = np.inf
+        dist[:, j] = np.inf
+        label[label == j] = i
+    _, flat = np.unique(label, return_inverse=True)
+    return jnp.asarray(flat.astype(np.int32))
+
+
+# ---------------------------------------------------------------------------
+# Non-negative matrix factorisation (Lee-Seung multiplicative updates)
+# ---------------------------------------------------------------------------
+
+
+class NMFResult(NamedTuple):
+    """A non-negative matrix factorisation ``X ~ basis @ coefficients``.
+
+    Attributes
+    ----------
+    basis : Float[Array, 'n k']
+        The ``(n, k)`` non-negative basis loadings ``W`` (one row per point).
+    coefficients : Float[Array, 'k p']
+        The ``(k, p)`` non-negative components ``H`` (one row per factor).
+    """
+
+    basis: Float[Array, 'n k']
+    coefficients: Float[Array, 'k p']
+
+
+def nmf(
+    X: Float[Array, 'n p'],
+    k: int,
+    *,
+    key: Array,
+    max_iter: int = 200,
+    eps: float = 1e-10,
+) -> NMFResult:
+    r"""Non-negative matrix factorisation by Lee--Seung multiplicative updates.
+
+    Factorises a non-negative matrix :math:`X \approx W H` with
+    :math:`W, H \ge 0` by the multiplicative-update rules that monotonically
+    decrease the Frobenius reconstruction error,
+
+    .. math::
+
+        H \leftarrow H \odot \frac{W^\top X}{W^\top W H}, \qquad
+        W \leftarrow W \odot \frac{X H^\top}{W H H^\top},
+
+    from a random non-negative start. Pure JAX (a fixed-iteration
+    :func:`jax.lax.fori_loop`), so it is ``jit`` / ``grad`` / ``vmap``-clean. The
+    parts-based factors are the basis of NMF parcellation (a soft assignment is
+    the argmax over each row of ``basis``).
+
+    Parameters
+    ----------
+    X : Float[Array, 'n p']
+        The non-negative data matrix to factorise.
+    k : int
+        Number of components (the inner rank).
+    key : Array
+        A :func:`jax.random.key` seeding the random non-negative initialisation
+        (NMF is non-convex; the start matters).
+    max_iter : int, optional
+        Number of multiplicative-update iterations. Default ``200``.
+    eps : float, optional
+        Denominator floor guarding the divisions. Default ``1e-10``.
+
+    Returns
+    -------
+    NMFResult
+        The ``(basis, coefficients)`` factors ``(W, H)``.
+    """
+    n, p = X.shape
+    key_w, key_h = jax.random.split(key)
+    w0 = jax.random.uniform(key_w, (n, k), dtype=X.dtype)
+    h0 = jax.random.uniform(key_h, (k, p), dtype=X.dtype)
+
+    def step(
+        _: int, wh: Tuple[Float[Array, 'n k'], Float[Array, 'k p']]
+    ) -> Tuple[Float[Array, 'n k'], Float[Array, 'k p']]:
+        w, h = wh
+        h = h * (w.T @ X) / (w.T @ w @ h + eps)
+        w = w * (X @ h.T) / (w @ h @ h.T + eps)
+        return w, h
+
+    w, h = lax.fori_loop(0, max_iter, step, (w0, h0))
+    return NMFResult(basis=w, coefficients=h)

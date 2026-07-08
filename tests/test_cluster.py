@@ -23,6 +23,8 @@ from nitrix.numerics import (  # noqa: E402
     kmeans,
     kmeans_fit,
     kmeans_predict,
+    nmf,
+    ward_linkage,
 )
 
 
@@ -133,3 +135,79 @@ def test_normalized_cut_recovers_planted_clusters():
     A, npc = _planted_two_cluster()
     labels = normalized_cut(jnp.asarray(A), 2, key=jax.random.key(0), n_init=5)
     assert _is_pure_recovery(labels, npc, 2)
+
+
+# --- Ward agglomerative clustering -------------------------------------------
+
+
+def _ward_blobs(per=25, k=4, spread=3.0, seed=0):
+    rng = np.random.default_rng(seed)
+    return np.vstack(
+        [rng.standard_normal((per, 4)) + spread * i for i in range(k)]
+    )
+
+
+def test_ward_recovers_separated_blobs():
+    X = _ward_blobs(spread=10.0)  # well-separated -> each block pure
+    labels = np.asarray(ward_linkage(jnp.asarray(X), k=4))
+    assert labels.shape == (100,)
+    # each planted block of 25 points lands in a single cluster
+    for i in range(4):
+        block = labels[i * 25 : (i + 1) * 25]
+        assert len(np.unique(block)) == 1
+    assert len(np.unique(labels)) == 4
+
+
+def test_ward_matches_scipy():
+    sp = pytest.importorskip('scipy.cluster.hierarchy')
+    opt = pytest.importorskip('scipy.optimize')
+    X = _ward_blobs(seed=2)
+    for k in (4, 6):
+        mine = np.asarray(ward_linkage(jnp.asarray(X), k=k))
+        ref = sp.fcluster(sp.linkage(X, method='ward'), k, 'maxclust') - 1
+        conf = np.zeros((k, k))
+        for a, b in zip(mine, ref):
+            conf[a, b] += 1
+        r, c = opt.linear_sum_assignment(-conf)
+        assert conf[r, c].sum() / len(mine) == 1.0  # exact partition match
+
+
+def test_ward_k_bounds():
+    X = _ward_blobs()
+    with pytest.raises(ValueError):
+        ward_linkage(jnp.asarray(X), k=0)
+    with pytest.raises(ValueError):
+        ward_linkage(jnp.asarray(X), k=101)
+
+
+# --- non-negative matrix factorisation ---------------------------------------
+
+
+def test_nmf_reconstructs_low_rank_nonnegative():
+    rng = np.random.default_rng(0)
+    w_true = np.abs(rng.standard_normal((40, 3)))
+    h_true = np.abs(rng.standard_normal((3, 15)))
+    v = jnp.asarray(w_true @ h_true)  # a genuine non-negative rank-3 matrix
+    res = nmf(v, 3, key=jax.random.key(0), max_iter=800)
+    recon = res.basis @ res.coefficients
+    rel = float(jnp.linalg.norm(recon - v) / jnp.linalg.norm(v))
+    assert rel < 0.02
+
+
+def test_nmf_factors_are_nonnegative():
+    rng = np.random.default_rng(1)
+    v = jnp.asarray(np.abs(rng.standard_normal((20, 8))))
+    res = nmf(v, 4, key=jax.random.key(1))
+    assert res.basis.shape == (20, 4) and res.coefficients.shape == (4, 8)
+    assert bool((res.basis >= 0).all()) and bool((res.coefficients >= 0).all())
+
+
+def test_nmf_jit_and_grad():
+    rng = np.random.default_rng(2)
+    v = jnp.asarray(np.abs(rng.standard_normal((20, 8))))
+    out = jax.jit(lambda v: nmf(v, 4, key=jax.random.key(0), max_iter=50).basis)(v)
+    assert bool(jnp.all(jnp.isfinite(out)))
+    g = jax.grad(
+        lambda v: jnp.sum(nmf(v, 4, key=jax.random.key(0), max_iter=50).basis)
+    )(v)
+    assert bool(jnp.all(jnp.isfinite(g)))

@@ -5499,7 +5499,9 @@ from nitrix.numerics import (  # noqa: E402
     kmeans,
     kmeans_fit,
     kmeans_predict,
+    nmf,
     stochastic_round,
+    ward_linkage,
 )
 
 
@@ -5555,6 +5557,28 @@ register(
         diff_arg=None,
         vmap_arg=None,
         invariants=('nearest-centroid assignment (apply)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.numerics.ward_linkage',
+        fixture=lambda: ((_cluster_data(),), {}),
+        fn_override=lambda X: ward_linkage(X, k=3),
+        diff_arg=None,
+        vmap_arg=None,
+        skip_jit=True,  # host-side combinatorial (agglomerative merges)
+        invariants=('Ward minimum-variance agglomerative clustering',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.numerics.nmf',
+        fixture=lambda: ((jnp.abs(_cluster_data()),), {}),
+        fn_override=lambda X: nmf(X, 3, key=_key()),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('Lee-Seung non-negative matrix factorisation',),
+        notes='returns NMFResult; grad reduces the basis leaf',
     )
 )
 register(

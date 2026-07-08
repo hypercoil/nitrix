@@ -31,10 +31,13 @@ Submodules:
 from . import cluster, normalize, ode, precision, spatial, tensor_ops
 from .cluster import (
     KMeansState,
+    NMFResult,
     Similarity,
     kmeans,
     kmeans_fit,
     kmeans_predict,
+    nmf,
+    ward_linkage,
 )
 from .fixed_point import fixed_point_solve
 from .ode import euler, local_linearization, midpoint, odeint, rk4
@@ -82,6 +85,9 @@ __all__ = [
     'kmeans_predict',
     'KMeansState',
     'Similarity',
+    'ward_linkage',
+    'nmf',
+    'NMFResult',
     # fixed point
     'fixed_point_solve',
     # ode integrators

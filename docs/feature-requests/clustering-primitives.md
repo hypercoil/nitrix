@@ -1,7 +1,7 @@
 # Clustering primitives — `nitrix.numerics.cluster`
 
-> **Status (2026-07-07): PARTIAL — `kmeans` SHIPPED; `ward_linkage` / `nmf`
-> deferred to the parcellation sprint.** `numerics.cluster.kmeans` /
+> **Status (2026-07-08): SHIPPED — `kmeans` + `ward_linkage` + `nmf`.**
+> `numerics.cluster.kmeans` /
 > `kmeans_fit` / `kmeans_predict` (Lloyd; euclidean/cosine/correlation) on the
 > §6.5 fit/apply seam (`KMeansState`, `similarity` as static aux; `n_init`
 > restarts). Homed in **`numerics`** (geometric clustering) per the SPEC §6.4
