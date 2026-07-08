@@ -67,8 +67,11 @@ from .parcellation import (
     surface_boundary_map,
 )
 from .wavelet import graph_wavelet_transform, mexican_hat_kernel
+from .components import connected_components
 
 __all__ = [
+    # connected components (graph / mesh cluster forming)
+    'connected_components',
     # laplacian
     'degree_vector',
     'in_degree_vector',

@@ -5,8 +5,14 @@
 > (Moran), and the most-rigorous parameterized (BrainSMASH variogram) nulls.
 > The spin refinements are **complete** (medial-wall, per-hemisphere, Váša
 > bijective, parcel-level) and the BrainSMASH **'sampled'** large-mesh (KNN,
-> memory-lean) variant is now shipped. Remaining: the mesh/graph-TFCE
-> clustering half of N2. Family ledger for
+> memory-lean) variant is now shipped. **The mesh/graph-TFCE clustering half of
+> N2 is now shipped too** (2026-07-08): `graph.connected_components` (an
+> adjacency-general, label-propagation cluster-forming primitive — the mesh/graph
+> analogue of the grid `morphology.connected_components`) plus a new
+> `adjacency=` edge-list path on `stats.inference.tfce`, so surface (CIFTI) /
+> fixel (ModelArray) vertex-wise TFCE now works over a cortical-mesh or
+> connectivity-graph neighbourhood. Validated bit-for-bit against the 1-D
+> lattice TFCE on a path graph. **N2 is complete.** Family ledger for
 > the spatial-autocorrelation-preserving null models used to test the
 > correspondence of two brain maps. Origin: the **N2** item of the
 > [`stats-suite-audit`](stats-suite-audit.md) ("no spin test (Alexander-Bloch/

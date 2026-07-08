@@ -210,7 +210,8 @@ def test_storey_pi0_and_adaptive_fdr():
     # 800 nulls (uniform) + 200 strong alternatives
     p = np.clip(
         np.concatenate([rng.uniform(0, 1, 800), rng.beta(0.3, 8.0, 200)]),
-        1e-8, 1.0,
+        1e-8,
+        1.0,
     )
     pj = jnp.asarray(p)
     pi0 = float(storey_pi0(pj))
@@ -464,8 +465,11 @@ def test_randomise_saturated_design_raises():
     X = jnp.asarray(rng.standard_normal((5, 5)))  # n == p -> dof = 0
     with pytest.raises(ValueError, match='saturated'):
         permutation_test(
-            Y, X, jnp.asarray(np.eye(5)[:1]),
-            n_perm=10, key=jax.random.PRNGKey(0),
+            Y,
+            X,
+            jnp.asarray(np.eye(5)[:1]),
+            n_perm=10,
+            key=jax.random.PRNGKey(0),
         )
 
 
@@ -698,7 +702,9 @@ def test_conjunction_min_statistic_and_max_pvalue():
         ]
     )
     cp = np.asarray(conjunction_pvalue(pvals))
-    np.testing.assert_array_equal(cp, [0.04, 0.50, 0.30, 0.30])  # max per voxel
+    np.testing.assert_array_equal(
+        cp, [0.04, 0.50, 0.30, 0.30]
+    )  # max per voxel
     np.testing.assert_array_equal(
         cp < 0.05, np.all(np.asarray(pvals) < 0.05, axis=0)
     )
@@ -760,9 +766,75 @@ def test_permutation_test_restricted_blocks_run_and_are_valid():
     data, X, c = _blob_data()
     blocks = jnp.asarray(np.repeat(np.arange(12), 2))  # paired blocks
     res = permutation_test(
-        data, design=X, contrast=c, n_perm=200, key=jax.random.PRNGKey(2),
-        exchange='sign', blocks=blocks,
+        data,
+        design=X,
+        contrast=c,
+        n_perm=200,
+        key=jax.random.PRNGKey(2),
+        exchange='sign',
+        blocks=blocks,
     )
     pf = np.asarray(res.p_fwe)
     assert pf.min() >= 1.0 / 200 - 1e-9 and pf.max() <= 1.0 + 1e-9
     assert np.all(np.isfinite(pf))
+
+
+# --- graph / mesh TFCE (N2: adjacency-general cluster forming) ----------------
+
+
+def _path_edges(n):
+    return jnp.asarray(np.stack([np.arange(n - 1), np.arange(1, n)], axis=1))
+
+
+def test_graph_tfce_on_path_matches_1d_lattice():
+    # A path graph is exactly the 1-D lattice with connectivity 1, so the graph
+    # cluster-forming path must reproduce the lattice TFCE bit-for-bit.
+    n = 24
+    stat = jnp.asarray(np.random.default_rng(0).standard_normal(n))
+    graph = tfce(stat, adjacency=_path_edges(n), n_steps=60)
+    lattice = tfce(stat, connectivity=1, n_steps=60)
+    np.testing.assert_array_equal(np.asarray(graph), np.asarray(lattice))
+
+
+def test_graph_tfce_two_sided_and_mask():
+    n = 20
+    stat = jnp.asarray(np.random.default_rng(1).standard_normal(n))
+    edges = _path_edges(n)
+    both = tfce(stat, adjacency=edges, two_sided=True, n_steps=40)
+    pos_only = tfce(stat, adjacency=edges, two_sided=False, n_steps=40)
+    assert float(jnp.min(both)) >= 0.0
+    assert (
+        float(jnp.max(jnp.abs(both - pos_only))) > 0.0
+    )  # negatives contribute
+    node_mask = jnp.asarray(np.random.default_rng(2).uniform(size=n) > 0.3)
+    masked = tfce(stat, adjacency=edges, mask=node_mask, n_steps=40)
+    assert float(jnp.max(jnp.abs(masked[~node_mask]))) == 0.0
+
+
+def test_graph_tfce_vmaps_over_permutations():
+    n = 18
+    rng = np.random.default_rng(3)
+    stat = jnp.asarray(rng.standard_normal(n))
+    edges = _path_edges(n)
+    perms = jnp.stack([jnp.asarray(rng.permutation(n)) for _ in range(12)])
+    maxima = jax.vmap(
+        lambda p: jnp.max(tfce(stat[p], adjacency=edges, n_steps=25))
+    )(perms)
+    assert maxima.shape == (12,)
+    assert bool(jnp.all(jnp.isfinite(maxima)))
+
+
+def test_graph_tfce_on_a_mesh_is_finite():
+    # A genuine surface mesh adjacency (icosphere edges), not a path graph.
+    from nitrix.sparse import icosphere
+    from nitrix.sparse.mesh import _edges_from_faces
+
+    mesh = icosphere(2)
+    edges = jnp.asarray(np.asarray(_edges_from_faces(np.asarray(mesh.faces))))
+    stat = jnp.asarray(
+        np.random.default_rng(4).standard_normal(mesh.n_vertices)
+    )
+    enhanced = tfce(stat, adjacency=edges, E=1.0, H=2.0, n_steps=50)
+    assert enhanced.shape == (mesh.n_vertices,)
+    assert bool(jnp.all(jnp.isfinite(enhanced)))
+    assert float(jnp.min(enhanced)) >= 0.0

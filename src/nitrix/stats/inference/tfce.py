@@ -44,12 +44,13 @@ https://doi.org/10.1016/j.neuroimage.2008.03.061
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Callable, Optional
 
 import jax.numpy as jnp
 from jax import lax
-from jaxtyping import Array, Bool, Float
+from jaxtyping import Array, Bool, Float, Int
 
+from ...graph import connected_components as graph_connected_components
 from ...morphology import connected_components
 from .cluster import cluster_size_map
 
@@ -61,7 +62,7 @@ def _tfce_one_sided(
     e: float,
     h_exp: float,
     n_steps: int,
-    connectivity: int,
+    extent_fn: Callable[[Bool[Array, '*spatial']], Float[Array, '*spatial']],
 ) -> Float[Array, '*spatial']:
     """
     Threshold-free cluster enhancement of a single non-negative map.
@@ -83,10 +84,10 @@ def _tfce_one_sided(
         Height exponent :math:`H` applied to the threshold at each step.
     n_steps : int
         Number of threshold steps in the Riemann sum.
-    connectivity : int
-        Neighbourhood order used to form connected components at each
-        threshold (``1`` = faces only; ``ndim`` = full connectivity including
-        diagonals, following the scipy convention).
+    extent_fn : callable
+        Maps a supra-threshold boolean mask to a per-element cluster-extent map
+        (component size at that element) -- the lattice or graph cluster-forming
+        rule.
 
     Returns
     -------
@@ -101,8 +102,7 @@ def _tfce_one_sided(
     def body(
         enhanced: Float[Array, '*spatial'], h: Float[Array, '']
     ) -> tuple[Float[Array, '*spatial'], None]:
-        labels = connected_components(pos > h, connectivity=connectivity)
-        extent = cluster_size_map(labels)
+        extent = extent_fn(pos > h)
         return enhanced + (extent**e) * (h**h_exp) * dh, None
 
     enhanced, _ = lax.scan(body, jnp.zeros_like(pos), heights)
@@ -118,37 +118,62 @@ def tfce(
     connectivity: int = 1,
     two_sided: bool = True,
     mask: Optional[Bool[Array, '*spatial']] = None,
+    adjacency: Optional[Int[Array, 'n_edges 2']] = None,
 ) -> Float[Array, '*spatial']:
     """Threshold-free cluster enhancement of a statistic image.
+
+    Enhances either a regular-grid image (default) or -- when ``adjacency`` is
+    given -- a ``(n_nodes,)`` map over an arbitrary graph / mesh (cortical
+    surface, fixel connectivity), forming clusters over the supplied edge list
+    instead of the voxel lattice.
 
     Parameters
     ----------
     stat
-        Statistic image (e.g. a t-map), arbitrary spatial dimensionality.
+        Statistic image (e.g. a t-map): arbitrary spatial dimensionality for
+        the grid path, or ``(n_nodes,)`` when ``adjacency`` is given.
     E, H
-        Extent and height exponents (defaults ``0.5`` / ``2.0`` -- 3-D volume).
+        Extent and height exponents (defaults ``0.5`` / ``2.0`` -- 3-D volume;
+        surface maps typically use ``E = 1.0``).
     n_steps
         Number of threshold steps in the Riemann sum (FSL default ~100).
     connectivity
-        Neighbourhood order for cluster forming (``1`` = faces; ``ndim`` =
-        full, incl. diagonals -- the scipy convention).
+        Neighbourhood order for grid cluster forming (``1`` = faces; ``ndim`` =
+        full, incl. diagonals -- the scipy convention). Ignored when
+        ``adjacency`` is given.
     two_sided
         Enhance the negative side as well (default ``True``); the result is the
         non-negative magnitude map used for two-sided max-statistic FWE.
     mask
-        Optional spatial mask; out-of-mask voxels are zeroed before
+        Optional spatial / node mask; out-of-mask elements are zeroed before
         enhancement.
+    adjacency
+        Optional ``(n_edges, 2)`` undirected edge list. When given, clusters are
+        the connected components of the induced sub-graph
+        (:func:`~nitrix.graph.connected_components`) rather than lattice
+        neighbourhoods, and ``stat`` is a ``(n_nodes,)`` node map.
 
     Returns
     -------
-    The (non-negative) enhanced image, same shape as ``stat``.
+    The (non-negative) enhanced map, same shape as ``stat``.
     """
+    if adjacency is None:
+
+        def extent_fn(m: Bool[Array, '*spatial']) -> Float[Array, '*spatial']:
+            return cluster_size_map(
+                connected_components(m, connectivity=connectivity)
+            )
+    else:
+
+        def extent_fn(m: Bool[Array, '*spatial']) -> Float[Array, '*spatial']:
+            return cluster_size_map(graph_connected_components(m, adjacency))
+
     s = stat if mask is None else jnp.where(mask, stat, 0.0)
     enhanced = _tfce_one_sided(
-        jnp.clip(s, 0.0, None), E, H, n_steps, connectivity
+        jnp.clip(s, 0.0, None), E, H, n_steps, extent_fn
     )
     if two_sided:
         enhanced = enhanced + _tfce_one_sided(
-            jnp.clip(-s, 0.0, None), E, H, n_steps, connectivity
+            jnp.clip(-s, 0.0, None), E, H, n_steps, extent_fn
         )
     return enhanced

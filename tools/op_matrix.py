@@ -786,6 +786,27 @@ register(
         invariants=('symmetric / random_walk / combinatorial variants',),
     )
 )
+
+
+def _graph_cc_fixture():
+    rng = np.random.default_rng(1)
+    n = 24
+    mask = jnp.asarray(rng.uniform(size=n) > 0.3)
+    ii, jj = np.nonzero(np.triu(rng.uniform(size=(n, n)) < 0.12, 1))
+    edges = jnp.asarray(np.stack([ii, jj], axis=1))
+    return (mask, edges), {}
+
+
+register(
+    OpInfo(
+        'nitrix.graph.connected_components',
+        fixture=_graph_cc_fixture,
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('pointer-jumping label propagation over an edge list',),
+        notes='returns Int labels -> non-differentiable; lax.while_loop',
+    )
+)
 register(
     OpInfo(
         'nitrix.graph.degree_vector',
