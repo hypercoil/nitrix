@@ -18,6 +18,7 @@ the shared framing + history and indexes its atomised items:
 | Internal engineering backlog | [`internal-backlog.md`](internal-backlog.md) | Parked perf / Pallas / API-refinement items, each gated on a **Trigger** |
 | Doc-drift / correctness fixes | [`perf-bench-feedback.md`](perf-bench-feedback.md) | Mechanical docstring fixes (file:line-pinned), *not* primitive proposals |
 | docs/feature-requests catalogue §12 brainstorm catalogue | `docs/feature-requests catalogue §12` (origin) | Substrate-compatible *candidate* primitives; promotion gated by `§13` |
+| Restricted-assistant (moonshot) filings | [`nitrix-moonshot-ledger.md`](nitrix-moonshot-ledger.md) | 14 hard problems hoisted to a pure-numerical core for the numerical-only assistant (filed domain-free in the sibling `nitrix-moonshot/`); this ledger holds the neuroimaging anchors + a difficulty/effort/impact assessment |
 
 Status is verified against the live `src/nitrix` surface as of 2026-06-02
 (interpolation-method dispatcher — `Lanczos` / `MultiLabel` /
