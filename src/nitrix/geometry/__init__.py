@@ -152,6 +152,7 @@ from .coords import (
     diffuse,
 )
 from .surface import (
+    SurfaceSmoothOperator,
     areal_distortion,
     cortical_thickness,
     deform_to_sdf,
@@ -162,6 +163,8 @@ from .surface import (
     ribbon_map,
     strain_distortion,
     surface_smooth,
+    surface_smooth_apply,
+    surface_smooth_operator,
 )
 from ._mesh_distance import (
     point_set_nearest_sq_dist,
@@ -278,6 +281,9 @@ __all__ = [
     'areal_distortion',
     'strain_distortion',
     'surface_smooth',
+    'surface_smooth_operator',
+    'surface_smooth_apply',
+    'SurfaceSmoothOperator',
     'deform_to_sdf',
     'cortical_thickness',
     'inflate_surface',

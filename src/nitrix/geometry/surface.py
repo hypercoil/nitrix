@@ -16,7 +16,7 @@ Everything here is pure JAX and differentiable w.r.t. ``mesh.vertices``.
 
 from __future__ import annotations
 
-from typing import Literal, Optional, Tuple
+from typing import Literal, NamedTuple, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -27,6 +27,7 @@ from ..linalg.krylov import cg
 from ..sparse import (
     ELL,
     Mesh,
+    SectionedELL,
     apply_operator,
     compute_vertex_normals,
     mesh_cotangent_laplacian,
@@ -431,6 +432,146 @@ def _roi_neumann_laplacian(lap: ELL, roi: Bool[Array, 'n_vertices']) -> ELL:
     )
 
 
+class SurfaceSmoothOperator(NamedTuple):
+    """Prebuilt mesh operator for :func:`surface_smooth_apply`.
+
+    The mesh-derived state of the geodesic heat smoother -- the lumped-mass
+    diagonal and the cotangent stiffness (ROI-masked when requested) -- built
+    once by :func:`surface_smooth_operator`.  Holding it lets the diffusion
+    solve run under :func:`jax.jit` without re-tracing the host-side operator
+    construction: it is the ``fit`` state of the smoother's fit/apply pair.
+
+    Attributes
+    ----------
+    mass : Float[Array, ' n_vertices']
+        The lumped vertex-area mass diagonal :math:`M` (:func:`vertex_areas`).
+    stiffness : ELL | SectionedELL
+        The cotangent stiffness :math:`L` (:func:`mesh_cotangent_laplacian`),
+        already ROI-Neumann-masked when an ``roi`` was supplied.
+    roi : Bool[Array, ' n_vertices'] | None
+        The cortex mask if one was given (it drives the masked solve in
+        :func:`surface_smooth_apply`), else ``None``.
+    """
+
+    mass: Float[Array, ' n_vertices']
+    stiffness: ELL | SectionedELL
+    roi: Optional[Bool[Array, ' n_vertices']]
+
+
+def surface_smooth_operator(
+    mesh: Mesh,
+    *,
+    area_scheme: Literal['voronoi', 'barycentric'] = 'voronoi',
+    roi: Optional[Bool[Array, 'n_vertices']] = None,
+) -> SurfaceSmoothOperator:
+    """Build the geodesic-smoothing operator for a mesh (the host-side step).
+
+    The construction half of the geodesic smoother's fit/apply pair: assembles
+    the lumped mass :math:`M` (:func:`vertex_areas`) and the cotangent stiffness
+    :math:`L` (:func:`mesh_cotangent_laplacian`, host-side) once, so that
+    repeated :func:`surface_smooth_apply` calls -- at one or several ``fwhm``,
+    inside a jitted region -- reuse them.  Build once, apply many.
+
+    Parameters
+    ----------
+    mesh : Mesh
+        Triangle mesh (concrete -- the cotangent operator is built host-side).
+    area_scheme : {'voronoi', 'barycentric'}, optional
+        Vertex-area / mass scheme (``'voronoi'`` default).
+    roi : Bool[Array, 'n_vertices'], optional
+        Optional ``(n_vertices,)`` boolean cortex mask.  Diffusion is given a
+        **Neumann boundary** at the ROI edge (no flux across it), so values do
+        not bleed across the medial wall.  Requires a flat ELL Laplacian.
+
+    Returns
+    -------
+    SurfaceSmoothOperator
+        The reusable ``(mass, stiffness, roi)`` state.
+
+    Raises
+    ------
+    ValueError
+        If ``roi`` is given but the cotangent Laplacian is not a flat ELL (the
+        sectioned operator is not supported for ROI masking).
+    """
+    area = vertex_areas(mesh, scheme=area_scheme)  # (n,) lumped mass diagonal
+    lap = mesh_cotangent_laplacian(mesh)
+    roi_arr = None
+    if roi is not None:
+        if not isinstance(lap, ELL):
+            raise ValueError(
+                'surface_smooth: roi masking requires a flat ELL Laplacian '
+                "(format='ell'); the sectioned operator is not supported."
+            )
+        roi_arr = jnp.asarray(roi)
+        lap = _roi_neumann_laplacian(lap, roi_arr)
+    return SurfaceSmoothOperator(mass=area, stiffness=lap, roi=roi_arr)
+
+
+def surface_smooth_apply(
+    values: Float[Array, '... n_vertices'],
+    operator: SurfaceSmoothOperator,
+    *,
+    fwhm: float,
+    tol: float = 1e-6,
+    maxiter: Optional[int] = None,
+) -> Float[Array, '... n_vertices']:
+    """Apply a prebuilt geodesic-smoothing operator (the jittable step).
+
+    The apply half of the smoother's fit/apply pair.  One **backward-Euler**
+    heat step solves the SPD system :math:`(M + t L) x = M x_0` for the mass
+    :math:`M` and stiffness :math:`L` of ``operator``, with diffusion time
+    :math:`t = \\mathrm{fwhm}^2 / (16 \\ln 2)` (the Gaussian variance
+    :math:`\\sigma^2 = 2t`, :math:`\\mathrm{FWHM} = 2 \\sqrt{2 \\ln 2}\\,
+    \\sigma`).  The solve is matrix-free conjugate gradients (:func:`cg`) --
+    GPU-native and cuSolver-free.  As ``operator`` is a plain-array pytree, this
+    call is fully jittable and differentiable with respect to ``values``.
+
+    Parameters
+    ----------
+    values : Float[Array, '... n_vertices']
+        Per-vertex field(s), shape ``(..., n_vertices)`` (vertex axis last).
+    operator : SurfaceSmoothOperator
+        The state from :func:`surface_smooth_operator`.
+    fwhm : float
+        Target full-width-at-half-maximum of the smoothing kernel, in the
+        mesh's coordinate units.  ``fwhm = 0`` is the identity.
+    tol : float, optional
+        Conjugate-gradient convergence tolerance.
+    maxiter : int, optional
+        Conjugate-gradient iteration cap.
+
+    Returns
+    -------
+    Float[Array, '... n_vertices']
+        Smoothed field(s), same shape as ``values``.  Differentiable with
+        respect to ``values`` (implicit CG rule).  When ``operator`` carries an
+        ``roi``, out-of-ROI vertices are returned unchanged.
+    """
+    area = operator.mass
+    lap = operator.stiffness
+    roi_arr = operator.roi
+    t = fwhm**2 / (16.0 * jnp.log(2.0))
+
+    def _matvec(
+        v: Float[Array, '... n_vertices'],
+    ) -> Float[Array, '... n_vertices']:
+        lv = apply_operator(lap, v[..., None])[..., 0]  # L @ v, (..., n)
+        return area * v + t * lv
+
+    if roi_arr is None:
+        return cg(_matvec, area * values, tol=tol, maxiter=maxiter)
+    # The Neumann mask decouples the ROI and out-of-ROI blocks, but CG shares a
+    # single global tolerance: feeding the (possibly huge, out-of-distribution,
+    # or NaN) medial-wall values into ``b`` would dominate ``||b||`` and starve
+    # the ROI of precision (or poison the whole solve with NaN).  So drive the
+    # solve from the ROI data alone (out-of-ROI -> 0 in the decoupled diagonal
+    # block) and restore the out-of-ROI vertices to their input afterwards.
+    masked = jnp.where(roi_arr, values, 0.0)
+    x = cg(_matvec, area * masked, tol=tol, maxiter=maxiter)
+    return jnp.where(roi_arr, x, values)
+
+
 def surface_smooth(
     mesh: Mesh,
     values: Float[Array, '... n_vertices'],
@@ -445,22 +586,25 @@ def surface_smooth(
 
     Smooths a per-vertex scalar *along the surface* (not through Euclidean
     space) -- the correct smoother for ``sulc`` / ``curv`` / myelin / thickness
-    maps and surface-GLM inputs.  One **backward-Euler** heat step solves the
-    SPD system :math:`(M + t L) x = M x_0` for the lumped mass :math:`M`
+    maps and surface-GLM inputs.  One backward-Euler heat step solves the SPD
+    system :math:`(M + t L) x = M x_0` for the lumped mass :math:`M`
     (:func:`vertex_areas`) and cotangent stiffness :math:`L`
-    (:func:`mesh_cotangent_laplacian`), with diffusion time
-    :math:`t = \\mathrm{fwhm}^2 / (16 \\ln 2)` (the Gaussian variance
-    :math:`\\sigma^2 = 2t`, :math:`\\mathrm{FWHM} = 2 \\sqrt{2 \\ln 2}\\,
-    \\sigma`).  The solve is matrix-free conjugate gradients (:func:`cg`) --
-    GPU-native and cuSolver-free.
+    (:func:`mesh_cotangent_laplacian`) by matrix-free conjugate gradients.
 
     This is the nitrix-native geodesic smoother; it is **not** identical to
     Connectome Workbench's ``-metric-smoothing`` (a geodesic-distance-weighted
-    Gaussian) -- a documented divergence.
+    Gaussian) -- a documented divergence.  Conserves the area-weighted integral
+    :math:`\\sum_i A_i x_i` (since :math:`\\mathbf{1}^{\\top} L = 0`) and fixes
+    constants; ``fwhm = 0`` is the identity.
 
-    Conserves the area-weighted integral :math:`\\sum_i A_i x_i` (since
-    :math:`\\mathbf{1}^{\\top} L = 0`) and fixes constants; ``fwhm = 0`` is the
-    identity.
+    This is the eager single-call convenience, defined as
+    ``surface_smooth_apply(values, surface_smooth_operator(mesh, ...), fwhm=...)``.
+    The cotangent operator is built host-side, so ``surface_smooth`` as a whole
+    is **not** jittable through ``mesh``.  To place the diffusion solve inside a
+    jitted region, build the operator once with
+    :func:`surface_smooth_operator` (host) and call the jittable
+    :func:`surface_smooth_apply` -- which also amortises the build across
+    repeated fields or ``fwhm`` values.
 
     Parameters
     ----------
@@ -496,36 +640,13 @@ def surface_smooth(
         If ``roi`` is given but the cotangent Laplacian is not a flat ELL (the
         sectioned operator is not supported for ROI masking).
     """
-    area = vertex_areas(mesh, scheme=area_scheme)  # (n,) lumped mass diagonal
-    lap = mesh_cotangent_laplacian(mesh)
-    roi_arr = None
-    if roi is not None:
-        if not isinstance(lap, ELL):
-            raise ValueError(
-                'surface_smooth: roi masking requires a flat ELL Laplacian '
-                "(format='ell'); the sectioned operator is not supported."
-            )
-        roi_arr = jnp.asarray(roi)
-        lap = _roi_neumann_laplacian(lap, roi_arr)
-    t = fwhm**2 / (16.0 * jnp.log(2.0))
-
-    def _matvec(
-        v: Float[Array, '... n_vertices'],
-    ) -> Float[Array, '... n_vertices']:
-        lv = apply_operator(lap, v[..., None])[..., 0]  # L @ v, (..., n)
-        return area * v + t * lv
-
-    if roi_arr is None:
-        return cg(_matvec, area * values, tol=tol, maxiter=maxiter)
-    # The Neumann mask decouples the ROI and out-of-ROI blocks, but CG shares a
-    # single global tolerance: feeding the (possibly huge, out-of-distribution,
-    # or NaN) medial-wall values into ``b`` would dominate ``||b||`` and starve
-    # the ROI of precision (or poison the whole solve with NaN).  So drive the
-    # solve from the ROI data alone (out-of-ROI -> 0 in the decoupled diagonal
-    # block) and restore the out-of-ROI vertices to their input afterwards.
-    masked = jnp.where(roi_arr, values, 0.0)
-    x = cg(_matvec, area * masked, tol=tol, maxiter=maxiter)
-    return jnp.where(roi_arr, x, values)
+    return surface_smooth_apply(
+        values,
+        surface_smooth_operator(mesh, area_scheme=area_scheme, roi=roi),
+        fwhm=fwhm,
+        tol=tol,
+        maxiter=maxiter,
+    )
 
 
 def deform_to_sdf(

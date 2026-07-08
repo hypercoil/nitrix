@@ -4794,6 +4794,18 @@ def _vertex_field():  # surface_smooth(mesh, values, *, fwhm)
     return (m, jnp.cos(m.vertices[:, 0] * 3.0)), {'fwhm': 8.0}
 
 
+def _smooth_operator_fix():  # surface_smooth_operator(mesh)
+    return (_ico(),), {}
+
+
+def _smooth_apply_fix():  # surface_smooth_apply(values, operator, *, fwhm)
+    from nitrix.geometry import surface_smooth_operator
+
+    m = _ico()
+    op = surface_smooth_operator(m)
+    return (jnp.cos(m.vertices[:, 0] * 3.0), op), {'fwhm': 8.0}
+
+
 def _sdf_volume(n=16):
     lin = jnp.linspace(-1.5, 1.5, n)
     g = jnp.stack(jnp.meshgrid(lin, lin, lin, indexing='ij'), axis=-1)
@@ -4957,6 +4969,22 @@ _GEOM_OPS = [
         None,
         False,
         'geodesic heat-diffusion smoothing',
+    ),
+    (
+        'nitrix.geometry.surface_smooth_operator',
+        _smooth_operator_fix,
+        None,
+        None,
+        True,
+        'geodesic-smoother operator build (host)',
+    ),
+    (
+        'nitrix.geometry.surface_smooth_apply',
+        _smooth_apply_fix,
+        0,
+        None,
+        False,
+        'geodesic heat-diffusion smoothing (apply)',
     ),
     (
         'nitrix.geometry.surface_resample',

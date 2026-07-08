@@ -15,7 +15,12 @@ import jax.numpy as jnp
 import numpy as np
 from _real_meshes import fsaverage_white
 
-from nitrix.geometry import surface_smooth
+from nitrix.geometry import (
+    SurfaceSmoothOperator,
+    surface_smooth,
+    surface_smooth_apply,
+    surface_smooth_operator,
+)
 from nitrix.sparse import Mesh, icosphere, vertex_areas
 
 
@@ -175,3 +180,56 @@ def test_roi_preserves_constants_and_integral_within_roi() -> None:
     lhs = float(np.sum(area[roi_np] * out[roi_np]))
     rhs = float(np.sum(area[roi_np] * np.asarray(vals)[roi_np]))
     assert np.isclose(lhs, rhs, rtol=1e-3)
+
+
+def test_surface_smooth_convenience_equals_fit_apply() -> None:
+    # The single-call convenience is defined as apply(values, operator(mesh)),
+    # so the two paths are byte-identical.
+    mesh = icosphere(3)
+    v = _noise(mesh.n_vertices)
+    direct = surface_smooth(mesh, v, fwhm=6.0)
+    op = surface_smooth_operator(mesh)
+    composed = surface_smooth_apply(v, op, fwhm=6.0)
+    np.testing.assert_array_equal(np.asarray(direct), np.asarray(composed))
+
+
+def test_surface_smooth_apply_is_jittable() -> None:
+    # The apply half runs under jit with the operator held as a pytree arg,
+    # even though the mesh-building convenience is not jittable through mesh.
+    mesh = icosphere(3)
+    v = _noise(mesh.n_vertices)
+    op = surface_smooth_operator(mesh)
+
+    def apply(vals: jax.Array, operator: SurfaceSmoothOperator) -> jax.Array:
+        return surface_smooth_apply(vals, operator, fwhm=6.0)
+
+    eager = np.asarray(apply(v, op))
+    jitted = np.asarray(jax.jit(apply)(v, op))
+    np.testing.assert_allclose(jitted, eager, atol=1e-5)
+
+
+def test_surface_smooth_operator_reused_across_fwhm() -> None:
+    # Building the operator once and applying at several fwhm matches building
+    # it fresh for each fwhm (the amortisation is exact).
+    mesh = icosphere(3)
+    v = _noise(mesh.n_vertices)
+    op = surface_smooth_operator(mesh)
+    for fwhm in (2.0, 5.0):
+        reused = np.asarray(surface_smooth_apply(v, op, fwhm=fwhm))
+        fresh = np.asarray(surface_smooth(mesh, v, fwhm=fwhm))
+        np.testing.assert_array_equal(reused, fresh)
+
+
+def test_surface_smooth_roi_via_seam() -> None:
+    # The ROI mask flows through the operator state and reproduces the
+    # convenience path exactly.
+    mesh = icosphere(3)
+    z = mesh.vertices[:, 2]
+    roi = jnp.asarray(z >= 0.0)
+    roi_np = np.asarray(roi)
+    v = jnp.asarray(np.where(roi_np, 1.0, 10.0).astype(np.float32))
+    op = surface_smooth_operator(mesh, roi=roi)
+    assert op.roi is not None
+    seam = np.asarray(surface_smooth_apply(v, op, fwhm=3.0))
+    conv = np.asarray(surface_smooth(mesh, v, fwhm=3.0, roi=roi))
+    np.testing.assert_array_equal(seam, conv)
