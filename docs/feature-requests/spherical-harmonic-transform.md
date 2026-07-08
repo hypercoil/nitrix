@@ -8,8 +8,12 @@
 > band-limit, so the data path is pure FFT + contraction). Orthonormal
 > Condon–Shortley `Y_lm`; verified against `scipy.special.sph_harm_y` (unit
 > coefficient per harmonic), round-trip + Parseval exact to machine precision;
-> jit/grad/batch clean. **Remaining follow-up:** `sht_rotation_matrix` (Wigner-D)
-> and a Driscoll–Healy equiangular-grid variant. Provenance:
+> jit/grad/batch clean. **Real spherical harmonics** (`real_sht_forward` /
+> `real_sht_inverse` — the redundancy-free real-SH basis, e.g. dMRI FOD) and the
+> **Driscoll–Healy equiangular grid** (`grid='driscoll_healy'` — the uniform
+> sampling SH-equivariant spherical CNNs use) are now shipped too (2026-07-08),
+> both round-tripping to machine precision. **Remaining follow-up:**
+> `sht_rotation_matrix` (Wigner-D). Provenance:
 > `docs/feature-requests catalogue §12.9`.
 
 **What.** Classical spherical-harmonic synthesis and analysis at arbitrary

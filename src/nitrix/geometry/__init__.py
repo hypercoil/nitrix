@@ -120,6 +120,8 @@ from .sphere_grid import (
 )
 from .harmonics import (
     SHTGrid,
+    real_sht_forward,
+    real_sht_inverse,
     sht_forward,
     sht_grid,
     sht_inverse,
@@ -230,6 +232,8 @@ __all__ = [
     'sht_forward',
     'sht_inverse',
     'sht_grid',
+    'real_sht_forward',
+    'real_sht_inverse',
     'SHTGrid',
     # coords
     'center_of_mass_points',
