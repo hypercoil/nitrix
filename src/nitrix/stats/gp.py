@@ -127,6 +127,7 @@ from ._hsgp import (
 )
 from ._irls import safe_dmu
 from ._penreml import mb_fs, mb_quantities, mb_reml_nll
+from ._periodic import periodic_features, periodic_penalty_diag
 from ._result import register_result
 
 __all__ = [
@@ -165,6 +166,7 @@ __all__ = [
         'boundary',
         'nd_meta',
         'family',
+        'period',
     ),
 )
 @dataclass(frozen=True)
@@ -262,6 +264,7 @@ class GPResult:
     boundary: float
     nd_meta: Optional[Any]
     family: str = 'gaussian'
+    period: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -1005,6 +1008,35 @@ def _hsgp_design_pen(
     return design, pen
 
 
+def _periodic_design_pen(
+    x: Float[Array, ' N'],
+    T: Float[Array, 'N q0'],
+    order: int,
+    n_fixed: int,
+    period: float,
+    dtype: Any,
+) -> Tuple[_DesignFn, _PenFn]:
+    r"""Build the periodic-kernel ``(design, penalty)`` closures.
+
+    The periodic analogue of :func:`_hsgp_design_pen`: a *fixed* Fourier design
+    (the ``order`` harmonic cosine/sine pairs of the period, concatenated with the
+    unpenalised block ``T``) and a :math:`\rho`-dependent diagonal penalty from
+    the modified-Bessel spectral weights (:func:`periodic_penalty_diag`).
+    """
+    features = periodic_features(x, period, order)
+    X = jnp.concatenate([T, features], axis=1)
+
+    def design(_rho: float) -> Float[Array, 'N p']:
+        return X
+
+    def pen(rho: _RhoArg) -> Tuple[Array, Array]:
+        return periodic_penalty_diag(
+            order, jnp.asarray(rho, dtype=dtype), n_fixed
+        )
+
+    return design, pen
+
+
 def _exact_design_pen(
     x_np: np.ndarray,
     T: Float[Array, 'N q0'],
@@ -1095,6 +1127,7 @@ def gp_fit(
     lam_floor: float = 1e-6,
     lam_ceil: float = 1e8,
     block: Optional[int] = None,
+    period: Optional[float] = None,
 ) -> GPResult:
     r"""Fit a mass-univariate Gaussian-process regression with REML-estimated
     lengthscale.
@@ -1121,7 +1154,15 @@ def gp_fit(
         linearly alongside the intercept).
     kernel
         Stationary kernel: ``'matern52'`` (default) / ``'matern32'`` /
-        ``'matern12'`` / ``'rbf'``.
+        ``'matern12'`` / ``'rbf'``, or ``'periodic'`` (the MacKay periodic kernel;
+        requires ``period=``, engine ``'hsgp'``, a 1-D Gaussian fit). The periodic
+        kernel is a reduced-rank Fourier expansion whose length-scale (the
+        within-period smoothness) is REML-estimated like the others; unlike a
+        cyclic spline it *extrapolates periodically* beyond the observed range.
+    period
+        The period ``T`` of the ``'periodic'`` kernel (required for it, ignored
+        otherwise). For the periodic kernel ``rank`` is the number of Fourier
+        harmonics (the smooth block is ``2 * rank`` cosine/sine columns).
     rank
         Smooth-basis rank ``m``.  ``None`` (default) uses an engine-appropriate
         value: ``20`` for 1-D ``'hsgp'`` (small ``rho`` needs a larger ``rank``),
@@ -1269,8 +1310,14 @@ def gp_fit(
     if x.ndim == 2 and x.shape[1] == 1:
         x = x[:, 0]  # an (N, 1) covariate is the 1-D case
 
+    is_periodic = kernel == 'periodic'
+
     # --- multi-dimensional (tensor-product) HSGP: X is (N, D), D >= 2 --------
     if x.ndim == 2:
+        if is_periodic:
+            raise NotImplementedError(
+                "gp_fit: kernel='periodic' is 1-D only."
+            )
         if non_gaussian:
             raise NotImplementedError(
                 'gp_fit: a non-Gaussian family is 1-D only (Phase 1); '
@@ -1322,12 +1369,33 @@ def gp_fit(
             block,
         )
 
-    # Engine-appropriate default rank: 20 (hsgp) or N (exact, full-rank).
+    # Engine-appropriate default rank: 20 (hsgp) or N (exact, full-rank). For the
+    # periodic kernel the rank is the number of Fourier harmonics (each giving a
+    # cosine/sine pair), so the smooth block is twice as wide.
     m = (20 if engine == 'hsgp' else n) if rank is None else int(rank)
     if m < 1:
         raise ValueError(f'gp_fit: rank={rank} must be >= 1.')
     if engine == 'exact' and m > n:
         m = n  # at most N kernel eigenfeatures
+
+    periodic_order = 0
+    if is_periodic:
+        if period is None:
+            raise ValueError("gp_fit: kernel='periodic' requires period=.")
+        if engine != 'hsgp':
+            raise NotImplementedError(
+                "gp_fit: kernel='periodic' needs engine='hsgp'."
+            )
+        if non_gaussian:
+            raise NotImplementedError(
+                "gp_fit: kernel='periodic' is Gaussian-only (Phase 1)."
+            )
+        if corr is not None:
+            raise NotImplementedError(
+                "gp_fit: kernel='periodic' with corr= is not supported."
+            )
+        periodic_order = m  # harmonics
+        m = 2 * m  # the smooth block is [cos_j, sin_j] per harmonic
 
     x_np = np.asarray(x, dtype=np.float64)
     lo = float(np.min(x_np)) if bounds is None else float(bounds[0])
@@ -1343,7 +1411,9 @@ def gp_fit(
     # --- rho search grid (shared by both engines) ---------------------------
     span = max(hi - lo, 1e-6)
     if rho_bounds is None:
-        rho_lo, rho_hi = 0.05 * span, 2.0 * span
+        # The periodic length-scale is a dimensionless within-period smoothness
+        # (rho ~ O(1)), not a fraction of the covariate range.
+        rho_lo, rho_hi = (0.1, 2.0) if is_periodic else (0.05 * span, 2.0 * span)
     else:
         rho_lo, rho_hi = float(rho_bounds[0]), float(rho_bounds[1])
     log_rho_grid_np = np.linspace(np.log(rho_lo), np.log(rho_hi), int(n_rho))
@@ -1451,9 +1521,15 @@ def gp_fit(
     # Fixed design + rho-dependent diagonal-penalty closures (DS2: the shared
     # construction, also used by the corr / exact paths). The HSGP design is
     # rho-independent, so it is evaluated once and the cross-products reused.
-    design_fn, pen_fn = _hsgp_design_pen(
-        x, T, kernel, m, n_fixed, lo, hi, boundary, Y.dtype
-    )
+    if is_periodic:
+        assert period is not None  # guarded above
+        design_fn, pen_fn = _periodic_design_pen(
+            x, T, periodic_order, n_fixed, period, Y.dtype
+        )
+    else:
+        design_fn, pen_fn = _hsgp_design_pen(
+            x, T, kernel, m, n_fixed, lo, hi, boundary, Y.dtype
+        )
     X = design_fn(0.0)  # (N, p) -- fixed; rho enters only the penalty
     p = X.shape[1]
 
@@ -1545,6 +1621,7 @@ def gp_fit(
         lo,
         hi,
         boundary,
+        period=period,
     )
 
 
@@ -1568,6 +1645,7 @@ def _assemble_gp_result(
     corr_rho: Optional[Array] = None,
     nd_meta: Optional[Any] = None,
     family: str = 'gaussian',
+    period: Optional[float] = None,
 ) -> GPResult:
     r"""Pack the per-element fit arrays into a :class:`GPResult`.
 
@@ -1654,6 +1732,7 @@ def _assemble_gp_result(
         boundary=float(boundary),
         nd_meta=nd_meta,
         family=family,
+        period=period,
     )
 
 
@@ -2600,6 +2679,11 @@ def gp_predict(
             result.rank,
             dtype,
         )  # (g, m)
+    elif result.period is not None:
+        # Periodic kernel: rebuild the fixed Fourier design (rho-independent).
+        phi_new = periodic_features(
+            x_new, result.period, result.rank // 2
+        )
     else:
         c_mid, big_l = _hsgp_domain(result.lo, result.hi, result.boundary)
         sqrt_lambda, phase, inv_sqrt_L = _hsgp_eigen(

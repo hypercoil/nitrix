@@ -7,8 +7,14 @@
 > `gp_predict` (HSGP + exact engines, MAP-`ρ` priors, non-Gaussian PQL-REML),
 > AR1/CAR1/CS residual composition (`corr=`), the factor-smooth + hierarchical /
 > nested `hgp_fit` / `HGPResult` / `hgp_predict`, and `gp_aic` / `gp_bic`.
-> **Residual (deferred, minor):** the optional periodic kernel (1 of 5) and an
-> optional perf-bench case. This doc is retained as the family ledger. **Primary
+> The **periodic kernel** is now shipped too (2026-07-08):
+> `gp_fit(kernel='periodic', period=T)` — a reduced-rank Fourier–Bessel expansion
+> of the MacKay periodic covariance (exact Jacobi–Anger, overflow-free
+> continued-fraction modified-Bessel weights), REML-estimated length-scale, and
+> *periodic extrapolation* beyond the observed range (which a cyclic spline
+> cannot do). **Residual (deferred):** only an optional perf-bench case (and the
+> periodic kernel for the non-Gaussian / corr / exact engines — Gaussian-hsgp-1D
+> is shipped). This doc is retained as the family ledger. **Primary
 > reduced-rank engine: the Hilbert-space
 > approximate GP (HSGP; Solin–Särkkä 2020, Riutort-Mayol/Bürkner 2023)** — a
 > fixed Laplace-eigenfunction basis whose hyperparameters enter *only* as a
