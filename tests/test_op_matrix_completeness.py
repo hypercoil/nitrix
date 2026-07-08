@@ -215,6 +215,11 @@ EXCLUDE: frozenset[str] = frozenset(
         'geometry.mesh_curl',
         'geometry.mesh_divergence',
         'geometry.mesh_star_k',
+        # -- Host-side fit/apply operator builders: assemble the mesh operator
+        #    once (host); the cataloged *_apply / hodge_apply is the jittable
+        #    array op that applies them. -----------------------------------------
+        'geometry.surface_smooth_operator',
+        'geometry.hodge_operator',
         # -- Priority-flood watershed: inherently serial, host-orchestrated -------
         #    segmentation over mesh adjacency (host-side -> JAX array pattern).
         'graph.mesh_watershed',

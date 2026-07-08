@@ -4794,10 +4794,6 @@ def _vertex_field():  # surface_smooth(mesh, values, *, fwhm)
     return (m, jnp.cos(m.vertices[:, 0] * 3.0)), {'fwhm': 8.0}
 
 
-def _smooth_operator_fix():  # surface_smooth_operator(mesh)
-    return (_ico(),), {}
-
-
 def _smooth_apply_fix():  # surface_smooth_apply(values, operator, *, fwhm)
     from nitrix.geometry import surface_smooth_operator
 
@@ -4969,14 +4965,6 @@ _GEOM_OPS = [
         None,
         False,
         'geodesic heat-diffusion smoothing',
-    ),
-    (
-        'nitrix.geometry.surface_smooth_operator',
-        _smooth_operator_fix,
-        None,
-        None,
-        True,
-        'geodesic-smoother operator build (host)',
     ),
     (
         'nitrix.geometry.surface_smooth_apply',
@@ -5963,11 +5951,17 @@ register(
     )
 )
 
-from nitrix.geometry import hodge_decompose, mesh_gradient  # noqa: E402
+from nitrix.geometry import (  # noqa: E402
+    hodge_apply,
+    hodge_decompose,
+    hodge_operator,
+    mesh_gradient,
+)
 from nitrix.sparse import icosphere as _icosphere  # noqa: E402
 
 _HODGE_MESH = _icosphere(1)
 _HODGE_E = mesh_gradient(_HODGE_MESH).n_rows
+_HODGE_OP = hodge_operator(_HODGE_MESH)
 
 register(
     OpInfo(
@@ -5978,6 +5972,18 @@ register(
         vmap_arg=None,
         invariants=('Helmholtz-Hodge decomposition (matrix-free cg)',),
         notes='returns HodgeDecomposition; grad reduces the exact leaf',
+    )
+)
+
+register(
+    OpInfo(
+        'nitrix.geometry.hodge_apply',
+        fixture=lambda: ((jax.random.normal(_key(28), (_HODGE_E,)),), {}),
+        fn_override=lambda omega: hodge_apply(omega, _HODGE_OP),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('Helmholtz-Hodge decomposition (matrix-free cg)',),
+        notes='jittable apply of a prebuilt HodgeOperator; grad reduces exact',
     )
 )
 

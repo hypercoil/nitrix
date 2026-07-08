@@ -134,7 +134,10 @@ from .harmonics import (
 )
 from .dec import (
     HodgeDecomposition,
+    HodgeOperator,
+    hodge_apply,
     hodge_decompose,
+    hodge_operator,
     mesh_curl,
     mesh_divergence,
     mesh_gradient,
@@ -260,7 +263,10 @@ __all__ = [
     'mesh_divergence',
     'mesh_star_k',
     'hodge_decompose',
+    'hodge_operator',
+    'hodge_apply',
     'HodgeDecomposition',
+    'HodgeOperator',
     # coords
     'center_of_mass_points',
     'compactness_penalty',

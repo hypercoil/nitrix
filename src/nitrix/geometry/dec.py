@@ -46,7 +46,7 @@ https://arxiv.org/abs/math/0508341
 
 from __future__ import annotations
 
-from typing import Any, Callable, NamedTuple, Tuple
+from typing import Any, NamedTuple, Tuple
 
 import jax.numpy as jnp
 import numpy as np
@@ -60,7 +60,10 @@ from ..sparse.mesh import _cotangent_weights, face_areas
 
 __all__ = [
     'HodgeDecomposition',
+    'HodgeOperator',
+    'hodge_apply',
     'hodge_decompose',
+    'hodge_operator',
     'mesh_curl',
     'mesh_divergence',
     'mesh_gradient',
@@ -319,32 +322,101 @@ class HodgeDecomposition(NamedTuple):
     harmonic: Float[Array, ' n_edges']
 
 
-def _matvecs(
-    mesh: Mesh,
-) -> Tuple[
-    Callable[[Array], Array],
-    Callable[[Array], Array],
-    Callable[[Array], Array],
-    Callable[[Array], Array],
-    Array,
-    int,
-    int,
-    int,
-]:
-    """Matrix-free ``d_0``, ``d_0^T``, ``d_1``, ``d_1^T`` and ``star_1``."""
+class HodgeOperator(NamedTuple):
+    """Prebuilt DEC operator state for :func:`hodge_apply`.
+
+    The mesh-derived operators the Helmholtz--Hodge solve needs -- the discrete
+    gradient :math:`d_0`, the discrete curl :math:`d_1` and the cotangent Hodge
+    star :math:`\\star_1` -- built once by :func:`hodge_operator` so the two
+    Poisson solves run under :func:`jax.jit` without re-tracing the host-side
+    topology construction.  It is the ``fit`` state of the decomposition's
+    fit/apply pair.
+
+    Attributes
+    ----------
+    gradient : ELL
+        The discrete gradient :math:`d_0` (:func:`mesh_gradient`); its edge
+        endpoints supply :math:`d_0` / :math:`d_0^\\top` and its ``n_cols``
+        carries the (static) vertex count.
+    curl : ELL
+        The discrete curl :math:`d_1` (:func:`mesh_curl`); its per-face edge
+        indices and signs supply :math:`d_1` / :math:`d_1^\\top`.
+    star1 : Float[Array, ' n_edges']
+        The cotangent Hodge-star :math:`\\star_1` weights (one per edge).
+    """
+
+    gradient: ELL
+    curl: ELL
+    star1: Float[Array, ' n_edges']
+
+
+def hodge_operator(mesh: Mesh) -> HodgeOperator:
+    """Build the DEC operators for :func:`hodge_apply` (the host-side step).
+
+    The construction half of the Helmholtz--Hodge fit/apply pair: assembles the
+    incidence operators and the cotangent star once (host-side -- a combinatorial
+    function of the connectivity plus the cotangent metric) so that repeated
+    :func:`hodge_apply` calls on the same mesh reuse them.
+
+    Parameters
+    ----------
+    mesh
+        Triangle mesh (concrete -- the operators are built host-side).
+
+    Returns
+    -------
+    HodgeOperator
+        The reusable ``(gradient, curl, star1)`` state.
+    """
+    d0 = mesh_gradient(mesh)
+    d1 = mesh_curl(mesh)
     verts_np = np.asarray(mesh.vertices, dtype=np.float64)
     faces_np = np.asarray(mesh.faces)
-    edges, face_edge, face_sign = _edge_topology(faces_np)
-    n_edges = edges.shape[0]
-    n_v = mesh.n_vertices
-    n_f = mesh.n_faces
-    ei = jnp.asarray(edges[:, 0]).astype(jnp.int32)
-    ej = jnp.asarray(edges[:, 1]).astype(jnp.int32)
-    fe = jnp.asarray(face_edge.astype(np.int32))  # (F, 3)
-    fs = jnp.asarray(face_sign, dtype=mesh.vertices.dtype)  # (F, 3)
+    edges, face_edge, _ = _edge_topology(faces_np)
     star1 = jnp.asarray(
-        _star1_values(verts_np, faces_np, face_edge, n_edges)
+        _star1_values(verts_np, faces_np, face_edge, edges.shape[0])
     ).astype(mesh.vertices.dtype)
+    return HodgeOperator(gradient=d0, curl=d1, star1=star1)
+
+
+def hodge_apply(
+    omega: Float[Array, ' n_edges'],
+    operator: HodgeOperator,
+    *,
+    tol: float = 1e-9,
+    ridge: float = 1e-8,
+) -> HodgeDecomposition:
+    r"""Apply a prebuilt Hodge operator to decompose an edge 1-form.
+
+    The apply half of the decomposition's fit/apply pair; see
+    :func:`hodge_decompose` for the mathematics.  As ``operator`` is a
+    plain-array pytree, this call is fully jittable and differentiable with
+    respect to ``omega``.
+
+    Parameters
+    ----------
+    omega : Float[Array, ' n_edges']
+        The input 1-form on the edges (in the :func:`mesh_gradient` edge order).
+    operator : HodgeOperator
+        The state from :func:`hodge_operator`.
+    tol : float, optional
+        Conjugate-gradient tolerance. Default ``1e-9``.
+    ridge : float, optional
+        Small Tikhonov ridge stabilising the singular (constant-null-space)
+        Poisson systems. Default ``1e-8``.
+
+    Returns
+    -------
+    HodgeDecomposition
+        The ``(exact, coexact, harmonic)`` parts, each a ``(n_edges,)`` 1-form.
+    """
+    n_v = operator.gradient.n_cols
+    ei = operator.gradient.indices[:, 0]
+    ej = operator.gradient.indices[:, 1]
+    fe = operator.curl.indices  # (F, 3)
+    fs = operator.curl.values  # (F, 3)
+    star1 = operator.star1
+    n_edges = star1.shape[0]
 
     def d0(alpha: Array) -> Array:  # (V,) -> (E,)
         return alpha[ej] - alpha[ei]
@@ -359,7 +431,20 @@ def _matvecs(
         contrib = (fs * u[:, None]).reshape(-1)
         return jnp.zeros((n_edges,), u.dtype).at[fe.reshape(-1)].add(contrib)
 
-    return d0, d0t, d1, d1t, star1, n_edges, n_v, n_f
+    def laplace0(alpha: Array) -> Array:
+        return d0t(star1 * d0(alpha))
+
+    def laplace2(u: Array) -> Array:
+        return d1((1.0 / star1) * d1t(u))
+
+    alpha = cg(laplace0, d0t(star1 * omega), tol=tol, l2=ridge)
+    exact = d0(alpha)
+
+    u = cg(laplace2, d1(omega), tol=tol, l2=ridge)
+    coexact = (1.0 / star1) * d1t(u)
+
+    harmonic = omega - exact - coexact
+    return HodgeDecomposition(exact=exact, coexact=coexact, harmonic=harmonic)
 
 
 def hodge_decompose(
@@ -387,6 +472,13 @@ def hodge_decompose(
     ``ridge`` stabilises them. The three parts are mutually orthogonal in the
     :math:`\star_1` inner product; on a genus-0 surface the harmonic part is zero.
 
+    This is the eager single-call convenience, defined as
+    ``hodge_apply(omega, hodge_operator(mesh))``.  The operators are built
+    host-side, so ``hodge_decompose`` as a whole is **not** jittable through
+    ``mesh``.  To place the solves inside a jitted region -- or to decompose many
+    1-forms on one mesh -- build the operator once with :func:`hodge_operator`
+    (host) and call the jittable :func:`hodge_apply`.
+
     Parameters
     ----------
     omega : Float[Array, ' n_edges']
@@ -404,19 +496,4 @@ def hodge_decompose(
     HodgeDecomposition
         The ``(exact, coexact, harmonic)`` parts, each a ``(n_edges,)`` 1-form.
     """
-    d0, d0t, d1, d1t, star1, _, n_v, n_f = _matvecs(mesh)
-
-    def laplace0(alpha: Array) -> Array:
-        return d0t(star1 * d0(alpha))
-
-    def laplace2(u: Array) -> Array:
-        return d1((1.0 / star1) * d1t(u))
-
-    alpha = cg(laplace0, d0t(star1 * omega), tol=tol, l2=ridge)
-    exact = d0(alpha)
-
-    u = cg(laplace2, d1(omega), tol=tol, l2=ridge)
-    coexact = (1.0 / star1) * d1t(u)
-
-    harmonic = omega - exact - coexact
-    return HodgeDecomposition(exact=exact, coexact=coexact, harmonic=harmonic)
+    return hodge_apply(omega, hodge_operator(mesh), tol=tol, ridge=ridge)

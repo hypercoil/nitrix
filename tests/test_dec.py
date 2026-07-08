@@ -18,7 +18,10 @@ import numpy as np
 jax.config.update('jax_enable_x64', True)
 
 from nitrix.geometry import (  # noqa: E402
+    HodgeOperator,
+    hodge_apply,
     hodge_decompose,
+    hodge_operator,
     mesh_curl,
     mesh_divergence,
     mesh_gradient,
@@ -176,3 +179,31 @@ def test_hodge_is_differentiable_in_the_form():
     omega = _random_form(mesh, 4)
     g = jax.grad(lambda w: jnp.sum(hodge_decompose(w, mesh).exact ** 2))(omega)
     assert bool(jnp.all(jnp.isfinite(g)))
+
+
+def test_hodge_convenience_equals_fit_apply():
+    # The single-call convenience is defined as apply(omega, operator(mesh)), so
+    # the two paths are byte-identical.
+    mesh = _mesh64(2)
+    omega = _random_form(mesh, 7)
+    direct = hodge_decompose(omega, mesh)
+    op = hodge_operator(mesh)
+    composed = hodge_apply(omega, op)
+    for a, b in zip(direct, composed):
+        np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+
+
+def test_hodge_apply_is_jittable():
+    # The apply half runs under jit with the operator held as a pytree arg
+    # (the static vertex count rides in gradient.n_cols), even though the
+    # mesh-building convenience is not jittable through mesh.
+    mesh = _mesh64(1)
+    omega = _random_form(mesh, 8)
+    op = hodge_operator(mesh)
+
+    def apply(w, operator: HodgeOperator):
+        return hodge_apply(w, operator).exact
+
+    eager = np.asarray(apply(omega, op))
+    jitted = np.asarray(jax.jit(apply)(omega, op))
+    np.testing.assert_allclose(jitted, eager, atol=1e-9)
