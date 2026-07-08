@@ -466,8 +466,11 @@ def mesh_watershed(
     each merging into the lowest-saddle neighbour.  The defaults
     (``min_basin_size=1``, ``h_min=0``) apply no merge -- a pure watershed.
 
-    Runs host-side (the flood is inherently serial), returning a JAX integer
-    array.  Works on any mesh adjacency, not just the icosphere.
+    Execution class: host-only.  The priority flood is inherently serial (a
+    scalar heap plus the plateau and prominence merges) and the basin count is
+    data-dependent, so it is not jittable -- run it eagerly, outside any
+    ``jax.jit``, as a post-hoc labelling.  Returns a JAX integer array and works
+    on any mesh adjacency, not just the icosphere.
 
     Parameters
     ----------

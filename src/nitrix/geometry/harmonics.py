@@ -235,6 +235,11 @@ def sht_grid(band_limit: int, *, grid: Grid = 'gauss') -> SHTGrid:
     A field must be sampled on this grid (colatitude :math:`\times` longitude,
     the outer product) before :func:`sht_forward`.
 
+    The nodes depend only on the static ``band_limit`` (and ``grid``), so this
+    is a cheap host-side constructor; for the transforms themselves use
+    :func:`sht_plan`, whose :class:`SHTPlan` carries this same grid plus the
+    quadrature plan.
+
     Parameters
     ----------
     band_limit : int

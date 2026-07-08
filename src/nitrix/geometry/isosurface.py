@@ -368,6 +368,11 @@ def mesh_to_sdf(
     bound memory) -- practical for moderate volumes / meshes; a spatial-hash
     broad phase is a future acceleration.  Not differentiable.
 
+    Execution class: host-by-implementation.  The output shape is the static
+    ``shape`` argument -- there is no data-dependent shape -- so, unlike
+    :func:`marching_cubes`, a device (``jnp``) port is feasible; it currently
+    runs host-side and is not jittable through ``mesh``.
+
     Parameters
     ----------
     mesh

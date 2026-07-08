@@ -315,6 +315,12 @@ def nearest_surface_distance(
 ) -> NDArray[Any]:
     """Per-query nearest (unsigned) distance to a triangle mesh's surface.
 
+    Execution class: host-only.  Takes and returns NumPy arrays; the
+    ``'grid'`` broad phase has data-dependent (ragged) bucket occupancy, so it
+    is not jittable.  The ``'brute'`` path is a static dense ``O(n * n_faces)``
+    scan that a device (``jnp``) port could express, but both paths run
+    host-side today (see the spatial-acceleration follow-up).
+
     Parameters
     ----------
     query
