@@ -114,6 +114,7 @@ __all__ = [
     'fisher_bingham_energy',
     'watson_sample',
     'bingham_sample',
+    'kent_sample',
 ]
 
 _AxisArg = Union[int, Tuple[int, ...]]
@@ -1321,3 +1322,111 @@ def watson_sample(
     v = v / jnp.linalg.norm(v, axis=-1, keepdims=True)
     x = w[:, None] * mu + jnp.sqrt(jnp.maximum(1.0 - w**2, 0.0))[:, None] * v
     return cast(Float[Array, '... p'], x.reshape((*shape, p)))
+
+
+def _acg_fisher_bingham_eigen(
+    key: jax.Array,
+    a: Float[Array, ' p'],
+    kappa: Float[Array, ''],
+    n: int,
+) -> Float[Array, 'n p']:
+    r"""ACG rejection for ``exp(-sum_j a_j x_j^2 + kappa x_0)`` on ``S^{p-1}``.
+
+    The Fisher--Bingham extension of :func:`_acg_bingham_eigen`: the same
+    Angular-Central-Gaussian proposal (tuned to the quadratic part ``a``, with
+    ``a >= 0``, ``min = 0``), but the acceptance carries the extra linear factor
+    :math:`e^{\kappa(x_0 - 1)} \le 1` (the mean-direction term on axis 0).  Since
+    that factor never exceeds 1, the Bingham envelope supremum remains a valid
+    (over-)bound, so the :func:`jax.lax.while_loop` still gives guaranteed
+    acceptance; efficiency falls with ``kappa`` (the proposal is untilted).
+    """
+    p = a.shape[0]
+    b = _solve_acg_b(a)
+    omega = 1.0 + 2.0 * a / b
+    sqrt_omega = jnp.sqrt(omega)
+    a_max = jnp.max(a)
+    s_star = jnp.clip((p - b) / 2.0, 0.0, a_max)
+    log_sup = -s_star + (p / 2.0) * jnp.log1p(2.0 * s_star / b)
+
+    def cond(state: Tuple[jax.Array, Array, Array]) -> Array:
+        _, _, accepted = state
+        return jnp.logical_not(jnp.all(accepted))
+
+    def body(
+        state: Tuple[jax.Array, Array, Array],
+    ) -> Tuple[jax.Array, Array, Array]:
+        key, x, accepted = state
+        key, k_z, k_u = jax.random.split(key, 3)
+        y = jax.random.normal(k_z, (n, p), dtype=a.dtype) / sqrt_omega
+        cand = y / jnp.linalg.norm(y, axis=-1, keepdims=True)
+        s = jnp.sum(a * cand**2, axis=-1)
+        log_r = (
+            -s
+            + (p / 2.0) * jnp.log1p(2.0 * s / b)
+            + kappa * (cand[:, 0] - 1.0)
+        )
+        log_u = jnp.log(jax.random.uniform(k_u, (n,), dtype=a.dtype))
+        test = log_r - log_sup >= log_u
+        newly = test & jnp.logical_not(accepted)
+        x = jnp.where(newly[:, None], cand, x)
+        return key, x, accepted | test
+
+    x0 = jnp.zeros((n, p), dtype=a.dtype)
+    accepted0: Bool[Array, ' n'] = jnp.zeros((n,), dtype=bool)
+    _, x, _ = jax.lax.while_loop(cond, body, (key, x0, accepted0))
+    return x
+
+
+def kent_sample(
+    key: jax.Array,
+    gamma1: Float[Array, ' 3'],
+    gamma2: Float[Array, ' 3'],
+    gamma3: Float[Array, ' 3'],
+    kappa: Float[Array, ''],
+    beta: Float[Array, ''],
+    shape: Tuple[int, ...] = (),
+) -> Float[Array, '... 3']:
+    r"""Draw samples from a Kent (FB5) distribution on :math:`S^2`.
+
+    The elliptical law :math:`f(x) \propto \exp(\kappa\, \gamma_1^\top x +
+    \beta[(\gamma_2^\top x)^2 - (\gamma_3^\top x)^2])` -- the normalised density
+    is :func:`kent_log_prob`.  Sampled by the Angular-Central-Gaussian rejection
+    of Kent, Ganeiber & Mardia (2018): the same guaranteed-acceptance envelope as
+    :func:`bingham_sample` for the quadratic part, with the linear
+    (mean-direction) term folded into the acceptance as the bounded factor
+    :math:`e^{\kappa(\gamma_1^\top x - 1)} \le 1`.  Acceptance is guaranteed for
+    any :math:`(\kappa, \beta)`; the envelope is untilted, so efficiency falls as
+    :math:`\kappa` grows (correctness is unaffected).
+
+    Sampling is **not differentiable** (the rejection loop).
+
+    Parameters
+    ----------
+    key : jax.Array
+        A PRNG key.
+    gamma1, gamma2, gamma3 : Float[Array, ' 3']
+        The orthonormal frame: mean direction, major axis, minor axis.
+    kappa : Float[Array, '']
+        Concentration (:math:`> 0`).
+    beta : Float[Array, '']
+        Ovalness (:math:`0 \le 2\beta < \kappa` for a unimodal density).
+    shape : tuple of int, optional
+        Batch shape of draws. Default ``()`` (a single sample).
+
+    Returns
+    -------
+    Float[Array, '... 3']
+        Samples of shape ``(*shape, 3)`` on :math:`S^2`.
+    """
+    dtype = jnp.result_type(gamma1.dtype, jnp.float32)
+    kappa = jnp.asarray(kappa, dtype=dtype)
+    beta = jnp.asarray(beta, dtype=dtype)
+    n = math.prod(shape) if shape else 1
+    # Eigenbasis (gamma1, gamma2, gamma3): quadratic diag(0, beta, -beta) ->
+    # ACG eigenvalues a = max(.) - diag = (beta, 0, 2 beta); linear kappa on
+    # axis 0 (the mean direction).
+    a = jnp.stack([beta, jnp.zeros_like(beta), 2.0 * beta]).astype(dtype)
+    x_eigen = _acg_fisher_bingham_eigen(key, a, kappa, n)  # (n, 3)
+    frame = jnp.stack([gamma1, gamma2, gamma3], axis=0).astype(dtype)  # (3, 3)
+    x_world = x_eigen @ frame  # rotate eigenbasis -> world
+    return x_world.reshape((*shape, 3))

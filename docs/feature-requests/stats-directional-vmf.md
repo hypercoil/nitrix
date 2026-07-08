@@ -12,6 +12,25 @@
 > `nitrix.stats.directional` submodule (vMF now; Watson / Bingham / Kent as the
 > family grows), the spherical analogue of `stats.gaussian`.
 >
+> **Family growth (2026-07-08).** The vMF keystone has since grown Watson
+> (`watson_log_prob` / `watson_fit` / `watson_sample`), Bingham / Fisher–Bingham
+> energy + samplers (`fisher_bingham_energy`, `bingham_sample`), and the **Kent
+> (FB5)** density / moment-fit (`log_kent_normaliser`, `kent_log_prob`,
+> `kent_fit`). Now added: **`kent_sample`** — the FB5 sampler by
+> Angular-Central-Gaussian rejection (Kent–Ganeiber–Mardia 2018) with the linear
+> mean-direction term folded into the acceptance as the bounded factor
+> `exp(κ(γ₁ᵀx − 1)) ≤ 1`, so acceptance is guaranteed for any (κ, β) (validated:
+> mean-direction recovery ≈ 1.000, κ recovery < 10 %). **Deferred (evidenced):**
+> a differentiable **Bingham normalising constant + `bingham_fit`**. The Bingham
+> normaliser has *no closed form* (unlike vMF `log_iv` / Watson `log_kummer_m`);
+> the tractable Kume–Wood **1st-order saddlepoint** was prototyped and is exact
+> at isotropy but its *gradient* — the moment map `∇log C` that `bingham_fit`
+> needs — is **30–38 % off the exact `E[xⱼ²]`** (checked vs numerical
+> integration), so it is unfit for a differentiable-first library. A usable fit
+> needs the **renormalised higher-order** Kume–Wood saddlepoint or the exact
+> `₁F₁` matrix-argument series — a research-grade effort tracked for a dedicated
+> session.
+>
 > **Correctness mandate — and why this kernel is the worst legacy liability.**
 > Clean-room from the directional-statistics literature (Mardia & Jupp; Wood
 > 1994; Banerjee et al. 2005; DLMF §10), **not** a port. The legacy

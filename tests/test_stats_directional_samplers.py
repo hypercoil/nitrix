@@ -128,3 +128,67 @@ def test_bingham_uniform_when_beta_constant():
     # empirical second-moment matrix ~ I/3 (isotropic)
     m = (x.T @ x) / x.shape[0]
     np.testing.assert_allclose(m, jnp.eye(3) / 3.0, atol=0.02)
+
+
+# ---------------------------------------------------------------------------
+# Kent (FB5) sampler
+# ---------------------------------------------------------------------------
+
+
+def _kent_frame():
+    g1 = jnp.asarray([0.0, 0.0, 1.0])
+    g2 = jnp.asarray([1.0, 0.0, 0.0])
+    g3 = jnp.asarray([0.0, 1.0, 0.0])
+    return g1, g2, g3
+
+
+def test_kent_sample_unit_norm_and_shape():
+    from nitrix.stats import kent_sample
+
+    g1, g2, g3 = _kent_frame()
+    x = kent_sample(
+        _key(1), g1, g2, g3, jnp.asarray(15.0), jnp.asarray(3.0), (5, 7)
+    )
+    assert x.shape == (5, 7, 3)
+    assert np.allclose(np.linalg.norm(np.asarray(x), axis=-1), 1.0, atol=1e-5)
+
+
+@pytest.mark.parametrize('kappa,beta', [(10.0, 2.0), (20.0, 5.0), (8.0, 3.0)])
+def test_kent_sample_recovers_mean_and_concentration(kappa, beta):
+    # The moment fit of a large sample recovers the mean direction (near-exactly)
+    # and kappa (closely); beta carries the estimator's known downward bias.
+    from nitrix.stats import kent_fit, kent_sample
+
+    g1, g2, g3 = _kent_frame()
+    x = kent_sample(
+        _key(2), g1, g2, g3, jnp.asarray(kappa), jnp.asarray(beta), (40000,)
+    )
+    fit = kent_fit(x[None], axis=-2)
+    assert abs(float(jnp.sum(fit.gamma1[0] * g1))) > 0.99  # mean direction
+    assert abs(float(fit.kappa[0]) - kappa) / kappa < 0.1  # concentration
+
+
+def test_kent_sample_beta_zero_is_von_mises_fisher():
+    # At beta = 0 the Kent density is vMF; the sample second moments about the
+    # mean axis are then rotationally symmetric in the tangent plane.
+    from nitrix.stats import kent_sample
+
+    g1, g2, g3 = _kent_frame()
+    x = kent_sample(
+        _key(3), g1, g2, g3, jnp.asarray(12.0), jnp.asarray(0.0), (40000,)
+    )
+    t2 = np.asarray(jnp.sum(x * g2, axis=-1))
+    t3 = np.asarray(jnp.sum(x * g3, axis=-1))
+    # equal spread on the two tangent axes (vMF isotropy), no NaNs
+    assert np.all(np.isfinite(np.asarray(x)))
+    np.testing.assert_allclose(np.var(t2), np.var(t3), rtol=0.1)
+
+
+def test_kent_sample_deterministic_in_key():
+    from nitrix.stats import kent_sample
+
+    g1, g2, g3 = _kent_frame()
+    args = (g1, g2, g3, jnp.asarray(10.0), jnp.asarray(2.0), (100,))
+    a = kent_sample(_key(4), *args)
+    b = kent_sample(_key(4), *args)
+    np.testing.assert_array_equal(np.asarray(a), np.asarray(b))

@@ -149,6 +149,7 @@ from .directional import (
     fisher_bingham_energy,
     kent_fit,
     kent_log_prob,
+    kent_sample,
     log_iv,
     log_kent_normaliser,
     log_kummer_m,
@@ -250,6 +251,7 @@ __all__ = [
     'fisher_bingham_energy',
     'watson_sample',
     'bingham_sample',
+    'kent_sample',
     # glm
     'Family',
     'Link',

@@ -3394,6 +3394,20 @@ def _bingham_sample_op(key):
     )
 
 
+def _kent_sample_op(key):
+    from nitrix.stats import kent_sample
+
+    return kent_sample(
+        key,
+        jnp.asarray([0.0, 0.0, 1.0]),
+        jnp.asarray([1.0, 0.0, 0.0]),
+        jnp.asarray([0.0, 1.0, 0.0]),
+        jnp.asarray(10.0),
+        jnp.asarray(2.0),
+        (64,),
+    )
+
+
 register(
     OpInfo(
         'nitrix.stats.watson_sample',
@@ -3414,6 +3428,19 @@ register(
         vmap_arg=None,
         invariants=(
             'Bingham sampler (Kent-Ganeiber-Mardia ACG rejection); ~25% accept',
+        ),
+        notes='sampling; non-differentiable; normaliser-free',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.stats.kent_sample',
+        fixture=lambda: ((_key(),), {}),
+        fn_override=_kent_sample_op,
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=(
+            'Kent FB5 sampler (ACG rejection, linear term folded); guaranteed',
         ),
         notes='sampling; non-differentiable; normaliser-free',
     )
