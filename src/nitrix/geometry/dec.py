@@ -29,10 +29,14 @@ them:
 Every operator is returned as an :class:`~nitrix.sparse.ELL`, so it applies
 through :func:`~nitrix.sparse.apply_operator`; the topology and orientation are
 built host-side (a combinatorial function of the connectivity only), like
-:func:`~nitrix.sparse.mesh_cotangent_laplacian`. The star / weight values are
-likewise assembled host-side, so the operators are not differentiable with
-respect to the vertex coordinates (:func:`hodge_decompose` *is* differentiable
-with respect to the input 1-form).
+:func:`~nitrix.sparse.mesh_cotangent_laplacian`. The Hodge stars split on
+differentiability: :math:`\star_0` and :math:`\star_2` (:func:`mesh_star_k`
+``k=0``/``k=2``) are pure-JAX functions of the vertex positions and *are*
+differentiable with respect to them, whereas :math:`\star_1` (``k=1``, and hence
+:func:`mesh_divergence` and the :math:`\star_1` inner product of
+:func:`hodge_decompose`) is assembled host-side from the cotangent weights and is
+*not* differentiable with respect to the vertex coordinates.
+:func:`hodge_decompose` is differentiable with respect to its input 1-form.
 
 References
 ----------
@@ -204,22 +208,32 @@ def mesh_star_k(mesh: Mesh, k: int) -> ELL:
     -------
     ELL
         The diagonal Hodge-star operator.
+
+    Notes
+    -----
+    The ``k=0`` (:math:`\star_0`) and ``k=2`` (:math:`\star_2`) branches are pure
+    JAX functions of the vertex positions -- jittable through ``mesh`` and
+    differentiable with respect to the vertex coordinates. The ``k=1``
+    (:math:`\star_1`) branch assembles the cotangent weights host-side: its
+    sparsity is fixed by the (concrete) connectivity and its values are not
+    differentiable with respect to the vertex coordinates, so that branch is not
+    jittable through the ``mesh`` argument.
     """
-    verts_np = np.asarray(mesh.vertices, dtype=np.float64)
-    faces_np = np.asarray(mesh.faces)
     dtype = mesh.vertices.dtype
     if k == 0:
         star0 = _barycentric_vertex_areas(mesh)
         return _diagonal_ell(star0, mesh.n_vertices)
+    if k == 2:
+        star2 = 1.0 / face_areas(mesh)
+        return _diagonal_ell(star2, mesh.n_faces)
     if k == 1:
+        verts_np = np.asarray(mesh.vertices, dtype=np.float64)
+        faces_np = np.asarray(mesh.faces)
         edges, face_edge, _ = _edge_topology(faces_np)
         star1 = _star1_values(verts_np, faces_np, face_edge, edges.shape[0])
         return _diagonal_ell(
             jnp.asarray(star1.astype(np.float64)).astype(dtype), edges.shape[0]
         )
-    if k == 2:
-        star2 = 1.0 / face_areas(mesh)
-        return _diagonal_ell(star2, mesh.n_faces)
     raise ValueError(f'mesh_star_k: k={k} must be 0, 1 or 2.')
 
 

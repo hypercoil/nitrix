@@ -90,6 +90,44 @@ def test_star_k_invalid_degree():
         mesh_star_k(_mesh64(1), 3)
 
 
+def test_star_k_metric_stars_are_jittable_and_differentiable():
+    # star_0 (k=0, barycentric areas) and star_2 (k=2, reciprocal face areas)
+    # are pure-JAX functions of the vertex positions: jittable through the mesh
+    # and differentiable w.r.t. the vertices.
+    mesh = _mesh64(1)
+    faces = mesh.faces
+
+    def star_sum(verts, k):
+        return jnp.sum(
+            mesh_star_k(Mesh(vertices=verts, faces=faces), k).values
+        )
+
+    for k in (0, 2):
+        val = jax.jit(star_sum, static_argnums=1)(mesh.vertices, k)
+        assert np.isfinite(np.asarray(val))
+        g = jax.grad(star_sum)(mesh.vertices, k)
+        assert g.shape == mesh.vertices.shape
+        assert np.all(np.isfinite(np.asarray(g)))
+        assert np.max(np.abs(np.asarray(g))) > 0.0
+
+
+def test_star1_is_host_only():
+    # star_1 (k=1) assembles the cotangent weights host-side, so it cannot be
+    # traced through the mesh vertices.
+    import pytest
+
+    mesh = _mesh64(1)
+    faces = mesh.faces
+
+    def star1_sum(verts):
+        return jnp.sum(
+            mesh_star_k(Mesh(vertices=verts, faces=faces), 1).values
+        )
+
+    with pytest.raises(Exception):
+        jax.jit(star1_sum)(mesh.vertices)
+
+
 def _random_form(mesh, seed=0):
     e = mesh_gradient(mesh).n_rows
     return jnp.asarray(np.random.default_rng(seed).standard_normal(e))
