@@ -2505,6 +2505,23 @@ register(
         invariants=('matrix-free CG for SPD systems (cuSolver-free)',),
     )
 )
+for _kname, _kinv in (
+    ('bicgstab', 'matrix-free BiCGSTAB (non-symmetric, cuSolver-free)'),
+    ('gmres', 'matrix-free restarted GMRES (non-symmetric, cuSolver-free)'),
+    ('minres', 'matrix-free MINRES (symmetric indefinite, cuSolver-free)'),
+):
+    register(
+        OpInfo(
+            f'nitrix.linalg.{_kname}',
+            fixture=lambda: (
+                (_spd_matrix(), jax.random.normal(_key(2), (5,))),
+                {},
+            ),
+            diff_arg=1,
+            vmap_arg=1,
+            invariants=(_kinv,),
+        )
+    )
 
 
 # Matrix-free nonlinear least squares share a fixed linear residual

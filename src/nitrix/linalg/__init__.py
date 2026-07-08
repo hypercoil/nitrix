@@ -52,7 +52,7 @@ from .matrix import (
     vec2sym,
 )
 from .decompose import randomized_svd
-from .krylov import cg
+from .krylov import bicgstab, cg, gmres, minres
 from .matrix_function import (
     chebyshev_apply,
     chebyshev_coefficients,
@@ -102,6 +102,9 @@ __all__ = [
     'solve',
     'cho_solve',
     'cg',
+    'bicgstab',
+    'gmres',
+    'minres',
     # matrix functions
     'matrix_exp',
     'matrix_log',

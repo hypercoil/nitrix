@@ -4,9 +4,16 @@
 > `linalg.krylov.cg`, matrix-free conjugate gradients for SPD systems, dense
 > or matvec, differentiable), graduated by the registration suite as the
 > wedge-resilient on-device solver for the GN/LM normal equations (see
-> `docs/design/registration.md` and `IMPLEMENTATION_PLAN.md §10.3`). Still
-> open: `minres` / `lsqr` / `bicgstab` (same template), gated by §13.
-> Provenance: `docs/feature-requests catalogue §12.1`.
+> `docs/design/registration.md` and `IMPLEMENTATION_PLAN.md §10.3`).
+> **`bicgstab` + `gmres` + `minres` now shipped too (2026-07-08):** the
+> non-symmetric pair (thin wraps of JAX's `bicgstab`/`gmres` — the
+> non-symmetric resolvent `(αI − J)` for spectral DCM) and `minres`
+> (symmetric-indefinite, implemented Paige–Saunders + `jax.lax.custom_linear_solve`
+> for the implicit-VJP; verified vs scipy and grad-vs-analytic to ~1e-10). Only
+> `lsqr` (matrix-free rectangular least-squares, Golub–Kahan) remains — **deferred
+> as rare in neuroimaging** (least-squares there is dense GLM / GN-LM, covered by
+> the shipped `residualise` / `cg` normal-equation paths), not a stability or
+> feasibility blocker. Provenance: `docs/feature-requests catalogue §12.1`.
 
 **What.** Matrix-free iterative linear solvers, generalising the
 implicit-operator pattern already proven by the `laplacian_eigenmap`
