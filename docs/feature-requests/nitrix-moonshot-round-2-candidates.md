@@ -371,11 +371,22 @@ polyhedral-homotopy continuation from a generic start system, path-tracked in `�
 a-posteriori interval certification of each endpoint. Output: the real root set, a
 per-root validity certificate, and a "no root missed" flag. Roots differentiable in `θ`
 by the implicit function theorem where the Jacobian is nonsingular.
-*Honest caveat.* Exactness holds only at the truncation order; under noise the right
-object is *all critical points* of the (Rician) SSE — still yielding the certified
-global optimum and all competing minima, which multi-start NLLS cannot guarantee.
-*Oracle.* Root count = mixed volume / Bézout; agreement with Gröbner bases on random
-dense systems; Krawczyk/Smale-α certification; `‖F(x*)‖ ≤ ε` at fp64.
+*Honest caveat.* Exactness holds only at the truncation order. Under noise the
+statistic lies *off* the image variety, so the exact system has no real solution and
+the right object is *all critical points* of a weighted **minimum-distance** criterion
+against the polynomial moment map — still yielding the certified global optimum and all
+competing minima, which multi-start NLLS cannot guarantee. **Correction (2026-07-10,
+raised by the assistant):** the count invariant there is the **Euclidean-distance
+degree**, not the maximum-likelihood degree, and a **Rice/noncentral-χ likelihood is
+inadmissible** — its stationarity is `ν = m·I₁(mν/σ²)/I₀(mν/σ²)`, transcendental in the
+Bessel ratio, with no polynomial critical system. Magnitude data enter through the
+*statistic* (noise-floor-corrected second moment, `E[m²] = ν² + dσ²`), never the
+objective; the exact likelihood geometry is **K3/filing 18's** concern, and the two
+compose — 17 certifies the complete candidate set, 18 adjudicates it.
+*Oracle.* Root count = mixed volume / Bézout (exact system) and ED degree (critical
+system); agreement with Gröbner bases on random dense systems; Krawczyk/Smale-α
+certification; `‖F(x*)‖ ≤ ε` at fp64; a published ML degree of a *discrete rational*
+model as an independent count oracle only.
 *Score:* ①5 ②5 ③2. **The hardest item in the batch.**
 
 **K3 · Profile-likelihood + Fisher/CRLB identifiability trace for batched NLLS.**
