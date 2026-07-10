@@ -1,6 +1,6 @@
 # nitrix-moonshot round 2 — candidate problems and frontier kernels
 
-**Status:** research ledger / proposal. Created 2026-07-09. No filings minted yet.
+**Status:** living ledger. Created 2026-07-09; filings 15–28 minted 2026-07-10.
 
 ## Purpose and method
 
@@ -719,7 +719,16 @@ bounded-distortion bijective mapping; nonsmooth convex optimisation & implicit
 differentiation; individualised parcellation with certificates; meta-analysis /
 normative modelling / harmonisation; microstructure identifiability.
 
-No filings have been minted. When they are, they go to `nitrix-moonshot/` as
-domain-free `PROBLEM.md` + `validation.md` (+ `protocols.py` only where an existing
-seam is targeted), grep-gated against the round-1 denylist. The anchors above stay
-here.
+**Filings minted.** The fourteen kernels were filed as `nitrix-moonshot/15-…` through
+`28-…` on branch `round-2-filings` (commit `49b5f93`), each a domain-free `PROBLEM.md`
++ `validation.md`, plus `protocols.py` in the eleven cases that target an existing seam
+(17, 20 and 21 open new seams and carry none). Gates: 39 files, denylist-clean, uniform
+section structure, 11/11 protocols parse. DOI strings are exempt from the grep gate and
+stripped before it runs — a DOI carries no domain information, and dropping a canonical
+citation to satisfy a substring match would be the worse defect.
+
+Round-2 filings are **deliberately less specified** than round 1: each fixes a contract
+and an oracle and leaves the recipe open, because for several of these problems
+prescribing the method would be prescribing the wrong one.
+
+The anchors in this ledger stay here, and never appear in a filing.
