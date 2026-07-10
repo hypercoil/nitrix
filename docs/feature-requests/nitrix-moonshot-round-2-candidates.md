@@ -562,7 +562,7 @@ routing signal). **② work** — relative effort. **③ impact** — ecosystem 
 | # | Kernel | Serves | ① low self-confidence | ② work | ③ impact |
 |---|---|---|:---:|:---:|:---:|
 | KA | Certified differentiable nonsmooth solver | P3, P4, P8 | 3 | **5** | **5** |
-| KB | Tiled kernel-Gram reduction (JAX-KeOps) | P7 | 2 | 3 | **5** |
+| ~~KB~~ | Tiled kernel-Gram reduction — **dissolved into K10** (see audit) | P7 | — | — | — |
 | K1 | Anisotropic/Finsler HJ + adjoint | P1 | 4 | **5** | 4 |
 | K2 | Certified all-real-root polynomial system | P2 | **5** | **5** | 2 |
 | K3 | Profile-likelihood + Rician CRLB | P2 | 1 | 2 | 3 |
@@ -616,6 +616,76 @@ routing signal). **② work** — relative effort. **③ impact** — ecosystem 
   filings 00 and 02 gate a surprising amount of round 2 (00 → KB → K10/K11 → K9;
   02 → K7, K13), which strengthens the round-1 recommendation to build those two
   internally and early.
+
+## Overlap and synergy audit vs round 1
+
+Checked against the *text* of the 14 round-1 `PROBLEM.md` files, in particular their
+declared **non-goals** — which turn out to be the most informative surface, because a
+declared non-goal is a seam someone deliberately left open.
+
+### One kernel dissolved
+
+**KB is not a filing.** The memory-linear tiled kernel-Gram reduction *is* an
+`einred`/`genred` formula plus its backward atoms — filing 00 already builds that
+engine, so KB would have re-filed it. The requirement (never materialise the `N×M`
+Gram; ship a hand-written VJP) is instead folded into **K10** as a stated invariant,
+where it belongs. Round 2 therefore mints **14** filings, not 15.
+
+### Round-2 kernels that would *collide* if filed naively
+
+| Kernel | Collides with | Resolution |
+|---|---|---|
+| K4 non-negative Fredholm | 05 spherical deconvolution | 05's forward operator is the diagonal zonal case; K4 is stated for a **general** linear operator. 05's `apply` becomes a K4 instance. |
+| K6 cone-degenerate inversion | KA | K6's splitting *is* a KA instance. K6's filing is scoped to the **stability estimate** and the symbol preconditioner, and consumes KA. |
+| K9 square-root monoid scan | 00 genred | genred is a *reduction*; K9 is a *prefix scan* over a non-commutative monoid. K9 consumes genred's algebra abstraction rather than restating it. |
+| K11 manifold transport | 12 SPD statistics | 12 ships Fréchet mean + parallel transport **for SPD in closed form**. K11 is the generic `exp`/`log`-only algorithm; **SPD is K11's oracle, not its subject**. |
+| K5 integer coboundary | 09 persistence | Same chain complex, different coefficient ring (`ℤ` vs `𝔽₂`) and different objective (min-cost flow vs pairing). Shared sparse boundary-operator representation. |
+| K7 matrix-free GMRF | 13 variational Laplace | 13 estimates log-dets for **dense matrix-free** operators; K7 for **sparse `Q`** plus selected inversion. Must adopt 13's `LogDetEstimator` protocol, not fork it. |
+| K1 anisotropic HJ | 03 heat-method geodesics | 03 is a mesh + elliptic-solve approximation; K1 is a grid + causal-upwind exact solve. Disjoint methods; 03's exact polyhedral oracle validates K1's isotropic limit. |
+
+### Conversely — round-1 filings that gain from round 2
+
+This is the stronger direction, and it lands squarely on filings' own declared
+non-goals:
+
+- **05 ← K4 + KA.** 05 explicitly declares *"No hard-constraint QP guarantee… the
+  solver enforces non-negativity as a certified soft floor… interior-point/active-set
+  QP with exact feasibility is out of scope."* K4 is precisely that missing exact
+  constraint, and KA supplies its certificate and its correct derivative.
+- **04 ← K8 + KA.** 04 declares *"No barycentre, multi-marginal, or continuous
+  transport in this filing."* K8 needs and supplies the Wasserstein barycentre (in
+  closed form in the 1-D fibered case). KA supplies a rigorous stopping certificate
+  for the Sinkhorn fixed point in place of an iteration budget.
+- **03 ← K1.** 03 declares *"Not an exact geodesic solver"* and *"No cut-locus /
+  geodesic-path extraction. Only the distance field is returned, not the minimising
+  paths."* K1 returns arrival time **and** the geodesic flow, exactly, anisotropically.
+- **12 ← K11.** 12 declares *"No manifold-valued regression or classification — those
+  are built by composing these primitives and are out of scope."* K11 is that
+  composition, done once and generically.
+- **08 ← K10.** 08 declares *"`similarity` is a supplied callable."* K10 is the
+  supplied callable for curves and surfaces — a correspondence-free data attachment,
+  which is the case 08 cannot otherwise serve.
+- **11 ← KA.** Principal component pursuit is a nonsmooth composite (nuclear + ℓ¹)
+  solved by ADMM with singular-value thresholding. KA gives it a duality-gap
+  certificate and a *correct* Jacobian, rather than whatever autodiff returns at a
+  rank-boundary.
+- **13 ← K3 + K7.** K3's profile likelihood is the identifiability audit of exactly the
+  fits 13 produces — it checks the Gaussian approximation that 13's `LaplaceResult.cov`
+  assumes. K7 is 13's sparse-precision complement.
+- **06 ← K9.** 06's integrators produce the trajectories; K9 infers the latent chain
+  behind them in `O(log T)` span.
+- **02 ← consumed by K7, K13.** Two more consumers for the eigensolver, strengthening
+  the round-1 case to build it first.
+- **01 ← reused by K12, K10.** 01's exact orientation predicates and broadphase are the
+  certification substrate K12's global-bijectivity check needs; reuse hardens both.
+- **00 ← two new consumers.** K10 adds a directional kernel-Gram atom; K9 adds a scan
+  seam over the same algebra abstraction. `genred` gains its second and third external
+  consumer, which is the best available evidence its abstraction is the right one.
+
+**Net.** Every round-2 kernel either fills a round-1 non-goal, supplies a round-1
+callable seam, or consumes a round-1 primitive. No kernel is orphaned, and the two
+round-1 filings flagged as "build in-house first" (00, 02) gate the most round-2 work —
+which is now a stronger recommendation than it was when made.
 
 ## Honest caveats carried forward
 
