@@ -1,6 +1,7 @@
 # Reducing unnecessary eagerness in the geometry suite — JIT-boundary hygiene, execution-class contract & a device-construction (cupy) cost/benefit
 
-> **Status (2026-07-08): PROPOSED — triage + design only, no code.** A suite-wide
+> **Status (2026-07-10): PARTIALLY IMPLEMENTED — the zero-dep sprint shipped;
+> the dep-gated / bench-gated remainder is deferred by design.** A suite-wide
 > pass over every `nitrix.geometry` / `nitrix.graph` op that executes host-side
 > (runtime `numpy`, eager, or degrades under `jax.jit`), folding two overlapping
 > concerns into one sprint:
@@ -13,13 +14,45 @@
 >    speed). Fix: lift the construction out behind a plan-passthrough / fit-apply
 >    seam (W3).
 >
-> The device-construction (cupy) dimension (W4) is **SPEC-gated** — it amends the
-> §5/§6.1/§6.2 dependency contract — and must clear a perf-bench-demonstrated
-> *multiplicative* win before any code. Provenance: user triage directives
-> 2026-07-08. Related: [`mesh-spatial-acceleration.md`](mesh-spatial-acceleration.md)
+> **Sprint 1 (zero-dep) is DONE** on branch `feat/geometry-eagerness-reduction`
+> (5 commits, not merged/pushed): W1 execution-class docstrings, W2.1 `mesh_star_k`
+> fix, and all three W3 (b)-style seams (`surface_smooth`, `hodge_decompose`, the
+> SHT family via a public `SHTPlan`). The device-construction (cupy) dimension
+> (W4) remains **SPEC-gated** — it amends the §5/§6.1/§6.2 dependency contract —
+> and must clear a perf-bench-demonstrated *multiplicative* win before any code;
+> W2.2 (`jnp`-port `mesh_to_sdf` / brute distance) is bench-signal-gated; the
+> two low-priority sphere-param seams are "only if a consumer asks". Provenance:
+> user triage directives 2026-07-08, sprint 2026-07-10. Related:
+> [`mesh-spatial-acceleration.md`](mesh-spatial-acceleration.md)
 > (C5), [`alternative-interp-backends-xla.md`](alternative-interp-backends-xla.md)
 > (B16), [`morphology-gpu-scaling.md`](morphology-gpu-scaling.md),
 > [`geometry-suite-audit.md`](geometry-suite-audit.md) (MIN-06, M-05, A1).
+
+## Implementation status (2026-07-10)
+
+Branch `feat/geometry-eagerness-reduction`, off `main` after the FR commit
+`cd5d2d7`. Not merged, not pushed. Every step verified per-file green (ruff +
+mypy-strict on the geometry sources; final combined regression 56 passed across
+`test_dec` / `test_surface_smoothing` / `test_harmonics` /
+`test_op_matrix_completeness`).
+
+| Work item | State | Commit | Notes |
+|---|---|---|---|
+| **W1** execution-class docstrings | ✅ shipped | `3b08105` | `mesh_to_sdf` (B), `nearest_surface_distance` grid+brute (A/B), `mesh_watershed` (A), plus the C/D tags on the seam ops |
+| **W2.1** `mesh_star_k` k=0/k=2 pure-JAX | ✅ shipped | `b94a8c1` | host `np.asarray` hoisted into the k=1 branch; module + method docstrings corrected (k=0/k=2 jittable + differentiable) |
+| **W3** `surface_smooth` seam | ✅ shipped | `2ac7acd` | `surface_smooth_operator` + `surface_smooth_apply`; convenience *defined as* apply∘operator (byte-identical) |
+| **W3** `hodge_decompose` seam | ✅ shipped | `f812156` | `hodge_operator` + `hodge_apply`; static vertex count rides in `gradient.n_cols` (no custom pytree) |
+| **W3** SHT family seam | ✅ shipped | `6058316` | private `_plan` → public `SHTPlan` + `sht_plan`; `sht_forward(f, plan)` / `sht_inverse(coeffs, plan)`; `n_lon = plan.longitude.shape[0]` |
+| **W2.2** `jnp`-port `mesh_to_sdf` / brute distance | ⏸ deferred | — | bench-signal-gated (delegated to `nitrix-perf-bench`) |
+| **W3** `spherical_parameterize` / `spectral_sphere_embedding` seams | ⏸ deferred | — | init/preproc; "only if a consumer asks" |
+| **W4** cupy optional backend | ⏸ SPEC-gated | — | needs the SPEC argument *and* a multiplicative perf-bench win |
+
+Op-matrix bookkeeping: the three new *apply* ops enter `CATALOGUE`
+(`surface_smooth_apply`, `hodge_apply`, the plan-threaded SHT overrides); the
+three *operator constructors* (`surface_smooth_operator`, `hodge_operator`,
+`sht_plan`) join the EXCLUDE allowlist alongside the existing `mesh_gradient`
+family, per the return-the-operator convention. No op-matrix regen was run
+(the completeness guard reads `CATALOGUE` at import).
 
 ## Headline finding
 
@@ -65,11 +98,11 @@ the built operator (the good pattern) or fuse build+apply (mixed-mode)?
 | Op | Cat | Host-side mechanism (trace-unknowable) | Diff? | Seam | Docstring |
 |---|---|---|---|---|---|
 | `marching_cubes` | **A** | # iso-crossing triangles = f(volume vs level) | no | host-only | **adequate** |
-| `mesh_to_sdf` | **B** | *none* — output shape is the static `shape` arg | no | — | partial |
-| `nearest_surface_distance` (grid) | **A** | ragged triangle→cell bin length | no | host-only | partial |
-| `nearest_surface_distance` (brute) | **B** | *none* — static dense `O(n·F)` | no | — | partial |
+| `mesh_to_sdf` | **B** | *none* — output shape is the static `shape` arg | no | — | ✅ W1 |
+| `nearest_surface_distance` (grid) | **A** | ragged triangle→cell bin length | no | host-only | ✅ W1 |
+| `nearest_surface_distance` (brute) | **B** | *none* — static dense `O(n·F)` | no | — | ✅ W1 |
 | `cortical_thickness` (`symmetric`) | **A** | inherits nearest-triangle search | no | (delegates) | **adequate** |
-| `surface_smooth` | **C-mesh** | cotangent ELL `k_max`; **build+CG fused in one call** | **yes** | **mixed-mode** ← W3 | partial |
+| `surface_smooth` | **C-mesh** | cotangent ELL `k_max`; build lifted to `surface_smooth_operator` | **yes** | ✅ **seam (W3)** | ✅ W1 |
 | `find_self_intersections` | **A** | # intersecting pairs = f(coords), `O(F²)` | no | host-only | **adequate** |
 | `remove_self_intersections` | **A** | inherits pair count; per-iter host↔device bounce | no | host-only | **adequate** |
 
@@ -82,19 +115,19 @@ the built operator (the good pattern) or fuse build+apply (mixed-mode)?
 | `surface_resample` | **A** | resampling-ELL nnz & `k_max` = f(geometry) | **yes** (apply) | **returns ELL (good)** | good |
 | `parcel_centroids` | **D** | `n_parcels = int(parcellation.max())+1` when `None` | yes | (scalar) | **adequate** |
 | `spherical_conv` | — | *not host-side*; `O(n²)` device compute only | yes | — | adequate |
-| `sht_forward` / `sht_inverse` | **C-static** | Legendre plan from **static band-limit only** | yes | already jittable; uncached | **adequate** |
-| `real_sht_forward` / `real_sht_inverse` | **C-static** | inherit static plan | yes | as above | adequate |
-| `sht_rotation_matrix` / `sht_rotate` | **C-static** | Wigner-y generators from static degree | **yes** (in `R`, `coeffs`) | as above | good |
-| `sht_grid` | **C-static** | nodes from static band-limit | n/a | **is** the plan handle | marginal |
+| `sht_forward` / `sht_inverse` | **C-static** | Legendre plan from **static band-limit only** | yes | ✅ **`SHTPlan` seam (W3)** | ✅ adequate |
+| `real_sht_forward` / `real_sht_inverse` | **C-static** | inherit static plan | yes | ✅ **`SHTPlan` seam (W3)** | adequate |
+| `sht_rotation_matrix` / `sht_rotate` | **C-static** | Wigner-y generators from static degree | **yes** (in `R`, `coeffs`) | static-degree (not migrated; already jittable) | good |
+| `sht_grid` | **C-static** | nodes from static band-limit | n/a | **is** the plan handle | ✅ W1 (→ `sht_plan`) |
 
 ### geometry — DEC / topology / intersection
 
 | Op | Cat | Host-side mechanism | Diff? | Seam | Docstring |
 |---|---|---|---|---|---|
 | `mesh_gradient` / `mesh_curl` | **C-mesh** | # unique edges from concrete `faces`; `±1` incidence | n/a (connectivity) | **returns ELL (good)** | **adequate** |
-| `mesh_star_k` | **C-mesh** | k=1: `E` + cotangent (host). **k=0/k=2 pure `jnp`** | **k=0/k=2 yes** | **returns ELL (good)** | **inadequate** — W2 |
+| `mesh_star_k` | **C-mesh** | k=1: `E` + cotangent (host). **k=0/k=2 pure `jnp`** | **k=0/k=2 yes** | **returns ELL (good)** | ✅ W2.1 + W1 |
 | `mesh_divergence` | **C-mesh** | `E` + `k_max` from connectivity | no | **returns ELL (good)** | adequate |
-| `hodge_decompose` | **C-mesh** | edge topology + host `star1`; **build+CG fused** | **yes** (in `omega`) | **mixed-mode** ← W3 | **adequate** |
+| `hodge_decompose` | **C-mesh** | edge topology + host `star1`; build lifted to `hodge_operator` | **yes** (in `omega`) | ✅ **seam (W3)** | **adequate** |
 | `euler_characteristic` / `genus` | **D** | returns Python `int`; unique-edge count | n/a (invariant) | — | **adequate** |
 | `spatial_gradient` | — | *not host-side*; pure `jnp` | yes | — | adequate |
 
@@ -104,10 +137,10 @@ the built operator (the good pattern) or fuse build+apply (mixed-mode)?
 |---|---|---|---|---|---|
 | `surface_boundary_map` | — | *not host-side*; ELL edge-aggregate | yes | — | adequate |
 | `connected_components` | — | *not host-side*; device label-propagation (exemplar) | n/a | — | **adequate** |
-| `mesh_watershed` | **A** | priority-flood pop order + basin count; scalar-Python | no | host-only | adequate (silent on jit) |
+| `mesh_watershed` | **A** | priority-flood pop order + basin count; scalar-Python | no | host-only | ✅ W1 (now explicit) |
 | `integrate_velocity_field` (`n_steps='auto'`) | **D** | `n_steps = f(max|v|)` | yes | (scalar) | **adequate** (×3) |
 
-## W1 — execution-class docstring contract (ask #1)
+## W1 — execution-class docstring contract (ask #1) — ✅ SHIPPED (`3b08105`)
 
 One greppable tag line per host-touching op, **honest per category** (not a
 uniform "XLA infeasible" that is false for B/C/D):
@@ -122,30 +155,46 @@ uniform "XLA infeasible" that is false for B/C/D):
   <plan-arg> to run the whole call under jit (W3).`
 - **D** → `Execution class: eager convenience. Pass <arg> explicitly for jit.`
 
-Add/correct only where the triage marks *partial/inadequate/marginal*
+Added/corrected only where the triage marked *partial/inadequate/marginal*
 (`mesh_to_sdf`, `nearest_surface_distance`, `surface_smooth`, `sht_grid`,
 `mesh_star_k`, `mesh_watershed`). The `adequate`/`excellent` docstrings
 (`spherical_parameterize`, `marching_cubes`, `hodge_decompose`, the SHT module
-header) are the template — no churn. **Pure docs; proceed on approval un-gated.**
+header) were the template — no churn.
 
 ## W2 — two latent findings beyond docs
 
-1. **`mesh_star_k` — a wrong differentiability claim + dead eager work.** The DEC
-   module docstring's blanket *"not differentiable w.r.t. vertex coordinates"* is
-   **false for k=0 (`⋆₀`) and k=2 (`⋆₂`)** (pure `jnp`, differentiable). And
-   `mesh_star_k` unconditionally runs `np.asarray(mesh.vertices/faces)` (≈`dec.py:208`)
-   even for k=0/k=2, doing dead host work and defeating jit on the two
-   device-clean branches. Fix = correct the split + hoist the host conversion
-   into the k=1 branch only. Small, correctness-adjacent.
+1. **`mesh_star_k` — a wrong differentiability claim + dead eager work. ✅ FIXED
+   (`b94a8c1`).** The DEC module docstring's blanket *"not differentiable w.r.t.
+   vertex coordinates"* was **false for k=0 (`⋆₀`) and k=2 (`⋆₂`)** (pure `jnp`,
+   differentiable). And `mesh_star_k` unconditionally ran
+   `np.asarray(mesh.vertices/faces)` even for k=0/k=2, doing dead host work and
+   defeating jit on the two device-clean branches. Fixed: the host conversion is
+   hoisted into the k=1 branch only; k=0/k=2 are now jittable through the mesh
+   and differentiable w.r.t. the vertices (pinned by
+   `test_star_k_metric_stars_are_jittable_and_differentiable`), with the k=1
+   host-only path guarded by `test_star1_is_host_only`; module + method
+   docstrings corrected.
 
-2. **`mesh_to_sdf` and brute `nearest_surface_distance` are Category B, not A.**
+2. **`mesh_to_sdf` and brute `nearest_surface_distance` are Category B, not A.
+   ⏸ DEFERRED (bench-signal-gated).**
    No shape barrier — a `jnp` port (with `lax.map` over voxel/query chunks) is
    jittable, GPU-native, static-shaped, **zero new dependency**. Strictly better
    than cupy for these two. First perf move if their host cost is measured to
    matter (delegated to `nitrix-perf-bench`); filed here, not committed pending a
    bench signal.
 
-## W3 — plan-passthrough seams: un-splitting the JIT region (ask: mixed-mode ops)
+## W3 — plan-passthrough seams: un-splitting the JIT region (ask: mixed-mode ops) — ✅ SHIPPED (`2ac7acd`, `f812156`, `6058316`)
+
+**Shipped seams (all (b)-style, convenience *defined as* apply∘operator):**
+`surface_smooth_operator` + `surface_smooth_apply`; `hodge_operator` +
+`hodge_apply` (returning the `HodgeOperator` NamedTuple `(gradient, curl, star1)`,
+static vertex count in `gradient.n_cols`); and the SHT transform family on a
+public `SHTPlan` + `sht_plan` fit (`sht_forward(f, plan)` / `sht_inverse(coeffs,
+plan)` / the real variants). Each apply half is **unconditionally jittable** with
+the operator held as a plain pytree arg — no custom pytree needed. **Remaining
+(deferred):** the `spherical_parameterize` / `spectral_sphere_embedding` seams
+(low-pri init/preproc) and the `sht_rotation_matrix` / `sht_rotate` migration
+(already jittable via `static_argnames`; not consumer-blocking).
 
 **The problem.** A "mixed-mode" op fuses a host construction (from an
 array-valued mesh) with an otherwise-jittable data-path in a *single* call that
@@ -190,11 +239,11 @@ consumers a *stronger, unconditional* jit guarantee and cannot be mis-called):
   jittable" is a subtle contract — a naive `jit(f)` still fails unless the caller
   knows to pass `operator`; that weaker guarantee is why (b) is preferred.
 
-**The SHT family takes (b), not a special case.** Its `_plan` factors cleanly
-into fit-state: promote the private `_plan` (nodes, weights, `(L+1,2L+1,n_lat)`
-Legendre table, `m_to_fft`) to a public `SHTPlan` pytree (a superset of the
-existing `SHTGrid`), expose `sht_plan(band_limit, *, grid) -> SHTPlan` as the
-fit, and take `sht_forward(f, plan)` / `sht_inverse(coeffs, plan)` as the apply
+**The SHT family takes (b), not a special case.** *(Shipped `6058316` — this is
+the design record.)* Its `_plan` factors cleanly into fit-state: the private
+`_plan` (nodes, weights, `(L+1,2L+1,n_lat)` Legendre table, `m_to_fft`) was
+promoted to a public `SHTPlan` pytree, `sht_plan(band_limit, *, grid) -> SHTPlan`
+is the fit, and `sht_forward(f, plan)` / `sht_inverse(coeffs, plan)` are the apply
 (`band_limit` is implicit in the plan's shapes — `sht_inverse` already infers
 it). This dissolves the uncached-rebuild wart (the consumer holds the plan)
 without any caching machinery, and unifies SHT with the rest of the suite.
@@ -202,11 +251,12 @@ without any caching machinery, and unifies SHT with the rest of the suite.
 generators are the plan). SHT is *already* jittable via `static_argnames`, so it
 is lowest-urgency within W3 — but it takes the same seam.
 
-**Per-op priority:** `surface_smooth` and `hodge_decompose` first (they are *not*
-jittable at all today — highest consumer value); the SHT family next (uniformity
-+ rebuild-elimination); `spherical_parameterize` / `spectral_sphere_embedding`
-last — init/preprocessing consumers rarely jit, do only if asked. All **zero-dep**
-and in the same sprint as W1/W2.
+**Per-op priority (as executed):** `surface_smooth` and `hodge_decompose` first
+(they were *not* jittable at all before — highest consumer value); the SHT
+family next (uniformity + rebuild-elimination) — **all three shipped**;
+`spherical_parameterize` / `spectral_sphere_embedding` last — init/preprocessing
+consumers rarely jit, deferred until a consumer asks. All **zero-dep** and in the
+same sprint as W1/W2.
 
 ## W4 — device-side dynamic construction (cupy): ask #2
 
@@ -243,13 +293,14 @@ the taxonomy that says **which** ops could even use cupy.
 
 ## Recommendation (sequencing)
 
-1. **One zero-dep sprint (un-gated on approval):** W1 (docstring contract) + W2.1
-   (`mesh_star_k` fix) + W3 ((b)-style constructor/apply seams: `surface_smooth`
-   and `hodge_decompose` first, then the SHT family via a public `SHTPlan`
-   fit-state). All pure-JAX / docs, no SPEC impact; W3 is the highest-value
-   consumer-facing win (un-splits real JIT regions).
-2. **Still zero-dep, on a bench signal:** W2.2 — `jnp`-port `mesh_to_sdf` and the
-   brute distance path.
+1. **One zero-dep sprint (un-gated on approval): ✅ DONE
+   (`feat/geometry-eagerness-reduction`, not merged/pushed).** W1 (docstring
+   contract) + W2.1 (`mesh_star_k` fix) + W3 ((b)-style constructor/apply seams:
+   `surface_smooth` and `hodge_decompose` first, then the SHT family via a public
+   `SHTPlan` fit-state). All pure-JAX / docs, no SPEC impact; W3 was the
+   highest-value consumer-facing win (un-splits real JIT regions).
+2. **Still zero-dep, on a bench signal: ⏸ deferred.** W2.2 — `jnp`-port
+   `mesh_to_sdf` and the brute distance path.
 3. **SPEC-gated + bench-gated:** a cupy path admitted *only* as a **profile-gated
    optional backend behind the existing `backend=` axis** (auto-off; loud
    `NitrixBackendFallback` to numpy when absent, per SPEC §7), scoped to the
