@@ -303,6 +303,38 @@ literature sweep surfaced, and what it **builds on** from round 1.
 
 ---
 
+### P9 · Functional parcellation without arbitrary reference loci
+
+- **Anchor.** The strongest functional-parcellation models build a *selectivity space*:
+  compute each vertex/voxel's affinity to a set of **reference loci**, normalise, and cluster
+  the resulting selectivity vectors. The loci are chosen by fiat.
+- **Why it is stuck.** The reference loci are arbitrary, and the standard remedies are
+  unprincipled: an EM-like iteration that instantiates subject-specific loci, or feeding the
+  first-round clusters back as the new loci and iterating to a fixed point — a self-referential
+  loop with no well-posedness, no certified optimum, and no differentiable map. The selectivity
+  representation inherits the arbitrariness of the anchor set.
+- **Kernels.** **K14** (self-consistent self-representation basis) upstream; directory 28
+  (certified co-assignment, K13) and directory 02 (spectral embedding) downstream.
+- **Overlooked bet.** The principled object is **self-representation**: let the data be its own
+  dictionary. Self-expressive coding (`X = XC`, `diag C = 0`, sparse/low-rank) makes each
+  vertex's selectivity a data-consistent combination of *other* vertices — no external loci
+  exist — and the affinity `|C| + |Cᵀ|` feeds the co-assignment SDP or the spectral embedding.
+  Archetypal analysis (`X = XBA`, simplex constraints) makes the loci **data-derived extreme
+  points**, self-consistent by construction, each vertex a simplex coordinate. Both are a single
+  convex/bi-convex programme with a certified optimum and — via directory 15 — an implicit-diff
+  solution map, so the heuristic EM feedback loop becomes a well-posed factorisation. The
+  *partition* arbitrariness is separately dissolved by 28 (P8); **K14 dissolves the upstream
+  selectivity-construction arbitrariness**.
+- **Builds on.** Directory 28 (co-assignment), 02 (eigensolvers), 15 (nonsmooth adjoint),
+  19 (simplex/non-negative projection), 00 (streaming reduction).
+
+*(Appended after the round-2 overlap audit, from the multimodal-alignment / parcellation /
+progression-modelling triage; the co-decision was to mint K14 and to route the alignment and
+progression problems to compositions of existing filings — see the conversely-notes and the
+04/26 extension requests.)*
+
+---
+
 ## The kernels
 
 Two are **substrate** (they underpin several of the rest and should exist first).
@@ -563,6 +595,31 @@ the certificate gap *and* the planted-model fit, never the certificate alone.
 
 ---
 
+**K14 · Self-consistent self-representation basis (self-expressive + archetypal).**
+Given a data matrix `X ∈ ℝ^{d×n}`, build a data-derived basis and affinity with **no external
+anchors**, in two modes. *Self-expressive:* `min_C ½‖X − XC‖² + λΩ(C)`, `diag C = 0`,
+`Ω ∈ {ℓ1, nuclear, elastic-net}`; affinity `W = |C| + |Cᵀ|`, convex hence globally optimal, and
+**subspace-preserving** under a separation condition. *Archetypal:* `min_{A,B} ½‖X − XBA‖²`,
+columns of `A, B` on the simplex; archetypes `Z = XB` in the item convex hull, exact under a
+**separability** condition via a successive-projection witness. A differentiable map
+`X ↦ (C or A)` by the implicit KKT rule (directory 15), the simplex/non-negative projection by
+directory 19, and the `n×n` coefficient carried **sparsely** (directory 00). Returns the
+*representation* only; the partition (28) and the spectral embedding (02) consume it.
+*Oracle.* Planted unions-of-subspaces at varying separation — the affinity fed to 28/02 must
+recover the blocks, and the subspace-preserving certificate must fire above the separation
+threshold and honestly *not* below; separable archetypal mixtures with vertices at data points —
+exact successive-projection recovery, gauge matched; brute-force archetypal optima on tiny
+instances; algebraic invariants (`diag C = 0`, `W` symmetric, `A` column-stochastic, hull
+containment).
+*Caveat:* self-representation is well-established (sparse subspace clustering, archetypal
+analysis); the novelty is the **certified + differentiable** framing and the composition with
+28/02, not the base method. It presumes a subspace / convex-hull generative structure; where the
+data is a smooth continuum with no blocks, the certificate reports honestly rather than
+manufacturing structure.
+*Score:* ①2 ②3 ③4.
+
+---
+
 ## Score assessment
 
 Axes as in round 1. **① low self-confidence** — higher = *less* confident I could
@@ -587,6 +644,7 @@ routing signal). **② work** — relative effort. **③ impact** — ecosystem 
 | K11 | Pole-ladder transport / Fréchet / geodesic reg. | P7 | 2 | 3 | 3 |
 | K12 | Beltrami chart + bijectivity certificate | P8 | 4 | 4 | 3 |
 | K13 | Burer–Monteiro co-assignment + gauge | P8 | 3 | 4 | 3 |
+| K14 | Self-representation basis (self-expressive + archetypal) | P9 | 2 | 3 | **4** |
 
 ### Reasoning
 
@@ -653,6 +711,7 @@ where it belongs. Round 2 therefore mints **14** filings, not 15.
 | K5 integer coboundary | 09 persistence | Same chain complex, different coefficient ring (`ℤ` vs `𝔽₂`) and different objective (min-cost flow vs pairing). Shared sparse boundary-operator representation. |
 | K7 matrix-free GMRF | 13 variational Laplace | 13 estimates log-dets for **dense matrix-free** operators; K7 for **sparse `Q`** plus selected inversion. Must adopt 13's `LogDetEstimator` protocol, not fork it. |
 | K1 anisotropic HJ | 03 heat-method geodesics | 03 is a mesh + elliptic-solve approximation; K1 is a grid + causal-upwind exact solve. Disjoint methods; 03's exact polyhedral oracle validates K1's isotropic limit. |
+| K14 self-representation | 11 structured decompositions (RPCA / NMF-adjacent) | K14's self-dictionary (`X = XC`) and simplex-archetypal (`X = XBA`) put the structure on the **coefficient**, distinct from 11's low-rank+sparse of `X` and from free-factor NMF's cone generators. The *partition* is directory 28 (round 2), which K14 feeds — pipeline `K14 → 28/02`, complementary not redundant; the differentiable adjoint is directory 15. |
 
 ### Conversely — round-1 filings that gain from round 2
 
