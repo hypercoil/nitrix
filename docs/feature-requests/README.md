@@ -19,6 +19,7 @@ the shared framing + history and indexes its atomised items:
 | Doc-drift / correctness fixes | [`perf-bench-feedback.md`](perf-bench-feedback.md) | Mechanical docstring fixes (file:line-pinned), *not* primitive proposals |
 | docs/feature-requests catalogue §12 brainstorm catalogue | `docs/feature-requests catalogue §12` (origin) | Substrate-compatible *candidate* primitives; promotion gated by `§13` |
 | Restricted-assistant (moonshot) filings | [`nitrix-moonshot-ledger.md`](nitrix-moonshot-ledger.md) | 14 hard problems hoisted to a pure-numerical core for the numerical-only assistant (filed domain-free in the sibling `nitrix-moonshot/`); this ledger holds the neuroimaging anchors + a difficulty/effort/impact assessment |
+| Restricted-assistant (moonshot) round 2 | [`nitrix-moonshot-round-2-candidates.md`](nitrix-moonshot-round-2-candidates.md) | 8 frontier/evergreen brain-mapping problems and the 15 numerical kernels (2 substrate + 13 frontier) that would unblock them; research ledger, no filings minted yet |
 
 Status is verified against the live `src/nitrix` surface as of 2026-06-02
 (interpolation-method dispatcher — `Lanczos` / `MultiLabel` /
