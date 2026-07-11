@@ -757,6 +757,63 @@ callable seam, or consumes a round-1 primitive. No kernel is orphaned, and the t
 round-1 filings flagged as "build in-house first" (00, 02) gate the most round-2 work —
 which is now a stronger recommendation than it was when made.
 
+## Cross-cutting instrument findings (post-mint triage)
+
+Two questions raised after the mint — "is `genred` an instrument for the reviewers' scaling
+blockers?" and "do we cover wave decomposition / large-scale wave analysis?" — resolved without new
+kernels, and are recorded here because both are synergies rather than gaps.
+
+### `genred` streaming reductions are the memory-linear substrate for the mesh-proximity scaling blockers
+
+The reconciliation reviews of the two mesh filings — **01** (certified genus-repair; the
+self-intersection classifier) and **07** (embedding-constrained surface flow; the clearance query) —
+both flagged an :math:`O(m^2)` / dense-gather **memory** blocker at real mesh scale (:math:`m \sim
+3\times10^5` faces). Both are **reductions over a pairwise (element × element) index space** —
+:math:`d_i = \min_j \operatorname{dist}(T_i, T_j)` (07), :math:`w_i = \sum_j \Omega(p_i, T_j)` (01) —
+that currently materialise the pairwise object. The fix is **not new memory machinery** but the
+already-built streaming-reduction substrate (round-1 filing **00** `genred`/`semiring` + the **ELL**
+block-sparse layer): *broad-phase → an ELL candidate-range structure → a `genred`/`semiring`
+reduction*, memory-linear by construction and differentiable via the hand-written adjoint.
+
+Load-bearing distinction: **`genred` removes the memory-quadratic wall (materialising the pairwise
+object); it does not remove the time-quadratic** :math:`O(m\cdot k)` **FLOPs** — the spatial broad-phase
+must still bound the candidate count :math:`k`. The streaming reduction is the memory-linear primitive
+*underneath* the acceleration, not a substitute for it. Note that 01's own in-flight fix
+(winding-by-propagation: one direct seed per connected component + an :math:`O(m)` label propagation) is
+a **better algorithm** than a naive `genred`-over-all-elements and should be kept; only the per-seed
+winding *sum* is a `genred` reduction worth consolidating onto. Does **not** apply to dense-linear-algebra
+(02), FFT-plus-trajectory-tape (08), or the combinatorial :math:`\mathbb{F}_2` reduction (09). Notes are
+logged in the 01 and 07 ADDENDUMs; a benchmark of the ELL-`genred` reduction against the current dense
+gather at target scale precedes any rewrite.
+
+### Wave decomposition / large-scale wave analysis (optical flow, travelling waves) is spanned by existing filings — no new frontier kernel
+
+A coverage triage of wave / optical-flow analysis (surface travelling waves, phase dynamics, wavefronts,
+spatiotemporal modes) found the space essentially covered by composition **plus two non-obvious
+synergies**, with the hard substrate already built:
+
+- **Surface phase unwrapping** *and* **phase-singularity / spiral-core detection** = **filing 20**
+  (integer coboundary correction) — its unwrapped cochain, and its :math:`dg/2\pi` residue 2-cocycle
+  *is* the phase winding per face. 20, filed for field-to-source phase, reaches travelling-wave phase
+  directly.
+- **Wavefront propagation** (an iso-phase front with spatially-varying speed) = **filing 16**
+  (anisotropic/Finsler Hamilton–Jacobi eikonal).
+- **Flow-field Helmholtz–Hodge classification** (source/sink/rotational/harmonic) = shipped
+  `geometry.dec.hodge_decompose`.
+- **Time-frequency / instantaneous phase** = shipped `signal.cwt` + `signal.fourier`.
+- **Optical-flow velocity field** = DEC surface gradient + a regularised / TV solve (15 / `linalg`);
+  **mass-transport flow** = the 04 dynamic-OT (Benamou–Brenier) extension already logged (E1).
+- **Spatiotemporal modes** (DMD / SPOD / complex PCA of the analytic signal) = 02 (SVD + eig; complex
+  PCA via the real-symmetric embedding :math:`\begin{smallmatrix}A&-B\\B&A\end{smallmatrix}`, so **no new
+  complex/Hermitian eigensolver is needed**) + 13's parametric resolvent / cross-spectral density.
+- **Spatial spectrum** (:math:`k`–:math:`\omega`) = SHT / Laplace–Beltrami eigenmodes (02) + a temporal FFT.
+
+**Verdict: no new frontier kernel warranted** — a "wave" filing would be redundant with the substrate.
+The one low-priority *maybe*, distinct from 29 (instantaneous self-representation) and 11 (CP/Tucker/
+RPCA), is a **shift-invariant / convolutional decomposition** for *recurring* spatiotemporal motifs
+(convolutional sparse coding, which composes 15's sparse solve + FFT convolution) — the numerical heart
+of quasi-periodic-pattern / motif discovery. Held, not minted.
+
 ## Honest caveats carried forward
 
 The sweeps were asked to be adversarial, and several findings are warnings rather than
