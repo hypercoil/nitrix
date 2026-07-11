@@ -335,6 +335,69 @@ progression problems to compositions of existing filings — see the conversely-
 
 ---
 
+### P10 · Lag-mapped confound regression and delay-field estimation
+
+- **Anchor.** A whole family of methods estimates a **per-voxel time delay** of a travelling
+  systemic signal, then regresses the delayed signal out or reads the delay itself as the
+  quantity of interest: sLFO denoising (RIPTiDe), CVR delay mapping under a breath-hold or
+  gas challenge, bolus arrival time in perfusion, lag threads. The shared recipe: correlate
+  each voxel's timeseries against a probe regressor across a grid of lags; take the per-voxel
+  `argmax`; fit a Gaussian (or parabola) to the peak for sub-TR precision; median-filter
+  ("despeckle") the lag outliers; iterate a refinement loop that realigns and re-averages to
+  update the probe; finally regress out the **voxel-specific** time-shifted regressor.
+- **Why it is stuck.** *Speed:* notoriously slow, and for structural reasons — the sub-TR peak
+  fit is a per-voxel nonlinear optimisation over ~`10⁵` voxels, and the final GLM has a
+  **voxel-specific design matrix** (the regressor is shifted by that voxel's delay), so it
+  cannot share a pseudo-inverse. *Robustness:* the Gaussian peak model is misspecified; the
+  despeckle is a heuristic stand-in for a spatial prior; the mask is a correlation threshold,
+  which conflates a weak signal with a broad peak; and a narrowband probe makes the correlation
+  oscillatory, so the `argmax` can lock onto the wrong lobe — mitigated only by clamping the
+  search range.
+- **Kernels.** **K15**.
+- **Overlooked bet.** Three structural facts dissolve all of it.
+  1. **The peak is exactly recoverable, and the Gaussian fit is a misspecified surrogate.** The
+     cross-correlation of band-limited signals is *itself band-limited in the lag*, so the
+     continuous correlation is exactly determined by its samples (Whittaker–Shannon) and the
+     peak is the root of the interpolant's derivative — a **vectorised** bracketed root-find
+     over all voxels at once, differentiable in closed form by the implicit function theorem,
+     replacing `10⁵` per-voxel nonlinear fits. The parabola/Gaussian fit carries a
+     *phase-dependent* bias, worst at the half-cell.
+  2. **The shifted-regressor family is rank ~7, and that same number explains the noisy lag
+     maps.** For a template band-limited to `B` and a search range `±Δ`, the family
+     `{x(t−τ)}` has ε-rank ≈ the time–bandwidth product `2B·(2Δ)+1`. For the sLFO band
+     (~0.15 Hz) and `±10 s` that is **about seven basis functions covering the entire lag
+     range** — so the voxel-specific-design GLM collapses to one rank-7 projection,
+     `O(V·r)` rather than `O(V·M·T)`. And the *same* count is an identifiability statement:
+     few degrees of freedom over the range ⇒ a **broad** peak ⇒ a weakly determined delay,
+     with a Cramér–Rao bound `∝ 1/(SNR·β²)` in the rms bandwidth `β`. The lag maps are noisy
+     for a reason that is computable, not filterable.
+  3. **The lag field is a scalar label field, so its global optimum is *attainable*.** With a
+     convex spatial regulariser, the non-convex cost-volume energy `Σᵢ cᵢ(τᵢ) + λ·TV(τ)` admits
+     an **exact** convex lifting (Ishikawa; Pock–Cremers–Bischof–Chambolle), so the global
+     minimiser is reachable **with a duality-gap certificate** — dissolving the despeckle
+     heuristic into a certified object. And the cycle-skip is not a nuisance but an
+     **integer-wrap ambiguity**, i.e. exactly directory 20's minimum-cost integer correction:
+     lag cycle-skipping and phase unwrapping are the same problem.
+- **The estimator class nitrix lacks.** `register` ships the *differential* flow estimator
+  (Demons/SyN: linearise, solve, iterate), valid only inside a linearisation radius. A `±10 s`
+  lag on a 0.15 Hz signal is far outside any such radius, so the problem is **irreducibly a
+  global search over a parameter axis**. That is a *distinct numerical object*, and it is
+  absent from the surface (`nitrix.signal` has no cross-correlation, no delay estimation, no
+  sub-sample peak, no cost-volume machinery) and absent from K1–K14.
+- **Builds on.** Directory 00 (streams the `V×M` volume — a fourth genred consumer), 15 (the
+  lifted convex solve + gap), 18 (CRLB + structural/practical identifiability, replacing the
+  correlation-threshold mask), 20 (the wrap), 16 (the arrival-time/eikonal reading of the lag
+  field), 14 (per-frequency rank-1 factorisation as a one-shot replacement for much of the
+  iterative refinement loop).
+- **Already covered, do not re-file.** The *sibling* denoisers are in hand: MP/NORDIC-style
+  shrinkage is directory 14; ICA- and CompCor-style nuisance removal is directory 11 + shipped
+  PCA; robust averaging in the refinement pass is shipped.
+
+*(Appended after the rapidtide-family coverage triage. This also **partially reverses** the
+earlier wave-analysis verdict — see the amended cross-cutting note.)*
+
+---
+
 ## The kernels
 
 Two are **substrate** (they underpin several of the rest and should exist first).
@@ -618,6 +681,44 @@ data is a smooth continuum with no blocks, the certificate reports honestly rath
 manufacturing structure.
 *Score:* ①2 ②3 ③4.
 
+**K15 · Regularised sub-grid parameter field from a similarity volume.** *(Directory 30.)*
+Given `n` sites with a neighbourhood structure, a **scalar** parameter `τ ∈ [τ₋, τ₊]`, and a
+parameter-indexed template family `g(τ)`, recover the field minimising
+`E(τ) = Σᵢ cᵢ(τᵢ) + λ·R(τ)` where `cᵢ(τ) = C(yᵢ, g(τ))` is the **non-convex** per-site cost and
+`R` is convex (TV / Huber-TV) — subject to four requirements the naïve recipe (sample the cost
+on a grid, per-site `argmax`, fit a parabola to three samples, median-filter the outliers)
+satisfies *none* of: **(a)** sub-grid accuracy certified against the *continuous* cost — the
+cost of a band-limited family is itself band-limited in `τ`, so the extremum is the root of the
+Whittaker–Shannon interpolant's derivative, bracketed, vectorised, IFT-differentiated, and
+**flagged** where `c″ ≈ 0`; **(b)** the **global** optimum with a **duality-gap certificate**,
+via the exact convex lifting of a scalar label space under a convex regulariser (Ishikawa,
+[10.1109/TPAMI.2003.1233908](https://doi.org/10.1109/TPAMI.2003.1233908); Pock–Cremers–Bischof–
+Chambolle, [10.1137/090757617](https://doi.org/10.1137/090757617)) — consuming directory 15;
+**(c)** the family's certified **ε-rank** `≈ 2B(τ₊−τ₋)+1` (time–bandwidth product; Slepian
+basis), which collapses the *site-specific-design* regression that consumes the field from
+`O(n·m·T)` to `O(n·r)`; **(d)** an honest per-site **Cramér–Rao precision** (directory 18) in
+place of a similarity threshold, and **integer-wrap resolution** (directory 20) for the
+narrowband cycle-skipping failure mode. The `n×m` volume is streamed, never materialised on the
+search pass (directory 00).
+*Oracle.* The decisive one is **exact**, not iterative: on a 1-D chain with a convex `R`,
+dynamic programming computes the true global minimiser in `O(n·m²)`. The lifted recipe must
+match it **on instances whose per-site minima are wrong by construction** (planted multimodal
+costs with decoy minima at a swept fraction φ of sites), and a control must assert the naïve
+recipe *fails* that corpus — a corpus the broken method also passes certifies nothing.
+Supporting: an oversampled interpolant for the sub-grid extremum (and a demonstration that the
+parabolic/Gaussian fit is measurably, *phase-dependently* biased on the same instance); the CRLB
+as a one-sided honesty check (the reported precision must never be optimistic); the ε-rank
+against the time–bandwidth prediction; a narrowband corpus that provably skips lobes site-wise
+and is recovered by the integer correction.
+*Caveat:* exactness of the lifting rests on the label space being **scalar** and `R` **convex**.
+A vector-valued parameter field (a 2-D displacement) is the natural generalisation and its
+lifting is **not exact** — only a relaxation. That extension is a **stated non-goal** precisely
+because the headline certificate would not survive it; a filing that quietly extended it would
+be shipping an uncertified claim. The `lifted` recipe also carries an `O(nm)` working set **by
+construction** — the certificate costs the lift — and this is declared in the cost model rather
+than papered over.
+*Score:* ①3 ②4 ③4.
+
 ---
 
 ## Score assessment
@@ -645,6 +746,7 @@ routing signal). **② work** — relative effort. **③ impact** — ecosystem 
 | K12 | Beltrami chart + bijectivity certificate | P8 | 4 | 4 | 3 |
 | K13 | Burer–Monteiro co-assignment + gauge | P8 | 3 | 4 | 3 |
 | K14 | Self-representation basis (self-expressive + archetypal) | P9 | 2 | 3 | **4** |
+| K15 | Sub-grid regularised parameter field from a similarity volume | P10 | 3 | 4 | **4** |
 
 ### Reasoning
 
@@ -712,6 +814,7 @@ where it belongs. Round 2 therefore mints **14** filings, not 15.
 | K7 matrix-free GMRF | 13 variational Laplace | 13 estimates log-dets for **dense matrix-free** operators; K7 for **sparse `Q`** plus selected inversion. Must adopt 13's `LogDetEstimator` protocol, not fork it. |
 | K1 anisotropic HJ | 03 heat-method geodesics | 03 is a mesh + elliptic-solve approximation; K1 is a grid + causal-upwind exact solve. Disjoint methods; 03's exact polyhedral oracle validates K1's isotropic limit. |
 | K14 self-representation | 11 structured decompositions (RPCA / NMF-adjacent) | K14's self-dictionary (`X = XC`) and simplex-archetypal (`X = XBA`) put the structure on the **coefficient**, distinct from 11's low-rank+sparse of `X` and from free-factor NMF's cone generators. The *partition* is directory 28 (round 2), which K14 feeds — pipeline `K14 → 28/02`, complementary not redundant; the differentiable adjoint is directory 15. |
+| K15 similarity-volume field | shipped `register` (Demons / greedy-SyN) — **and** 15 / 18 / 20 / 00 | `register` is the **differential** flow estimator: linearise the template about the current parameter, solve a regularised linear system, iterate. It is valid *only inside a linearisation radius*. K15 is the **global-search** estimator for the regime **outside** it — where the parameter range exceeds the correlation width and no basin contains the solution. These are distinct numerical objects, and neither is a special case of the other; the differential estimator does not degrade gracefully into the search one, it simply has no basin. K15 **consumes** 15 (the lifted convex solve + gap), 20 (the integer wrap), 18 (CRLB + identifiability), and 00 (streams the `n×m` volume) — it must restate none of them. |
 
 ### Conversely — round-1 filings that gain from round 2
 
@@ -786,7 +889,20 @@ winding *sum* is a `genred` reduction worth consolidating onto. Does **not** app
 logged in the 01 and 07 ADDENDUMs; a benchmark of the ELL-`genred` reduction against the current dense
 gather at target scale precedes any rewrite.
 
-### Wave decomposition / large-scale wave analysis (optical flow, travelling waves) is spanned by existing filings — no new frontier kernel
+### Wave decomposition / large-scale wave analysis — mostly spanned, but **one gap was missed** (amended)
+
+> **Amendment (rapidtide-family triage).** The verdict below — "no new frontier kernel" — was
+> **wrong in one identifiable place**, and the error is instructive. The optical-flow bullet
+> equated flow estimation with its **differential** formulation (linearise, regularise, solve).
+> That silently assumed the displacement lies inside a linearisation radius. It is exactly the
+> assumption that fails for a **wide-range parameter search** — a `±10 s` lag on a 0.15 Hz
+> signal, a large-displacement flow, a stereo disparity — where the problem is irreducibly a
+> **global search over a parameter axis** and no basin contains the solution. That estimator
+> class is a distinct numerical object, and nitrix has none of it. It is now **K15 / directory
+> 30** (P10). The rest of the verdict below stands.
+>
+> *Lesson for future sweeps:* "covered by a regularised TV solve" is not a coverage argument
+> unless the linearisation radius is checked against the parameter range.
 
 A coverage triage of wave / optical-flow analysis (surface travelling waves, phase dynamics, wavefronts,
 spatiotemporal modes) found the space essentially covered by composition **plus two non-obvious
@@ -801,18 +917,23 @@ synergies**, with the hard substrate already built:
 - **Flow-field Helmholtz–Hodge classification** (source/sink/rotational/harmonic) = shipped
   `geometry.dec.hodge_decompose`.
 - **Time-frequency / instantaneous phase** = shipped `signal.cwt` + `signal.fourier`.
-- **Optical-flow velocity field** = DEC surface gradient + a regularised / TV solve (15 / `linalg`);
-  **mass-transport flow** = the 04 dynamic-OT (Benamou–Brenier) extension already logged (E1).
+- **Optical-flow velocity field** — *amended.* The **differential** (small-displacement) estimator
+  = DEC surface gradient + a regularised / TV solve (15 / `linalg`), and shipped `register`
+  (Demons/SyN) already is one. But the **large-displacement / wide-range** estimator is **not**
+  this and is **not covered**: it is a global search over a parameter axis (**K15 / directory 30**).
+  **Mass-transport flow** = the 04 dynamic-OT (Benamou–Brenier) extension already logged (E1).
 - **Spatiotemporal modes** (DMD / SPOD / complex PCA of the analytic signal) = 02 (SVD + eig; complex
   PCA via the real-symmetric embedding :math:`\begin{smallmatrix}A&-B\\B&A\end{smallmatrix}`, so **no new
   complex/Hermitian eigensolver is needed**) + 13's parametric resolvent / cross-spectral density.
 - **Spatial spectrum** (:math:`k`–:math:`\omega`) = SHT / Laplace–Beltrami eigenmodes (02) + a temporal FFT.
 
-**Verdict: no new frontier kernel warranted** — a "wave" filing would be redundant with the substrate.
-The one low-priority *maybe*, distinct from 29 (instantaneous self-representation) and 11 (CP/Tucker/
-RPCA), is a **shift-invariant / convolutional decomposition** for *recurring* spatiotemporal motifs
-(convolutional sparse coding, which composes 15's sparse solve + FFT convolution) — the numerical heart
-of quasi-periodic-pattern / motif discovery. Held, not minted.
+**Verdict (amended): no new *wave-decomposition* kernel warranted** — a "wave" filing would be
+redundant with the substrate. But the **wave-estimation** side had a hole: the wide-range parameter
+search, now **K15 / directory 30**. The one remaining low-priority *maybe*, distinct from 29
+(instantaneous self-representation) and 11 (CP/Tucker/RPCA), is a **shift-invariant / convolutional
+decomposition** for *recurring* spatiotemporal motifs (convolutional sparse coding, which composes
+15's sparse solve + FFT convolution) — the numerical heart of quasi-periodic-pattern / motif
+discovery. Held, not minted.
 
 ## Honest caveats carried forward
 
