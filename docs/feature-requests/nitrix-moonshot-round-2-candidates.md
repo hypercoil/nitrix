@@ -911,6 +911,12 @@ which is now a stronger recommendation than it was when made.
 
 ## Cross-cutting instrument findings (post-mint triage)
 
+> **Cross-*filing* reconciliation constraints live in the round-1 ledger**
+> (`nitrix-moonshot-ledger.md` → *Cross-filing reconciliation constraints*), which is the single
+> tracking surface for them. Currently open: **X-1** — 02's SVD adjoint must adopt 14's
+> Daleckii–Krein spectral-function formulation, or `linalg` inherits an unbounded `1/σ` gradient
+> that every future spectral consumer then rides on. Check that table before folding any filing in.
+
 Two questions raised after the mint — "is `genred` an instrument for the reviewers' scaling
 blockers?" and "do we cover wave decomposition / large-scale wave analysis?" — resolved without new
 kernels, and are recorded here because both are synergies rather than gaps.

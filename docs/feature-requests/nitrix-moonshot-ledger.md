@@ -57,6 +57,10 @@ the **anchor** is the domain motivation, kept here.
   cannot `vmap`.
 - **Reconciles →** `linalg` solver/eig seam (beside `cg`/`safe_*`). Graduates B24;
   unblocks 03, 12, 14 and the sphere-param eigensolve.
+- **⚠ Reconciliation constraint — adopt filing 14's spectral-function adjoint (X-1).** 02's
+  thin-SVD adjoint carries an **unbounded** `1/σ` range-complement term (its open **G2**): the
+  degeneracy routes broaden the *repeated*-σ coupling but **not** that term. **Do not fold 02's
+  adjoint into `linalg` as-is.** See the cross-filing table below.
 
 ### 03 · Intrinsic geodesic distance on a triangulated 2-manifold
 - **Anchor.** Geodesic (along-the-cortex) distance on the cortical surface, as
@@ -163,6 +167,67 @@ the **anchor** is the domain motivation, kept here.
   by the parked B24 eigensolver FR.
 - **Reconciles →** `stats`/`numerics` (beside `randomized_svd`/`pca_fit`/
   `ledoit_wolf`); rides on filing 02's batched SVD.
+- **⚠ Reconciliation constraint — 14 *supplies* the adjoint 02 is missing (X-1),** and 14's own
+  review returned **5 blockers** (fabricated rank on correlated noise; all-NaN at `σ̂=0`; every
+  shrinker discontinuous; fail-open non-convergence; `O(n_blocks)` reverse-mode memory). **Do not
+  fold 14 into `stats`/`numerics` until those are closed** — the denoiser is exactly the consumer
+  that would silently corrupt data. See the cross-filing table below.
+
+---
+
+## Cross-filing reconciliation constraints (tracked)
+
+Findings that **cross filing boundaries**. Each is a constraint on the *order* or *content* of
+what gets folded into nitrix — not a defect of any one filing, and therefore invisible in any
+single filing's ADDENDUM. **This table is the tracking surface: check it before folding any
+filing in.**
+
+| id | constraint | status |
+|---|---|---|
+| **X-1** | **02's SVD adjoint must adopt 14's spectral-function formulation.** | **open** |
+
+### X-1 · The spectral-function adjoint (02 ← 14)
+
+**The finding.** Filing 02's thin-SVD adjoint divides by the singular value `σ` in its
+range-complement term, guarded only against an exact zero. Its degeneracy routes broaden the
+*repeated*-`σ` coupling but **not** this term, so a small-but-nonzero `σ` yields a
+`1/σ`-amplified left-factor gradient with no floor available (02 **G2**, open).
+
+**Filing 14 solved exactly this, structurally — and it is the stronger derivation.** 14 never
+differentiates `U, Σ, V` at all. It writes the operation as the **spectral function**
+`X ↦ X · g(XᴴX)` and differentiates *that* with a Daleckii–Krein divided-difference tangent.
+**Both** singular terms then vanish from the derivation rather than being damped:
+
+- the `1/(λᵢ − λⱼ)` coupling never appears — a **divided difference is finite at a repeat**;
+- the `1/σ` complement **collapses in closed form** to `U·diag(g)·Uᴴ·dX·(I − VVᵀ)`, because
+  `X·V_d = 0` on the discarded subspace.
+
+This is not a tolerance trick; it is a different (and correct) object to differentiate.
+
+**Why it must be tracked here and not in either ADDENDUM.** Both filings reconcile into nitrix,
+02 into the `linalg` eig/SVD seam and 14 into `stats`/`numerics`. If each is folded in on its own
+terms, **nitrix acquires two different answers to the same question**, and the weaker one lands in
+the *lower-level, more widely-consumed* seam — `linalg` — where every future spectral consumer
+inherits an unbounded `1/σ` gradient. The damage is done by the *order* of folding, which is
+exactly what no single-filing review can see.
+
+**The rule on reconciliation.**
+1. Wherever a consumer differentiates a **spectral function** of the matrix — every shrinkage,
+   filtering, or spectral-nonlinearity consumer, **including 02's own G2 motivating example** —
+   `linalg` exposes the **Daleckii–Krein spectral-function adjoint**, not a factor-wise SVD adjoint.
+   This is the default path.
+2. The factor-wise adjoint is retained **only** for consumers that genuinely need `U`, `V`
+   themselves (a subspace, a rotation, a sign-fixed basis). There the `1/σ` term is **irreducible**
+   — it is a real property of the factor map, not an artefact — and 02's G2 stands on its own terms
+   as a *documented domain restriction*, not a bug to be floored away.
+3. Land the spectral-function adjoint **once**, in `linalg`, and have 14's shrinkage *consume* it.
+   Neither filing should ship its own copy.
+
+**Degeneracy is the common case here, not an edge case.** A noise bulk **is** a cluster of hundreds
+of near-equal singular values, so the clustered-spectrum path is the one that runs on every block
+of every real input — which is why this cannot be deferred as an edge-case hardening item.
+
+---
 
 ## Score assessment (relative, within-set, 1 = lowest … 5 = highest)
 
