@@ -1,12 +1,13 @@
 # nitrix-moonshot round 2 — candidate problems and frontier kernels
 
-**Status:** living ledger. Created 2026-07-09; filings 15–28 minted 2026-07-10.
+**Status:** living ledger. Created 2026-07-09; filings 15–28 minted 2026-07-10; **29 (P9/K14)
+and 30 (P10/K15) minted 2026-07-11** from the post-mint triage rounds.
 
 ## Purpose and method
 
 Round 1 (`nitrix-moonshot-ledger.md`) filed 14 strictly-numerical problems for the
 restricted assistant. Assistant credit turns out to be the non-binding constraint, so
-this ledger opens a second, deliberately more forward-looking candidate set: **eight
+this ledger opens a second, deliberately more forward-looking candidate set: **ten
 frontier-and-evergreen problems in brain mapping**, and the **numerical kernels that
 would unblock them or qualitatively change how they are approached**.
 
@@ -15,6 +16,17 @@ filings, followed by eleven parallel literature sweeps (SOTA + deliberately
 adversarial "what is overlooked, what is popular but numerically weak"). Each sweep
 was asked to state the bottleneck *in pure-mathematical terms* and to name a
 hoistable kernel with an oracle.
+
+**P1–P8 came from that sweep; P9 and P10 came from triage afterwards** — a standing
+question of the form *"is method-family X covered, and if not, what is the hoistable
+kernel?"* Both were minted only after the composition test failed: **P9** (functional
+parcellation without arbitrary reference loci) and **P10** (lag-mapped confound
+regression) each named a numerical object that no existing filing supplied. The same
+triage **declined** a longer list as compositions of existing filings — multimodal
+surface alignment, haemodynamic inference, multimodal and longitudinal template
+construction, disease-progression instruments, and hyperalignment with missing data.
+The declines matter as much as the mints: the default answer is *compose*, and a mint
+has to survive an argument that it is redundant.
 
 **Scope exclusions honoured throughout:** no M/EEG/fNIRS (MNE's domain), no image
 reconstruction / k-space, no pulse-sequence design. Everything below lives in the
@@ -42,6 +54,25 @@ SPDE/GMRF assembly on a mesh; DPSS/multitaper; Burer–Monteiro; parallel transp
 Fréchet means or geodesic regression on non-SPD manifolds; quasiconformal/Beltrami
 machinery; polynomial-system solving; monotone/isotonic projection.
 
+*Added by the later triage rounds (P9, P10):* self-expressive / archetypal factorisation
+(a **self**-dictionary, `X = XC` or `X = XBA` — distinct from the free-dictionary NMF/PCA
+that ships); and — the P10 cluster — **lagged cross-correlation of any kind**, sub-sample
+delay/peak estimation, cost-volume machinery, and **convex functional lifting** (the exact
+relaxation of a scalar label space under a convex regulariser). `nitrix.signal` has
+`fourier`/`filter`/`cwt`/`interpolate`/`lomb_scargle` and **no** cross-correlation, no
+delay estimation, no sub-sample peak. Note that the already-listed absence of
+**DPSS/multitaper** is the *same* gap seen from another angle: the Slepian basis is what
+makes a delay-parameterised regressor family low-rank (K15c).
+
+**A whole estimator class is missing, not just a routine.** `register` ships the
+**differential** flow estimator (Demons/greedy-SyN: linearise, regularise, solve, iterate),
+which is valid *only inside a linearisation radius*. Nothing ships the **global-search**
+estimator for the regime outside it — where the parameter range exceeds the correlation
+width and no basin contains the solution. These are distinct numerical objects and the
+differential one does not degrade gracefully into the other; it simply has no basin. This
+absence was **missed by the original sweep** (see the amended wave-analysis note) and is
+now K15 / directory 30.
+
 Present and load-bearing for what follows: `fixed_point_solve`, `implicit_minimize`,
 `implicit_least_squares` (a **smooth** implicit-diff seam — the nonsmooth one does
 not exist); `cg`/`gmres`/`minres`/`bicgstab`; `matrix_function`/`chebyshev_apply`;
@@ -50,11 +81,29 @@ not exist); `cg`/`gmres`/`minres`/`bicgstab`; `matrix_function`/`chebyshev_apply
 
 ---
 
-## The eight problems
+## The problems
 
 Each entry gives the **anchor** (domain motivation — stays in this repo, never in a
 filing), **why it is stuck**, the **kernels** it implies, the **overlooked bet** the
 literature sweep surfaced, and what it **builds on** from round 1.
+
+**This section is the *only* place the domain motivation lives.** The filings themselves are
+strictly numerical and domain-free by contract, and the restricted assistant never sees this
+document — so if an anchor is not written down here, the reason the kernel exists is lost. Keep
+it current when a filing is minted.
+
+| # | Problem | Kernels | Filing |
+|---|---|---|---|
+| P1 | Tractography as a differentiable global inverse problem | K1 | 16 |
+| P2 | Microstructure inversion that does not hide its degeneracy in a prior | K2, K3 | 17, 18 |
+| P3 | Ill-posed non-negative spectral inversion | K4 (+ KA) | 19, 15 |
+| P4 | Field-to-source inversion with an integer obstruction | K5, K6 (+ KA) | 20, 21 |
+| P5 | Population pooling: meta-analysis, lifespan charts, harmonisation | K7, K8 | 22, 23 |
+| P6 | Whole-brain latent dynamics at cohort scale | K9 | 24 |
+| P7 | Correspondence-free shape statistics and longitudinal diffeomorphometry | K10, K11 | 25, 26 |
+| P8 | Cross-subject correspondence with certificates rather than by fiat | K12, K13 (+ KA) | 27, 28 |
+| P9 | Functional parcellation without arbitrary reference loci | K14 | 29 |
+| P10 | Lag-mapped confound regression and delay-field estimation | K15 | 30 |
 
 ### P1 · Tractography as a differentiable global inverse problem
 
@@ -967,13 +1016,22 @@ bounded-distortion bijective mapping; nonsmooth convex optimisation & implicit
 differentiation; individualised parcellation with certificates; meta-analysis /
 normative modelling / harmonisation; microstructure identifiability.
 
-**Filings minted.** The fourteen kernels were filed as `nitrix-moonshot/15-…` through
-`28-…` on branch `round-2-filings` (commit `49b5f93`), each a domain-free `PROBLEM.md`
-+ `validation.md`, plus `protocols.py` in the eleven cases that target an existing seam
-(17, 20 and 21 open new seams and carry none). Gates: 39 files, denylist-clean, uniform
-section structure, 11/11 protocols parse. DOI strings are exempt from the grep gate and
-stripped before it runs — a DOI carries no domain information, and dropping a canonical
-citation to satisfy a substring match would be the worse defect.
+**Filings minted.** The original fourteen kernels were filed as `nitrix-moonshot/15-…`
+through `28-…` on branch `round-2-filings` (commit `49b5f93`), each a domain-free
+`PROBLEM.md` + `validation.md`, plus `protocols.py` in the eleven cases that target an
+existing seam (17, 20 and 21 open new seams and carry none). Gates: 39 files,
+denylist-clean, uniform section structure, 11/11 protocols parse. DOI strings are exempt
+from the grep gate and stripped before it runs — a DOI carries no domain information, and
+dropping a canonical citation to satisfy a substring match would be the worse defect.
+
+**Two more minted later, from triage rather than from the sweep** (2026-07-11, on
+`nitrix-moonshot` main, each with a build worktree): **29** `self-representation-basis`
+(P9/K14) and **30** `similarity-volume-parameter-field` (P10/K15, commit `b9bf81c`). Both
+carry a `protocols.py`; both passed the same gates. They were minted only after failing the
+composition test — the default answer to *"is family X covered?"* is **compose**, and the
+same triage declined multimodal surface alignment, haemodynamic inference, multimodal and
+longitudinal template construction, disease-progression instruments, and hyperalignment with
+missing data on exactly that ground.
 
 Round-2 filings are **deliberately less specified** than round 1: each fixes a contract
 and an oracle and leaves the recipe open, because for several of these problems
