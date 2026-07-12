@@ -72,7 +72,9 @@ half-built and we have not been calling it that. Already on the books: correlate
 the Marchenko–Pastur bulk (filing 14 G1); cycle-skipping in narrowband lag estimation (30);
 `det ∇f > 0` not implying global bijectivity on a closed surface; the non-physical residues of
 unconstrained spectral-analysis perfusion deconvolution; geodesic tractography's intrinsic shortcut
-pathology; the moment-map normaliser that is 30–38 % off.
+pathology; the moment-map normaliser that is 30–38 % off; and **every spatial null but the spin test
+matching a single moment without certifying exchangeability** — a null that does not control its own
+false-positive rate is the purest instance of the genre.
 
 ### 2.1 Evidence hierarchy
 
@@ -261,9 +263,24 @@ requiring a second to be admitted:
 | **Fail-closed flag discipline** | 15's `trustworthy`; 14's absent bulk-fit; 30's `certified` |
 | **Memory-gate discipline (two-sided)** | filing 00's `grad_max > operand`; filing 14's missing `grad` witness |
 | **Iteration-cap / non-convergence surfacing** | filing 14 G4; filing 02 G4 — *the same defect, twice, independently* |
+| **Injectivity certificate + strength lattice** | filings 07, 08, 27 — **X-2**: one property, three witnesses, at three genuinely different strengths |
 
-The last row is worth noting: **two filings independently failed to surface non-convergence.** That
-is not a coincidence — it is a seam announcing itself.
+Two rows are worth dwelling on, because they are the method working.
+
+**Non-convergence surfacing:** two filings, no contact between them, **the same omission**. That is
+not a coincidence — it is a seam announcing itself, and it is the cheapest possible demonstration
+that the ≥2-sites standard finds real structure rather than imagined structure.
+
+**Injectivity (X-2):** three filings certify *"this deformation does not fold the domain onto
+itself"* with three different witnesses — 07's embedding invariant, 08's positive Jacobian, 27's
+Beltrami bound plus a separate bijectivity certificate. And the witnesses are **not equivalent**: a
+positive Jacobian is *local* and does **not** imply global injectivity (a `d`-fold covering has one
+everywhere — which is exactly why 27 carries bijectivity *separately*). So this seam is not merely a
+deduplication: it needs a **strength lattice** (locally-non-folding ⊏ globally-injective ⊏ embedded)
+so a consumer can request the strength it needs and a primitive that can only establish the weak form
+**cannot be read as establishing the strong one**. This is §3.2's certificate-composition problem in
+its most concrete form — and a consumer reading "positive Jacobian" as "injective" would get an
+answer our *own filings already know is wrong*.
 
 ### 6.6 Non-goals
 

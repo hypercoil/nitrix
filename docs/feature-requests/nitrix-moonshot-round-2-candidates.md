@@ -990,11 +990,73 @@ decomposition** for *recurring* spatiotemporal motifs (convolutional sparse codi
 15's sparse solve + FFT convolution) — the numerical heart of quasi-periodic-pattern / motif
 discovery. Held, not minted.
 
+### Triage round 3 — mass-univariate / spatial nulls / FC inductive bias / topology-guaranteed surfaces
+
+Four candidate families checked against the surface. **Zero minted.** Three were already filed or
+shipped; the fourth dissolved into a unification. Recorded because the *declines* are load-bearing —
+the default answer is compose, and each of these was checked against the code rather than against
+memory.
+
+- **Mass-univariate modelling — COVERED, more thoroughly than assumed.** Already shipped:
+  `stats.glm.sandwich_cov`; the full FDR family (`fdr_bh` / `fdr_by` / `fdr_storey`); **`gpd_pvalue`**
+  (the generalised-Pareto tail fit that removes the `1/n_perm` resolution floor on extreme-tail FWE —
+  the acceleration that was *about* to be proposed); `permutations(blocks=…)` for restricted /
+  exchangeability-block permutation; Freedman–Lane, TFCE, cluster mass/size, conjunction, sign-flips.
+  **Only gap: non-parametric combination (NPC)** — combining across modalities/contrasts through the
+  *joint* permutation distribution rather than by combining marginal p-values. A combining function
+  over an axis already materialised. **Cheap FR, not a filing** (`stats-inference-npc.md`).
+- **Spatial nulls — COVERED.** Shipped: `spin_test`, `moran_test`, **`brainsmash_surrogates` +
+  `variogram`** (the ledger previously had these queued — stale), on the shared `spatial_null_test`
+  seam. Exact GMRF/SPDE field sampling on a mesh is directory 22. **Decline** — but see the validity
+  caveat below, which is a *corpus* item, not a kernel.
+- **System-FC inductive bias — DISSOLVES; the hack is one mechanism, not two.** Bolting a selective
+  state-space model to self-attention treats temporal recurrence and second-order coupling as
+  separate mechanisms. They are not: **a linear-attention layer *is* a state-space model with a
+  matrix-valued state** (`S_t = A·S_{t-1}·Aᵀ + v_t k_tᵀ` is simultaneously a recurrence in time and a
+  second-order coupling among loci). And the right carrier for *"a locus's meaning is what the others
+  are doing"* is not a vector of activations — the state **is** the connectivity. **Directory 24 is
+  already that object** (an associative monoid scan in **square-root form**, subsuming the
+  affine-Gaussian factor; square-root form is precisely what keeps a covariance state PSD through the
+  recurrence). Logged as **two extension requests on 24**, not a new filing:
+  - **24-E1 — a fixed-rank PSD carrier.** The real gap. A `V×V` state at `V ~ 10⁵` is `10¹⁰` entries,
+    so `S = LLᵀ` with `r ≪ V`. **The rank grows every step**, so `L` must be retracted — and the
+    retraction is the whole content: PSD-preserving (free in square-root form — which is *why* 24's
+    carrier is the right substrate), **robust at small singular values** (naïve SVD truncation is
+    unstable exactly when the retained spectrum is near-degenerate, which is the common case, not the
+    rare one — hence projector-splitting integrators), differentiable, and **gauged** (`L` and `LQ`
+    agree for `Q ∈ O(r)`, so the gauge is solved and reported, as in 28/29). **The fixed-rank PSD
+    manifold is a different manifold from 12's full-rank SPD** and is genuinely absent from nitrix
+    (only `linalg/subspace.py`'s Grassmann pair exists).
+  - **24-E2 — long-memory factors.** An SSM's memory decays **exponentially**; the signals of
+    interest are **power-law**. Stacking timescales is an *uncontrolled* sum-of-exponentials with no
+    stated error. Make it explicit and certified.
+- **Topology-guaranteed surface construction — it is directory 07.** The "never break it" route
+  (deform a genus-0 template) versus the "repair it" route (directory 01). Both filed. And the link
+  that was never stated: **fixed connectivity + the embedding invariant ⇒ an ambient isotopy ⇒ genus
+  is preserved for free.** So 07 needs **no separate genus certificate** — it would only restate what
+  the embedding invariant established. *Caveat:* 07 is currently **blocked on scale** (the O(m²)
+  dense-gather), so the bypass exists on paper but does not yet run at real mesh scale. *Honest
+  trade:* the route converts a **topological** failure into a **geometric** one (an unreachable
+  narrow concavity gives large geometric error while every invariant still holds) — correct, but only
+  if the discrepancy is reported. **Also yielded cross-filing constraint X-2** (07/08/27 all certify
+  injectivity — see the round-1 ledger).
+
 ## Honest caveats carried forward
 
 The sweeps were asked to be adversarial, and several findings are warnings rather than
 opportunities:
 
+- **Only the spin test is an *exact* spatial null; every other one matches a moment and hopes.**
+  The spin test is exact because it is a **group action** — a measure-preserving symmetry of the
+  domain, so the surrogate is genuinely exchangeable with the data under H₀. Moran spectral
+  randomisation, BrainSMASH/variogram matching and the spatial-autoregressive family all match **one
+  summary statistic** and assume the rest of the distribution follows. **None certifies
+  exchangeability**, and they are known to disagree with one another on real comparisons. The cortex
+  has no symmetry group, so *no exact null is available by that route* — what you get is model-based,
+  and is only as good as the model. This is not a missing kernel (directory 22 supplies exact GMRF
+  field sampling); it is a **validity** problem, and it belongs in the adversarial validation corpus:
+  a null that does not control its false-positive rate is precisely the "silently wrong" instance the
+  campaign exists to exhibit. It is also a textbook *"how this fails"* section.
 - **Geodesic tractography is popular but numerically weak.** The shortcut pathology is
   intrinsic. Do not adopt it without curvature lifting.
 - **FIM/FSM "GPU eikonal" solvers carry no convergence certificate** under strong

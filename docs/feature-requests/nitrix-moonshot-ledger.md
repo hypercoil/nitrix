@@ -185,6 +185,7 @@ filing in.**
 | id | constraint | status |
 |---|---|---|
 | **X-1** | **02's SVD adjoint must adopt 14's spectral-function formulation.** | **open** |
+| **X-2** | **"This deformation is injective" is certified three times over — 07, 08, 27. One property, three witnesses.** | **open** |
 
 ### X-1 · The spectral-function adjoint (02 ← 14)
 
@@ -226,6 +227,44 @@ exactly what no single-filing review can see.
 **Degeneracy is the common case here, not an edge case.** A noise bulk **is** a cluster of hundreds
 of near-equal singular values, so the clustered-spectrum path is the one that runs on every block
 of every real input — which is why this cannot be deferred as an edge-case hardening item.
+
+### X-2 · Injectivity of a deformation, certified three times (07 / 08 / 27)
+
+**The finding.** Three filings independently guarantee **the same property** — *this deformation
+does not fold the domain onto itself* — each with a different witness:
+
+| filing | the guarantee | the witness |
+|---|---|---|
+| **07** embedding-constrained surface flow | the deformation stays **embedded** | the self-intersection-free invariant, maintained at every step |
+| **08** metric diffeomorphic shooting | the deformation is **invertible** | a positive-Jacobian guarantee |
+| **27** Beltrami bijective mapping | the map is **bijective** | a Beltrami-coefficient bound + a *separate* global-bijectivity certificate |
+
+These are not three properties. They are one property at three strengths, and the strengths are
+**genuinely ordered** — which is exactly why folding them independently is dangerous:
+
+- A **positive Jacobian is local**. It says the map does not fold *infinitesimally*. It does **not**
+  imply global injectivity — a `d`-fold covering of a closed surface has a positive Jacobian
+  everywhere (this is already recorded in the round-2 skeptical flags). 08's guarantee is therefore
+  *weaker* than it sounds, and 27 knows this: it is precisely why 27 carries bijectivity as a
+  **separate** certificate rather than deriving it from the Beltrami bound.
+- 07's **embedding** invariant is the strongest of the three (no self-intersection is a global
+  statement), but it is stated for a *mesh under a flow*, not for a *map*.
+
+**Why this must be tracked.** Fold the three in independently and nitrix acquires three unrelated
+vocabularies for one guarantee, with **no way to compose them** — and worse, a consumer who reads
+"positive Jacobian" as "injective" gets a silently wrong answer that one of our own filings already
+knows is wrong. This is the certificate-composition problem (see the post-buildout RFC §3.2) in its
+sharpest, most concrete form.
+
+**The rule on reconciliation.** One **injectivity certificate** type, with an explicit **strength
+lattice** (locally-non-folding ⊏ globally-injective ⊏ embedded), so that a consumer can ask for the
+strength it needs and a pipeline's guarantee is the *meet* of its stages'. A primitive that can only
+establish the weak form must **say so** and must not be readable as the strong one. Land the type
+once; have 07, 08 and 27 populate it.
+
+*Note (from 07):* 07's embedding invariant, with fixed connectivity, **already implies genus
+preservation** (an ambient isotopy cannot change genus) — so 07 needs no separate genus certificate.
+That is a fourth thing that would otherwise have been invented independently.
 
 ---
 
