@@ -184,8 +184,9 @@ filing in.**
 
 | id | constraint | status |
 |---|---|---|
-| **X-1** | **02's SVD adjoint must adopt 14's spectral-function formulation.** | **open** |
+| **X-1** | **02's SVD adjoint must adopt 14's spectral-function formulation.** *(ESCALATED: 02's round-2 "fix" is a **regression** — it now silently zeroes a finite gradient. See below.)* | **open — escalated** |
 | **X-2** | **"This deformation is injective" is certified three times over — 07, 08, 27. One property, three witnesses.** | **open** |
+| **X-3** | **13's log-det seam is NOT adoptable by 22 (sparse) — the standing "adopt, don't fork" instruction is unsatisfiable as shipped.** | **open** |
 
 ### X-1 · The spectral-function adjoint (02 ← 14)
 
@@ -228,6 +229,45 @@ exactly what no single-filing review can see.
 of near-equal singular values, so the clustered-spectrum path is the one that runs on every block
 of every real input — which is why this cannot be deferred as an edge-case hardening item.
 
+#### X-1 ESCALATION (2026-07-12) — 02's round-2 fix made it *worse*, and that settles the ruling
+
+02 attempted to close its `1/σ` gap **in-filing**, on the (correct) observation that *"the null space
+was never a separate singularity"*. **The observation is right; the engineering conclusion drawn from
+it is wrong, and the result is a regression.**
+
+02 replaced the exact complement coefficient `1/σ` with a regularised `null(σ)`. But that coefficient
+is **never consumed alone** — for the advertised spectral nonlinearity `Z ↦ U·η(Σ)·Vᵀ`, the quantity
+that must be finite is the **composite** `η(σ)/σ`. Take `η = identity`: then `U·Σ·Vᵀ ≡ Z`, so
+`∇_Z ⟨C, UΣVᵀ⟩ = C` **exactly, at every Z, including rank-deficient Z** — and the *exact* rule
+reproduces it (`σ · 1/σ = 1`). 02's new rule returns `σ·null(σ)`:
+
+| route | coefficient | exact answer |
+|---|---|---|
+| Lorentzian | `σ⁴/(σ⁴+ε²)` → **0.5** at σ=1e-3 (gradient **halved**); 1e-4 at σ=1e-4 | **1** |
+| Subspace | **exactly 0** below the floor | **1** |
+
+**The range-complement gradient is silently amputated where a finite exact answer exists — and where
+02's *pre-fix* code was correct.** Worse, `spectral_scale = max(|λ|∞, 1.0)` is **floored at 1**, so the
+threshold is **absolute, not relative**: a *perfectly conditioned* matrix merely **scaled down** has its
+complement gradient deleted. **This fires at κ = 1.** Every corpus entry pins σ_max = 1, so it is
+invisible — and the acceptance functional's `η(σ)/σ` is bounded, so **the "fix" tests pass on the
+pre-fix code too**.
+
+**Direction.** The old defect was an **unbounded** gradient: loud, obviously broken, noticed. The new
+one is **finite, plausible, and silently wrong** — a consumer converges to the wrong stationary point
+instead of blowing up.
+
+**This settles X-1 rather than complicating it.** 14's Daleckii–Krein form evaluates
+`g(λ) = η(√λ)/√λ` **directly** — no division by σ ever occurs, the complement collapses in closed form
+via `X·V_d = 0`, and the result is **exact *and* bounded at σ=0, with no floor, no ε, no cluster
+threshold**. 02 divides and then *regularises the division*, which corrupts the product. **It buys
+boundedness by giving up exactness in a regime where exactness is available in closed form.**
+
+**Ruling:** 02 must **not** ship its regularised complement. Land the spectral-function adjoint **once**
+(14's form), in `linalg`, and have both filings consume it. The factor-wise adjoint survives only for
+consumers that genuinely need `U`/`V` themselves, where the `1/σ` is **irreducible** and becomes a
+documented domain restriction — not something to floor away.
+
 ### X-2 · Injectivity of a deformation, certified three times (07 / 08 / 27)
 
 **The finding.** Three filings independently guarantee **the same property** — *this deformation
@@ -265,6 +305,32 @@ once; have 07, 08 and 27 populate it.
 *Note (from 07):* 07's embedding invariant, with fixed connectivity, **already implies genus
 preservation** (an ambient isotopy cannot change genus) — so 07 needs no separate genus certificate.
 That is a fourth thing that would otherwise have been invented independently.
+
+### X-3 · The log-det seam is not adoptable by a sparse operator (13 → 22)
+
+**The standing instruction is unsatisfiable as shipped.** The ledger tells filing 22 (matrix-free GMRF
+on a *sparse* precision) that it *"must adopt 13's `LogDetEstimator` protocol, not fork it"*. Two
+problems, both found in 13's round-2 review:
+
+1. **`LogDetEstimator` is not a Protocol.** It is `Literal["lanczos", "hutchinson"]` — a *recipe-name
+   axis*. The instruction names something that does not exist. The seam 22 would actually adopt is the
+   matrix-free operator + the free `logdet(...)` function + its estimate container.
+2. **At implementation level it bakes in dense-scale assumptions that force the very fork the
+   instruction forbids:** full reorthogonalisation against an **explicit dense basis buffer**, with a
+   **second full-size mask copy allocated inside the scan body, every step, every probe** (≈ **8.4 GB**
+   at `n = 10⁶`, 16 probes, order 32 — and a sparse GMRF's *entire premise* is `n ≫ 10⁴`); and **no
+   preconditioner is plumbed through to the log-det's gradient solve**, so it runs an *unpreconditioned*
+   CG per probe (a sparse precision at κ≈10⁵ needs ~300 iterations — the budget is exhausted and the
+   tangent channel fires on every probe).
+
+**This is 13's finding, not 22's.** *Required before either lands:* expose the preconditioner on
+`logdet`; make reorthogonalisation a knob (`full | local | none`); lift the hard quadrature-order cap
+into a documented accuracy bound. **Then** the seam is genuinely shareable.
+
+*Seam-inventory note:* this is a third instance of the pattern the RFC's §6.5.1 names — **a seam whose
+guarantee (or adoptability) was certified only on the path its author's own consumer took.** Compare
+genred's ELL hole (G6/G7 there) and X-1. The seam register must record, per seam, **which paths the
+guarantee was tested on** — not merely that a guarantee exists.
 
 ---
 
