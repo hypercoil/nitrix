@@ -921,6 +921,47 @@ Two questions raised after the mint — "is `genred` an instrument for the revie
 blockers?" and "do we cover wave decomposition / large-scale wave analysis?" — resolved without new
 kernels, and are recorded here because both are synergies rather than gaps.
 
+### ~~`genred` streaming reductions are the memory-linear substrate for the mesh-proximity scaling blockers~~ — **RETRACTED, falsified by measurement**
+
+> **RETRACTION (2026-07-12).** The recommendation below — *"the fix shape is broad-phase → ELL
+> candidate ranges → a `genred`/`semiring` min-reduction"* — **was wrong, and both consumer filings
+> proved it by building and benchmarking it.** I told 07 to adopt the engine. It did the benchmark I
+> asked for, and the engine **lost by 124× on memory**.
+>
+> **What the measurement showed.** `genred`'s advertised `O(m + nnz)` working set attaches to
+> **`DenseDomain` streaming only**. On the **ELL/edge path it materialises the `(m, k_max, d)`
+> message tensor** — exactly the object streaming exists to avoid. Filing 07, both paths consuming
+> *identical* compacted candidate rows (level-5 icosphere, `m = 20,480`, fp64, L4): **engine 7.45 GiB
+> of temporaries versus 0.06 GiB in-filing**, and one level finer the engine **blew a 4.5 GB compile
+> budget outright** while the in-filing pipeline compiled and ran in 0.89 s — for **no wall-clock
+> gain** (171 ms fold-only vs 190 ms for the filing's enumeration *plus* fold).
+>
+> **And the guarantee was never tested where it fails.** `genred`'s memory gate builds a **dense
+> matmul over `DenseDomain`**; it never constructs an `EllDomain` and never emits a `Gather`. The gate
+> has teeth on the path that works and is silent on the path that does not. That is how a false
+> `RESOLVED` is manufactured — and it survived four rounds of adversarial review, mine included.
+>
+> Filing 01 found the same class of problem from the other side: the IR **has no transcendentals**, so
+> its solid-angle kernel must enter through the `Opaque` escape hatch, which the Pallas planner cannot
+> see into — so the fused tier **never applies** — and the reference tier folds `REDUCE` in **fixed
+> 64-wide tiles**, wasting 97 % of every tile at `q = 2` seeds. Measured: engine 83.1 ms vs a tuned
+> in-house kernel at **1.9 ms** (30–44×).
+>
+> **Filing 00 is REOPENED** with G6–G9 (`nitrix-moonshot` `e42c62b`). **Do not route a
+> geometric-proximity consumer onto the engine's ELL path until G6 is closed.**
+>
+> **The lesson, and it is the same one twice:** *"composes onto the substrate" is not a coverage
+> argument unless the substrate's guarantee has been tested on the path the consumer would actually
+> take.* Compare the linearisation-radius error in the wave-analysis verdict above — I asserted
+> coverage from the shape of the abstraction rather than from its measured behaviour on the consumer's
+> path. **Twice now.**
+>
+> *What survives:* the **algorithmic** claim below (broad-phase → bounded candidate set → streamed
+> min-reduction) is still the right *shape*; what is wrong is the claim that **this engine** supplies
+> it. Both filings built that shape in-house, correctly.
+
+*Original finding, retained for the record:*
+
 ### `genred` streaming reductions are the memory-linear substrate for the mesh-proximity scaling blockers
 
 The reconciliation reviews of the two mesh filings — **01** (certified genus-repair; the

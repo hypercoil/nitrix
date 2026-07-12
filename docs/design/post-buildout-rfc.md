@@ -256,7 +256,7 @@ requiring a second to be admitted:
 |---|---|
 | **Solution map + implicit adjoint** | `linalg` Krylov; `numerics.fixed_point_solve` / `implicit_minimize` / `implicit_least_squares`; `register`'s level solver; filings 15, 19, 30 |
 | **Certificate ADT + composition (meet)** | invented ad hoc by *every* filing; §3.2 |
-| **Streaming reduction over an implicit `n×m` object** | `genred` / `semiring`; filings 25, 07, 29, 30 |
+| **Streaming reduction over an implicit `n×m` object** | `genred` / `semiring`; filings 25, 07, 29, 30 — **but see the warning below: the engine's guarantee is currently scoped to its dense path** |
 | **Spectral function `X·g(XᴴX)` + its adjoint** | filings 02, 14; `matrix_function` — **X-1** |
 | **fit/apply estimator seam** | SPEC §6.5 — *already exists*; audit for drift |
 | **Divergent-recipe registry** | `_divergent_ops`; filing 00's AST anti-bypass guard; filing 02's **per-site** canonicals |
@@ -281,6 +281,31 @@ so a consumer can request the strength it needs and a primitive that can only es
 **cannot be read as establishing the strong one**. This is §3.2's certificate-composition problem in
 its most concrete form — and a consumer reading "positive Jacobian" as "injective" would get an
 answer our *own filings already know is wrong*.
+
+### 6.5.1 A worked example of why the inventory is gated — and of what it will find
+
+**Two consumer filings (01 and 07) independently attempted to adopt the streaming-reduction engine
+(filing 00), benchmarked it, and both declined.** Their measurements found that the engine's headline
+`O(m + nnz)` memory guarantee **attaches to its dense path only**; on the ELL/sparse path it
+materialises the message tensor (7.45 GiB vs 0.06 GiB in-house — 124× — and a compile-OOM one size
+up). And the engine's own memory gate **never exercises the sparse path**: it builds a dense matmul.
+
+Three lessons, all of which the inventory must be designed around:
+
+1. **A seam is only as good as the path its guarantee was tested on.** Filing 00 passed *four* rounds
+   of adversarial review and was signed off `RESOLVED`. The gate was two-sided and non-vacuous — on
+   the path that already worked. **Consumer adoption found in one benchmark what four reviews
+   missed**, because a consumer exercises the path it actually needs.
+2. **Therefore: the seam register must record, for every seam, *which paths the guarantee was
+   certified on* — not merely that a guarantee exists.** A seam whose guarantee is scoped and whose
+   scope is unstated is worse than no seam, because consumers build on the claim.
+3. **This is precisely why the gate (§6.2) exists.** Had the rebuild extracted "the streaming
+   reduction" as a foundation on the strength of the `RESOLVED` verdict, every future
+   geometric-proximity consumer in nitrix would have inherited a memory guarantee that does not hold.
+
+**The corollary for method:** the strongest evidence a seam is real is not that N filings *use* it —
+it is that N filings *tried to use it and reported what happened*. **A decline is evidence.** The
+inventory must therefore collect **adoption attempts and their outcomes**, not just implementations.
 
 ### 6.6 Non-goals
 
