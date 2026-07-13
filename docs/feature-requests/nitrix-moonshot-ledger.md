@@ -351,13 +351,34 @@ pure shape function, never platform-probed, and therefore already reproducible �
 strict order buys a stricter association at the price of an asymptotic guarantee. **Order-preserving
 and order-deterministic were conflated.**
 
-**Why this is a cross-filing constraint and not a filing-00 bug.** nitrix has its own registry —
-**5 registered divergent ops**, each with a canonical variant, all forced by `nitrix.reproducible()` /
-`NITRIX_REPRODUCIBLE=1`. Nothing in the reproducibility contract currently says a canonical variant
-must preserve the op's stated complexity. **That invariant has never been checked at any of the 5
-sites**, and the same conflation is easy to make anywhere a canonical is chosen as "the strict/serial
-one" (the associative-scan ↔ sequential-scan axis is the obvious suspect: a sequential canonical is
-the *natural* choice and may carry a different memory or depth profile than the associative default).
+**Why this is a cross-filing constraint and not a filing-00 bug — and it is already live in nitrix.**
+nitrix has its own registry — **5 registered divergent ops**, each with a canonical variant, all forced
+by `nitrix.reproducible()` / `NITRIX_REPRODUCIBLE=1`. Nothing in the reproducibility contract says a
+canonical must preserve the op's stated complexity. **I audited the 5 sites. One of them already has
+the defect, and it is not the one I predicted.**
+
+- **`metrics.joint_histogram` — CONFIRMED, and only half-recorded.** Canonical is `onehot`, and
+  `_divergent_ops.py` says so in a *comment*: *"deterministic on any platform; **`O(N·bins)` memory —
+  reproducibility's cost at scale**"*. So somebody saw it. But that comment lives in a **private**
+  module, and the field a consumer actually reads — `DivergentOp.summary`, the payload of the public
+  `nitrix.divergent_ops()` enumeration — says only *"joint histogram: one-hot matmul (deterministic) vs
+  atomic scatter"*. **`DivergentOp` has no field for a complexity caveat at all.** The discoverability
+  surface exists precisely so a parity-sensitive consumer can audit what reproducible mode will do to
+  them, and it does not tell them that it changes the memory profile. The cost was priced in a comment
+  and never entered the contract.
+- **`nn.ssm.selective_scan` and `geometry.cubic_bspline_prefilter` — the suspects I predicted, and the
+  charge does not quite stick.** Both take canonical `sequential` against an `associative` fast path.
+  That is a **depth** difference (`O(T)` vs `O(log T)`), not a memory one — so it needs a ruling rather
+  than a fix: **does the rule cover depth, or only memory?** It should. But note `selective_scan` also
+  carries a third variant described in the registry as *"XLA-stable, **memory-sparing**"* (`chunked`) —
+  which the canonical does **not** select. If the op's memory profile is ever advertised on the strength
+  of `chunked`, this becomes the same defect as `joint_histogram`.
+- `signal.iir` (canonical `scan`) and `register.field_smooth` (canonical `fir`) are clean: both
+  canonicals are the *faithful* variant and neither trades an asymptotic bound.
+
+So the conflation is not hypothetical and not confined to a filing. It is in the shipped library, at
+the one site where the canonical genuinely costs an order of memory, recorded where no consumer will
+look.
 
 **The rule.**
 1. **Normative addition to the reproducibility contract:** *a canonical variant must preserve every
@@ -366,9 +387,16 @@ the *natural* choice and may carry a different memory or depth profile than the 
 2. Where the default is **already host-invariant** (a pure shape function, no platform probe), the
    default **is** the correct canonical. Registering a stricter-but-costlier variant as canonical is a
    category error.
-3. **Audit the 5 registered sites in `nitrix._internal._divergent_ops` against (1)** before any filing
-   lands on top of them, and extend `tests/test_reproducible_dispatch_guard.py` so a canonical that
-   degrades a stated bound **fails CI**, exactly as an ungoverned platform-flip already does.
+3. **`DivergentOp` gains a complexity-caveat field**, and `nitrix.divergent_ops()` surfaces it. The
+   enumeration exists so a parity-sensitive consumer can audit what reproducible mode does to them;
+   today it cannot tell them that `joint_histogram`'s canonical costs `O(N·bins)`. A cost recorded in a
+   private comment is not in the contract.
+4. Extend `tests/test_reproducible_dispatch_guard.py` so a canonical that degrades a stated bound
+   **without declaring it** fails CI, exactly as an ungoverned platform-flip already does.
+5. **Rule on depth.** `selective_scan` and `cubic_bspline_prefilter` take a sequential canonical against
+   an associative default — `O(T)` vs `O(log T)` depth. Memory is untouched, so (1) as written does not
+   bite. It should: a consumer who turns on reproducibility to stabilise a result, and silently gets a
+   serial scan on a GPU, has been surprised in exactly the way this rule exists to prevent.
 
 *Seam-inventory note:* this is the **fourth** instance of the RFC §6.5.1 pattern — a guarantee
 certified only on the path its author took. Here the untaken path is *the library's own safety knob*.
