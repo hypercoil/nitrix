@@ -189,6 +189,7 @@ filing in.**
 | **X-3** | **13's log-det seam is NOT adoptable by 22 (sparse) — the standing "adopt, don't fork" instruction is unsatisfiable as shipped.** | **open** |
 | **X-4** | **A canonical recipe must never void a stated complexity guarantee.** Discovered in 00 (G10); **nitrix's own 5 registered divergent sites are unaudited against it.** | **open — audit nitrix** |
 | **X-5** | 23 reported 15 unusable without ">1-D" support. **Adjudicated: mistaken, and moot.** Recorded so it is not re-litigated. | **closed — declined** |
+| **X-6** | **A substrate may not replace a seam it has not measured itself into.** genred is gated on incumbent-parity (00 G19) before it takes any nitrix seam. | **open — gate on the fold** |
 
 ### X-1 · The spectral-function adjoint (02 ← 14)
 
@@ -433,6 +434,40 @@ through the existing composite — and *isotropic* grid TV then follows free fro
 `GroupNorm` over the stacked gradient channels, whose partition is already arbitrary static metadata.
 **One operator unlocks the most common composite program there is.** Filed as a should-fix on 15, not a
 blocker, and explicitly *not* what 23 asked for.
+
+### X-6 · A substrate may not replace a seam it has not measured itself into (00 → the rebuild)
+
+**The finding, in filing 00 (G19).** genred's proposition is *one streaming engine replaces N
+hand-written kernels*. Its twelve-row "served" table certifies **memory** — every row is a working-set
+bound, **not one carries a performance claim or cites a benchmark** — and its `bench/` harness measures
+against *external* opponents (cuBLAS, the two flash kernels, the superseded in-tree kernels). **The
+incumbent hand-written kernel at the seam genred proposes to replace appears in no row.**
+
+Two filings adopted genred *because the abstraction subsumed their computation*, built it, measured it,
+and backed out: **01** (seeded reduction, `q≪m`) at **30–44× slower** than its tuned in-house kernel,
+and **07** (candidate/proximity reduction) at **7.45 GiB vs 0.06 GiB — 124×**. Both losses were
+invisible to every gate in the suite, because **every gate in the suite asks a question the engine
+passes.**
+
+**Why this is a fold-order constraint.** genred does not arrive as a new subpackage; it arrives as a
+*replacement* for `_internal/reductions.py` (the single `reduce()` behind every score kernel),
+`semiring`, and — through them — `morphology`, `smoothing`, and the `nn.attention` fused path. If it is
+folded in on the strength of its memory table, nitrix trades N kernels it has measured for one it has
+not, at every one of those seams simultaneously, and the regression surfaces as a diffuse slowdown with
+no single owner.
+
+**The rule.** **No seam is replaced without a head-to-head against the kernel it replaces** —
+wall-clock *and* peak working set, **forward and gradient** — at the seam's own shapes, not at balanced
+ones. A seam where the substrate loses by more than a stated factor is **not adopted**, and the factor
+is recorded. This is the strengthened form of the RFC's *"validate on certificates, not metrics"*: for a
+**substrate replacement**, an incumbent-parity measurement *is* one of the certificates.
+
+*Seam-inventory note:* the **fifth** instance of the RFC §6.5.1 pattern, and the one with the widest
+blast radius — a guarantee certified only on the path its author took, about to be adopted at seams
+nobody measured. It is also the pattern **this reviewer** twice fell into, asserting coverage from the
+shape of an abstraction rather than a number (the retracted genred/ELL ledger entry; the G8 op-set
+claim). A prose retraction gets re-asserted by the next reader of the table. A red benchmark row does
+not.
 
 ---
 
