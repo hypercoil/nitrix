@@ -187,6 +187,8 @@ filing in.**
 | **X-1** | **02's SVD adjoint must adopt 14's spectral-function formulation.** *(ESCALATED: 02's round-2 "fix" is a **regression** — it now silently zeroes a finite gradient. See below.)* | **open — escalated** |
 | **X-2** | **"This deformation is injective" is certified three times over — 07, 08, 27. One property, three witnesses.** | **open** |
 | **X-3** | **13's log-det seam is NOT adoptable by 22 (sparse) — the standing "adopt, don't fork" instruction is unsatisfiable as shipped.** | **open** |
+| **X-4** | **A canonical recipe must never void a stated complexity guarantee.** Discovered in 00 (G10); **nitrix's own 5 registered divergent sites are unaudited against it.** | **open — audit nitrix** |
+| **X-5** | 23 reported 15 unusable without ">1-D" support. **Adjudicated: mistaken, and moot.** Recorded so it is not re-litigated. | **closed — declined** |
 
 ### X-1 · The spectral-function adjoint (02 ← 14)
 
@@ -331,6 +333,78 @@ into a documented accuracy bound. **Then** the seam is genuinely shareable.
 guarantee (or adoptability) was certified only on the path its author's own consumer took.** Compare
 genred's ELL hole (G6/G7 there) and X-1. The seam register must record, per seam, **which paths the
 guarantee was tested on** — not merely that a guarantee exists.
+
+### X-4 · A canonical recipe must never void a complexity guarantee (00 → nitrix's own registry)
+
+**The finding, in filing 00 (G10).** genred's ELL-edge aggregation earns its memory-linear guarantee
+by chunking the slot fold at width `c = √k_max`. The chunk width is registered as a divergent recipe
+whose **canonical variant is the strict per-slot order — i.e. `c = 1`**. The module's own docstring
+prices the backward's saved carry chain at `(k_max / c) · n · d_out`; at `c = 1` that is
+`k_max · n · d_out`, **exactly the message tensor the guarantee exists to forbid**. So
+`NITRIX_REPRODUCIBLE=1` — the knob a consumer sets *for safety* — silently destroys the streaming
+property in the backward.
+
+**The root error is conceptual, and it generalises.** A recipe axis exists to govern a choice that
+would otherwise **diverge across hosts**. The canonical variant's job is to be *deterministic and
+portable*, not to be *mathematically strict*. Those came apart here: the chunked default is already a
+pure shape function, never platform-probed, and therefore already reproducible — while the "canonical"
+strict order buys a stricter association at the price of an asymptotic guarantee. **Order-preserving
+and order-deterministic were conflated.**
+
+**Why this is a cross-filing constraint and not a filing-00 bug.** nitrix has its own registry —
+**5 registered divergent ops**, each with a canonical variant, all forced by `nitrix.reproducible()` /
+`NITRIX_REPRODUCIBLE=1`. Nothing in the reproducibility contract currently says a canonical variant
+must preserve the op's stated complexity. **That invariant has never been checked at any of the 5
+sites**, and the same conflation is easy to make anywhere a canonical is chosen as "the strict/serial
+one" (the associative-scan ↔ sequential-scan axis is the obvious suspect: a sequential canonical is
+the *natural* choice and may carry a different memory or depth profile than the associative default).
+
+**The rule.**
+1. **Normative addition to the reproducibility contract:** *a canonical variant must preserve every
+   complexity guarantee (memory, depth) the op advertises.* If it cannot, the op must not advertise the
+   guarantee unconditionally — the degraded bound goes in the contract, at its true order.
+2. Where the default is **already host-invariant** (a pure shape function, no platform probe), the
+   default **is** the correct canonical. Registering a stricter-but-costlier variant as canonical is a
+   category error.
+3. **Audit the 5 registered sites in `nitrix._internal._divergent_ops` against (1)** before any filing
+   lands on top of them, and extend `tests/test_reproducible_dispatch_guard.py` so a canonical that
+   degrades a stated bound **fails CI**, exactly as an ungoverned platform-flip already does.
+
+*Seam-inventory note:* this is the **fourth** instance of the RFC §6.5.1 pattern — a guarantee
+certified only on the path its author took. Here the untaken path is *the library's own safety knob*.
+
+### X-5 · "15 is unusable below >1-D" (23 → 15) — DECLINED
+
+**The report.** During planning, filing 23 flagged that filing 15 was unusable as a dependency without
+genuine support for dimensions beyond 1-D.
+
+**Adjudicated: mistaken, and moot.** Recorded here — rather than dropped — because a false cross-filing
+dependency claim costs as much to re-litigate as a true one.
+
+- **15 is not a 1-D solver.** It minimises `f(x) + g(Dx)` over a *flat* `x ∈ ℝⁿ` for arbitrary `n`, with
+  no rank restriction and no `ndim` guard anywhere in `src/`. The flat vector is a **calling convention,
+  not a problem class**: tensor structure rides as static pytree metadata, and 15 already carries a
+  genuinely 2-D variable that way (`NuclearNorm` reshapes the flat vector to a matrix via a static
+  `shape`, `terms/svt.py:258-267`). Reading "`x` is rank-1" as "the solver is 1-D" is the misread.
+- **23 needs none of it.** What 23 requires is the **chain** monotone cone — the isotonic projection of
+  a quantile vector across levels, by pool-adjacent-violators (`23/PROBLEM.md:21`). 15 has exactly that
+  (`terms/isotonic.py`), declared `vmap`-safe, so batching over fibres is free. 23 **scopes every
+  certified guarantee to the fibered one-dimensional case** and routes the multivariate map to entropic
+  transport (filing 04), not to 15. Monotonicity of an *n*-D map — the cyclical-monotonicity /
+  positive-Jacobian cone, a genuinely different and much harder object — appears nowhere in 23's
+  contract.
+- **And the import is forbidden regardless.** Cross-filing runtime imports are barred by the shared
+  conventions, so "unusable as a dependency" was never going to be true for *any* reason.
+
+**The kernel of truth, kept.** What genuinely *is* chain-1-D in 15 — TV, TGV, the isotonic cone — is
+**scoped as such in 15's own problem statement** (its prox table says "one-dimensional total
+variation"). But the review surfaced a real, cheap gap behind the bad complaint: **15 has no *n*-D
+discrete-gradient operator** (`ForwardDifference` is a chain difference; there is no grid gradient).
+That matters because **anisotropic grid TV needs no new prox at all** — it is `L1Norm ∘ Grad_nD`
+through the existing composite — and *isotropic* grid TV then follows free from the existing
+`GroupNorm` over the stacked gradient channels, whose partition is already arbitrary static metadata.
+**One operator unlocks the most common composite program there is.** Filed as a should-fix on 15, not a
+blocker, and explicitly *not* what 23 asked for.
 
 ---
 
