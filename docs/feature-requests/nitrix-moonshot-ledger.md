@@ -185,11 +185,12 @@ filing in.**
 | id | constraint | status |
 |---|---|---|
 | **X-1** | **02's SVD adjoint must adopt 14's spectral-function formulation.** *(ESCALATED: 02's round-2 "fix" is a **regression** — it now silently zeroes a finite gradient. See below.)* | **open — escalated** |
-| **X-2** | **"This deformation is injective" is certified three times over — 07, 08, 27. One property, three witnesses.** | **open** |
+| **X-2** | **"This deformation is injective" is certified three times over — 07, 08, 27. One property, three witnesses.** *(ESCALATED: 07's witness does **not** certify the property it names — see below.)* | **open — escalated** |
 | **X-3** | **13's log-det seam is NOT adoptable by 22 (sparse) — the standing "adopt, don't fork" instruction is unsatisfiable as shipped.** | **open** |
 | **X-4** | **A canonical recipe must never void a stated complexity guarantee.** Discovered in 00 (G10); **nitrix's own 5 registered divergent sites are unaudited against it.** | **open — audit nitrix** |
 | **X-5** | 23 reported 15 unusable without ">1-D" support. **Adjudicated: mistaken, and moot.** Recorded so it is not re-litigated. | **closed — declined** |
-| **X-6** | **A substrate may not replace a seam it has not measured itself into.** genred is gated on incumbent-parity (00 G19) before it takes any nitrix seam. | **open — gate on the fold** |
+| **X-6** | **A substrate may not replace a seam it has not measured itself into.** genred is gated on incumbent-parity (00 G19) before it takes any nitrix seam. *(Its own motivating number went stale — see the correction.)* | **open — gate on the fold** |
+| **X-7** | **"Adjacent" means *shares an edge*, not *shares any vertex*. Two filings (01, 07) wrote the same wrong predicate — and the same wrong oracle.** A shared, tested triangle-pair primitive, not a per-consumer re-derivation. | **open — mint the primitive** |
 
 ### X-1 · The spectral-function adjoint (02 ← 14)
 
@@ -278,9 +279,36 @@ does not fold the domain onto itself* — each with a different witness:
 
 | filing | the guarantee | the witness |
 |---|---|---|
-| **07** embedding-constrained surface flow | the deformation stays **embedded** | the self-intersection-free invariant, maintained at every step |
-| **08** metric diffeomorphic shooting | the deformation is **invertible** | a positive-Jacobian guarantee |
+| **07** embedding-constrained surface flow | the deformation stays **embedded** | ~~the self-intersection-free invariant~~ — **NO. See the escalation below: the invariant is *"no non-adjacent pair intersects"*, which is strictly weaker than embeddedness.** |
+| **08** metric diffeomorphic shooting | the deformation is **invertible** | a positive-Jacobian guarantee — *local*, and does **not** imply global injectivity |
 | **27** Beltrami bijective mapping | the map is **bijective** | a Beltrami-coefficient bound + a *separate* global-bijectivity certificate |
+
+**ESCALATION (2026-07-13, from 07's round-2 review).** The lattice this constraint asked for now has
+its first rung, and it is lower than advertised. **07's witness does not certify the property 07
+names.** Every collision site in 07 (`_clearance.py:312-315`, `_fused.py:209-214`, `_sweep.py:371-374`
+— *and its own oracle*, `tests/oracles.py:195-196`) discards any triangle pair sharing **≥ 1 vertex**.
+But two triangles sharing exactly one vertex can cross transversally with both areas positive — a
+**generic** configuration, unlike a shared-*edge* pair whose interiors overlap only when coplanar. So
+the closed star of every vertex is a **collision-blind clique**, and because the step bound is a
+clearance to *non-adjacent faces only*, intra-star motion is not merely unmonitored but **unbounded**.
+
+**The strength lattice, corrected:**
+
+> `no non-adjacent pair intersects` **(07, actual)**  <  `positive Jacobian` **(08)** — local  <
+> `embedded / globally injective` **(07, claimed; 27, actual)**
+
+Three filings, and **not one of them certifies global injectivity except 27** — which is the only one
+that treated bijectivity as a *separate* certificate rather than a corollary. That was the right
+instinct and it is now evidenced.
+
+**Consequence for the fold.** A downstream consumer cannot read "injective" off any of these seams and
+believe it. The reconciliation must name the *witness*, not the property: a nitrix seam that returns an
+injectivity certificate must state **which rung** it certifies, and the weaker rungs must not be typed
+as if they were the strongest. (This is also why `NOTES-topology-guarantee.md` in 07 — the argument
+that a fixed connectivity plus the embedding invariant gives ambient isotopy and hence genus
+preservation *for free* — is **void in exactly the excluded class**: it was derived from a property the
+filing does not deliver. The note was written by this reviewer, from the *name* of the invariant rather
+than its definition in the code.)
 
 These are not three properties. They are one property at three strengths, and the strengths are
 **genuinely ordered** — which is exactly why folding them independently is dangerous:
@@ -468,6 +496,62 @@ nobody measured. It is also the pattern **this reviewer** twice fell into, asser
 shape of an abstraction rather than a number (the retracted genred/ELL ledger entry; the G8 op-set
 claim). A prose retraction gets re-asserted by the next reader of the table. A red benchmark row does
 not.
+
+### X-6 correction · the number that motivated the gate had gone stale, and nobody could tell
+
+The first statement of X-6 cited filing 07's decline as **7.45 GiB vs 0.06 GiB (124×)**. **That figure
+is obsolete**: it measured the engine materialising the `(m, k_max, d)` message tensor, and filing 00's
+round-5 work *removed that object* — its `semiring/ell_edge.py:52-53` now names **this very
+measurement** as the thing it fixed. Filing 07 has **no bench script, no test, no artefact**; the number
+lived only in prose, so nothing detected that it had expired before it was elevated into a governance
+rule.
+
+**This is the argument for X-6, not against it.** A number that cannot be re-run rots silently into a
+rule founded on a fixed bug. The gate stands; the citation is corrected.
+
+**And the surviving leg is the stronger one, because it indicts the *domain model* rather than the
+fold.** 07's incumbent fuses candidate **generation** with the fold *inside the tile*, so the
+`(m, k_max)` index operand **never exists**. genred's ELL path consumes that structure **already
+materialised** — at 07's target scale the operand *alone* is `(327 680 × 1024)` i32 = **1.34 GB**,
+against a **0.32 GiB** total incumbent forward budget. Streaming the fold cannot recover a cost paid at
+the domain's boundary. That limit generalises to **every candidate-generating proximity query**
+(fixed-radius neighbours, kNN, collision broad-phase) — it is *fixable* (it is precisely the in-tile
+candidate domain genred declared a non-goal), and **it has never been measured.**
+
+### X-7 · "Adjacent" is being used to mean the wrong thing, in two filings and both their oracles
+
+**The finding.** Filings **01** and **07** each need to exclude trivially-touching triangle pairs from a
+collision test. Both wrote:
+
+```python
+shares = (faces[ii][:, :, None] == faces[jj][:, None, :]).any(axis=(1, 2))   # drop if ANY shared vertex
+```
+
+**This is the wrong predicate.** Two triangles sharing an **edge** can only have overlapping interiors
+when coplanar — a measure-zero corner. Two triangles sharing exactly **one vertex** can cross
+transversally with both areas positive — a **generic** configuration, an open set. Excluding the latter
+discards real self-intersections:
+
+- **01**: its surgery's centroid fan *manufactures* precisely those pairs, so the defect is on the
+  filing's own hot path.
+- **07**: the closed star of every vertex becomes collision-blind, and the step bound therefore places
+  **no constraint at all** on intra-star motion.
+
+**And in both filings the "independent" oracle applies the identical exclusion** (`01/tests/oracles.py:59`,
+`07/tests/oracles.py:195-196`) — so in both, the exhaustive audit agrees with the broken fast path and
+the invariant test passes on a self-intersecting mesh. **The same error, made twice, and hidden twice by
+the same mistake in the oracle.**
+
+**Why it is a cross-filing constraint.** Two independent authors converging on the same wrong predicate
+is not a bug, it is a **missing primitive**. The correct object — *"exclude the shared simplex from the
+intersection test, not the pair from the census"* — is a small, exactly-testable piece of computational
+geometry that both consumers should be *consuming*, not re-deriving. It belongs in the reconciliation as
+a shared, tested primitive (a `nonadjacent_pairs` / `triangle_pair_intersects` seam in the mesh layer),
+with the oracle built **independently of it**.
+
+**The rule.** No filing folds a collision or self-intersection census in on its own predicate. One
+primitive, one definition of adjacency (**shares an edge**), one oracle that enumerates *all* pairs and
+adjudicates the shared feature — and a corpus member that a vertex-fan fold-through must fail.
 
 ---
 
