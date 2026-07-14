@@ -173,6 +173,64 @@ the **anchor** is the domain motivation, kept here.
   fold 14 into `stats`/`numerics` until those are closed** — the denoiser is exactly the consumer
   that would silently corrupt data. See the cross-filing table below.
 
+### 31 · Masked sparse–sparse products over a semiring *(late addition; the 32nd kernel)*
+- **Anchor.** Three things nitrix cannot currently do, all of which are one operation.
+  **(i) Preconditioning.** Every mesh- and graph-Laplacian solve in the library is
+  *unpreconditioned* CG — `linalg.krylov.cg` has no preconditioner argument at all, and the
+  preconditioners that exist (`shift_invert`, `polynomial`) are **dense-only**, raising on
+  ELL/SectionedELL. At the scale that is the whole point of the sparse path, and on operators whose
+  spectra are the *worst* case for CG (community structure ⇒ clustered low eigenvalues ⇒ small
+  spectral gap), there is no lever. The mesh-independent supplier is a multilevel hierarchy, whose
+  setup is the Galerkin triple product :math:`P^\top A P` — a sparse×sparse product. The
+  prolongation `P` already ships as an ELL (`sparse/mesh.py:566`); it is only ever applied to
+  *signals*, never to the *operator*. **(ii) Graph reduction by a partition.** Contracting a
+  connectivity graph by a parcellation is :math:`P^\top A P` — the same kernel — and is not
+  expressible today: `graph/community.py` dodges it by contracting straight to a scalar trace.
+  **(iii) Mesh combinatorics.** Face adjacency, n-ring neighbourhoods and reachability are boolean
+  semiring products; `_kring_adj_list` currently computes a boolean matrix power as a **triple-nested
+  Python `set` BFS** on meshes of up to 163,842 vertices.
+- **Reconciliation target.** `sparse` + `semiring` — **not a new top-level subpackage.** The algebra
+  axis (`REAL/LOG/TROPICAL_*/BOOLEAN/EUCLIDEAN`) and the `ELL`/`SectionedELL` storage are **shared
+  with genred and must bind, not fork**; `semiring_ell_matmul` (sparse × dense) stays exactly where
+  it is. 31 contributes a storage (sliced-ELL) and a *constructed* domain. It also supplies the
+  **preconditioner seam** on the Krylov solvers, which is what unblocks X-3.
+- **⚠ Governed by X-9** (the genred boundary) and **closes X-3**; **C2 of its corpus is X-7's
+  primitive** (`shares an edge` ≡ :math:`F F^\top` entry `== 2`).
+- **On the absence of a named request.** A full-tree grep for `spgemm`, `graphblas`, `multigrid`,
+  `AMG`, `galerkin` returns **zero hits** across SPEC, ~80 feature-requests and all source. *This is
+  not a caveat.* **The moonshot standard is prospective — SPEC §9's "concrete blocked consumer" gate
+  is waived for this batch by construction** (a filing qualifies if it improves something we have
+  **or** opens a family of methods we cannot currently write). Demand-by-name was never the bar, and
+  the six mutually-unaware rediscovery sites of X-9 are corroboration, not the argument. The one
+  place the concept appears at all is `SPEC.md:236-242`, which names **`spspmm`** exactly once — as
+  *the memory hazard to guard against*. The hazard is in the SPEC; the operation is not in the
+  library.
+
+### 32 · Kernel-independent hierarchical summation *(late addition; gated on a go/no-go spike)*
+- **Anchor.** Surface-to-surface and point-set-to-point-set matching by a kernel metric — the
+  data-attachment term of a diffeomorphic match — is an $N \times M$ kernel sum over vertices, evaluated
+  *and differentiated* at every step of the optimisation. At full cortical-mesh resolution the pair count
+  is the wall: filing 25 fixed the *memory* ($O(N+M)$) and **declared quadratic time irreducible**, which
+  leaves its own stated upper target ($N \sim 10^7$) unreachable — $10^{14}$ multiply–adds per evaluation.
+  An $O(N \log N)$ summation is what makes mesh-scale kernel matching, and the same regime for any smooth
+  kernel (RBF interpolation, kernel density on a surface, Gaussian-process covariance application),
+  computable at all.
+- **Reconciliation target.** Composes with the streaming kernel-sum engine (filing 00 / genred) rather
+  than replacing it — **the near field *is* the incumbent tiled kernel**. Lands beside it, not over it.
+- **⚠ This is the one filing whose first deliverable may be a decline.** The incumbent is a tiled
+  streaming sum whose inner-product stage runs on tensor cores at near-peak arithmetic intensity;
+  asymptotic wins routinely lose to that on a GPU. The spike bounds the proposed method from **below** by
+  its unavoidable work (without implementing it) and the incumbent from **above** by measurement, at
+  iso-accuracy, in **both** precisions, on **both** the value and the gradient — with the decision rule
+  fixed before the numbers are seen. **A no-go returns the crossover table as the result**, which is worth
+  having: it would tell us exactly where the quadratic path stops being affordable, which nothing in the
+  corpus currently knows.
+- **Note the precision axis specifically.** The incumbent's advantage *is* its tensor cores, and
+  double-precision tensor throughput collapses on the hardware class we deploy on; the hierarchical
+  method's advantage is a FLOP count, which is precision-agnostic. **The honest answer may well be
+  "no-go in fp32, go in fp64"** — and since the scientific core is fp32/fp64-first, that is not an
+  academic distinction.
+
 ---
 
 ## Cross-filing reconciliation constraints (tracked)
@@ -186,11 +244,13 @@ filing in.**
 |---|---|---|
 | **X-1** | **02's SVD adjoint must adopt 14's spectral-function formulation.** *(ESCALATED: 02's round-2 "fix" is a **regression** — it now silently zeroes a finite gradient. See below.)* | **open — escalated** |
 | **X-2** | **"This deformation is injective" is certified three times over — 07, 08, 27. One property, three witnesses.** *(ESCALATED: 07's witness does **not** certify the property it names — see below.)* | **open — escalated** |
-| **X-3** | **13's log-det seam is NOT adoptable by 22 (sparse) — the standing "adopt, don't fork" instruction is unsatisfiable as shipped.** | **open** |
+| **X-3** | **13's log-det seam is NOT adoptable by 22 (sparse).** *(RETARGETED: not a plumbing dispute — nitrix has **no preconditioner seam on any Krylov solver**. The required fix is unsatisfiable; the supplier is filing 31.)* | **open — blocked on 31** |
 | **X-4** | **A canonical recipe must never void a stated complexity guarantee.** Discovered in 00 (G10); **nitrix's own 5 registered divergent sites are unaudited against it.** | **open — audit nitrix** |
 | **X-5** | 23 reported 15 unusable without ">1-D" support. **Adjudicated: mistaken, and moot.** Recorded so it is not re-litigated. | **closed — declined** |
 | **X-6** | **A substrate may not replace a seam it has not measured itself into.** genred is gated on incumbent-parity (00 G19) before it takes any nitrix seam. *(Its own motivating number went stale — see the correction.)* | **open — gate on the fold** |
 | **X-7** | **"Adjacent" means *shares an edge*, not *shares any vertex*. Two filings (01, 07) wrote the same wrong predicate — and the same wrong oracle.** A shared, tested triangle-pair primitive, not a per-consumer re-derivation. | **open — mint the primitive** |
+| **X-8** | **A "supplied callable" seam is not a *typed* seam.** 25 cannot reach 08's similarity: it is typed over lattice scalar fields, not point measures. **The false claim is in the filing I wrote.** 25 caught it at plan time — the first filing to check a seam before claiming it. | **open — decision deferred to 25's impl** |
+| **X-9** | **The genred / sparse-product boundary.** genred streams a fold over a **given** domain; it does not **construct** one. A reduction whose index set is affine in the output index is genred's; one that is the **intersection of two data-dependent patterns** is filing 31's. Neither may claim the other's ground. | **open — governs 00 and 31** |
 
 ### X-1 · The spectral-function adjoint (02 ← 14)
 
@@ -362,6 +422,32 @@ into a documented accuracy bound. **Then** the seam is genuinely shareable.
 guarantee (or adoptability) was certified only on the path its author's own consumer took.** Compare
 genred's ELL hole (G6/G7 there) and X-1. The seam register must record, per seam, **which paths the
 guarantee was tested on** — not merely that a guarantee exists.
+
+#### X-3 correction · the required fix is itself unsatisfiable, and I filed this under the wrong heading
+
+**"Expose the preconditioner on `logdet`" presumes there is a preconditioner to expose. There is not.**
+`nitrix.linalg.krylov.cg` takes `(a, b, x0, tol, atol, maxiter, l2)` — and `l2` is a Tikhonov ridge, not a
+preconditioner (`krylov.py:59-68`). Neither does `bicgstab`, `gmres`, or `minres`. **Every mesh- and
+graph-Laplacian solve in nitrix is unpreconditioned CG.** The preconditioners that *do* exist
+(`shift_invert`, `polynomial`) **raise `ValueError` on ELL / SectionedELL** — they are dense-only, which
+`perf-bench-case-hardening.md:255-261` states in the plainest terms: *"the entire point of lobpcg is
+sparse scale (n ~ 1M); the headline numbers do not apply to the sparse path."*
+
+So X-3 is **not** a plumbing dispute between two filings, which is how I titled it and how the summary row
+read. It is the first surfacing of a **substrate hole**: nitrix has no preconditioner seam on any Krylov
+solver, and no sparse preconditioner of any kind. 13 cannot close X-3 by plumbing, because there is
+nothing to plumb.
+
+**And the supplier is a sparse-sparse product.** At κ≈10⁵ on an irregular operator, the mesh-independent
+preconditioner family is multilevel; its setup is the Galerkin triple product :math:`P^\top A P`, which is
+an SpGEMM. nitrix cannot form :math:`P^\top A P` — the prolongation `P` ships as an ELL
+(`sparse/mesh.py:566`), but it is only ever applied to *signals*, never to the *operator*
+(`mesh_coarsen_meanpool`, `mesh.py:1275`). Note also `graph/laplacian.py:277-287`: the symmetric Laplacian
+is **dense-only** *"because the non-zero diagonal does not fit the sparse pattern of the input"* — so a
+coarse-grid Laplacian is not constructible even in principle today.
+
+**Status: X-3 is retargeted.** It is no longer "13 must expose a knob"; it is **blocked on the preconditioner
+seam**, which is filing 31's deliverable. Filings 13 and 22 both wait on it. See X-9.
 
 ### X-4 · A canonical recipe must never void a complexity guarantee (00 → nitrix's own registry)
 
@@ -552,6 +638,195 @@ with the oracle built **independently of it**.
 **The rule.** No filing folds a collision or self-intersection census in on its own predicate. One
 primitive, one definition of adjacency (**shares an edge**), one oracle that enumerates *all* pairs and
 adjudicates the shared feature — and a corpus member that a vertex-fan fold-through must fail.
+
+---
+
+### X-8 · A "supplied callable" is not a typed seam (25 → 08) — and the false claim is mine
+
+**The report.** Filing **25** (kernel metrics between weighted directional point-measures) reports at
+**plan time, before writing code**:
+
+> *directory 08 cannot consume this filing as PROBLEM.md claims. Its similarity seam is typed over scalar
+> fields on a lattice, not point sets — a shape mismatch, not a naming one.*
+
+**Audited against 08's merged code: correct, and understated.**
+
+**The claim it contradicts is one I wrote.** `25/PROBLEM.md:53` argues that *"Directory 08 declares its
+`similarity` to be a **supplied callable**"* — and concludes that 25 therefore slots in. The callable is
+indeed supplied. Its arguments are not point measures:
+
+```python
+# 08/protocols.py — and 08/src/epdiff_shooting/types.py, as merged
+class Similarity(Protocol):
+    def __call__(
+        self,
+        warped: Float[Array, "*spatial"],     # a scalar field on the lattice
+        fixed:  Float[Array, "*spatial"],     # likewise
+    ) -> Float[Array, ""]: ...
+```
+
+**Pluggable-callable is not pluggable-type.** I read the *shape of the abstraction* (a callable, injected,
+therefore open) and inferred a capability, without reading the argument types. **This is the fourth time in
+this corpus I have made that exact move** — the G8 op-set claim, the G19 stale-number claim, the
+`NOTES-topology-guarantee` derivation, and now this. Every instance is mine, and every instance was caught
+by someone reading the code I did not read.
+
+**The mismatch is deeper than the signature.** 08's data term is not merely typed for grids, it *operates*
+on them (`objective.py`):
+
+```python
+warped = warp_scalar(moving, fields.inv_displacement, ...)   # grid -> grid resample
+return regularisation + weight * similarity(warped, fixed)
+```
+
+A point measure needs the opposite operation in two independent ways: the points are **pushed forward** by
+`fwd_displacement` (not pulled back by `inv_displacement`), and their **directions and weights must be
+transported** by the Jacobian, which 08 never applies to anything. Swapping the `similarity` callable alone
+cannot express this at any type.
+
+**But "cannot consume" overstates the distance — the ingredients are already in 08.**
+
+- **The scattered sampler exists.** `interp._interpolate` is batch-shape-agnostic: it rank-checks
+  `values`' spatial axes against `points.shape[-1]` only, then gathers over a flat index. Its jaxtyping
+  annotation (`points: Float[Array, "*spatial d"]`) *understates* it — `points` of shape `(n_vertices, d)`
+  works today. It is private, and every public entry (`warp_scalar`/`warp_vector`) hard-wires
+  `_index_points(displacement, spacing)` = *the whole lattice*.
+- **The Jacobian field exists.** `grid.jacobian` / `jacobian_spectral` / `determinant` are computed already
+  (EPDiff transport needs `Dφ`; the certificate needs `det Dφ`).
+
+So what is genuinely absent is (a) a **public point-warp entry**, (b) the **direction flip**, and (c) one
+piece of real mathematics that **neither filing has**: the transport rule for a *directional* measure — the
+**tangential (Gram) Jacobian**, which is not `det Dφ`, rescaling the weight by the local area distortion
+and pushing the direction by `Dφ` up to normalisation.
+
+**The ownership question (25's F7: "whose filing owns it?") — recommended split, to be ratified when 25
+lands.** The warp *path* is a property of the diffeomorphism, not of the metric: 25 never sees a
+displacement field, and 25's own non-goal 3 puts measure construction out of scope. The transport *rule* is
+a geometric-measure fact, which is exactly 25's mathematics. Therefore: **08 owns the path, 25 owns the
+rule.** Neither filing may assume the other has already built it — which is how this constraint arose.
+
+**Status: the decision defers to 25's implementation** (25 is PLAN-only; nothing is built yet). What does
+**not** defer is the correction to `25/PROBLEM.md:53`, which is false as written and must not be allowed to
+justify a seam that does not exist.
+
+**The rule.** *A filing may not claim a consumer seam it has not type-checked against that consumer's
+merged code.* An injected callable proves the consumer is **open**; it says nothing about **what it is open
+to**. Credit where it is due: **X-6 compels a filing to measure itself into a seam before taking it; 25 is
+the first filing to check a seam before claiming it — unprompted, and against its own interest.**
+
+---
+
+### X-9 · The genred / sparse-product boundary — and the six sites nobody had connected
+
+**The rule.** *genred streams a fold over a **given** domain; it does not **construct** one.* That sentence is
+genred's own (`genred/README.md:113-119`), and it is the partition:
+
+- **The reduce index set is a static or affine function of the output index** (dense, product, banded,
+  masked-by-index-predicate; ELL slots at a fixed `k_max`) → **genred's ground.**
+- **The reduce index set is the intersection of two data-dependent patterns**, or the output pattern is
+  itself data-dependent → **filing 31's ground.**
+
+**Neither may claim the other's.** This is not a performance judgement; it is an expressibility one, and it is
+already conceded on 00's side of the line. genred's `Domain` protocol derives every bound from the *output
+index* (`bounds(i_lo, i_hi, extent)`); its sole indexed access, `Gather`, is documented as resolving *"rows of
+a **dense table**"* and validates `axis is FEATURE` eagerly. A sparse×sparse product has no such encoding:
+forcing one produces a dense `(m, n)` output — **the exact pairwise object the engine exists to forbid.**
+genred does not lose at SpGEMM by a constant; it *inverts into the thing it was built to avoid.* Filing 00
+states the boundary itself in four places — the README scope contract, `CandidateDomain` as a declared
+non-goal (*"a traversal machine grafted onto a fold engine"*), "CSR domains" as a deferred non-goal, and
+ADDENDUM **G9 — "the streaming boundary is drawn in the wrong place for data-dependent domains"**, which was
+*declared, not fixed*.
+
+**This is X-6 discharging correctly.** X-6 gates genred on measuring itself into a seam before taking it. The
+measurement came back negative. The seam is not taken. **Note that the two "genred loses" numbers on record
+(07's 124×, 01's 30–44×) are stale — both were fixed by B2/B3.2 — and this constraint deliberately does not
+rest on them.** It rests on the domain algebra and on 00's own scope contract. Founding a family split on a
+number that has already rotted once is exactly what G19 exists to prevent.
+
+**What the boundary was hiding.** Six sites in nitrix independently need a sparse×sparse product; none knows
+about the others, and **no one has ever requested it by name** (a full-tree grep for `spgemm`, `graphblas`,
+`multigrid`, `AMG`, `galerkin` returns zero hits across SPEC, ~80 feature-requests, and source):
+
+1. **X-3** — every Krylov solver is unpreconditioned; the sparse preconditioner's setup is :math:`P^\top A P`.
+2. **X-7** — *"shares an edge"* is :math:`F F^\top` thresholded at 2: a boolean masked product. Two filings
+   hand-rolled it wrong, and so did both their oracles.
+3. **`SPEC.md:236-242`** — names **`spspmm`** exactly once in the whole repository, as *the memory hazard to
+   guard against*. The hazard is in the SPEC; the operation is not in the library.
+4. **`geometry/dec.py:21`** — *"`d0ᵀ ★₁ d0` **is** that Laplacian"* — and `hodge_apply` can only compose the
+   factors as **matvec closures** (`:433-438`), never form the product.
+5. **`sparse/mesh.py:779-816`** — `_kring_adj_list` is a **boolean semiring matrix power implemented as a
+   triple-nested Python `set` BFS**, run on meshes of up to 163,842 vertices.
+6. **`sparse/ell.py:230-330`** — you cannot build a sparse graph without a dense `n × n` first, and
+   `symmetrize=True` *"can densify hub rows entirely"* for want of a structural sparse union.
+
+**The shared substrate is not to be forked.** The semiring algebras (`REAL / LOG / TROPICAL_* / BOOLEAN /
+EUCLIDEAN`) and the `ELL` / `SectionedELL` storage are **common to genred and to 31**; the algebra axis is
+orthogonal to the storage axis and to the domain axis. 31 adds a storage (sliced-ELL) and a domain
+(constructed), **not** a second algebra vocabulary and **not** a second SpMM — `semiring_ell_matmul` stays
+exactly where it is.
+
+---
+
+## Evaluated and declined (recorded so they are not re-litigated)
+
+**The standard applied here is the batch's own: prospective, not demand-driven.** A candidate qualifies
+if it *improves something we have* **or** *opens a family of methods we cannot currently write*. Absence
+of a named request is not a reason to decline. The declines below are on **invariants** and on
+**operating regime**, never on demand.
+
+### Butterfly factorisation / Monarch / Monarch-Mixer — DECLINED, but it surfaced a real gap
+
+Two different objects share the name; they fail for entirely different reasons.
+
+**Monarch / Monarch-Mixer — declined on invariants.**
+1. **There is no weight matrix in nitrix to parameterise.** `nn/` holds exactly three functional kernels
+   (`scaled_dot_product_attention`, `selective_scan`, the norms). **There is no `Linear` layer**, and
+   SPEC forbids one: *"the learnable modules that hold the parameters live in downstream libraries."*
+   Monarch is a *weight parameterisation*; the object it modifies does not exist here. It belongs a
+   layer up.
+2. **The kernel has no irreducible content.** A Monarch matmul is `reshape → batched matmul → transpose
+   → reshape`; autodiff through a bmm is already exact and efficient. SPEC §9 excludes exactly this
+   class (*"(trivial elementwise op) ∘ (reduction) with no content"*). Its value is a statement about
+   which subspace of matrices to search — a *modelling* choice, not arithmetic.
+   *(Incidentally, M2's sub-quadratic sequence mixing comes from FFT long-convolution, not from Monarch;
+   Monarch does the dimension mixing, i.e. it replaces the MLP. nitrix has no MLP.)*
+
+**Butterfly proper (complementary-low-rank, for *oscillatory* operators) — declined on regime.** Its
+natural targets are **NUFFT / Fourier integral operators / high-frequency BEM**, and all of them are
+outside the charter (no k-space or reconstruction; no M/EEG). The one in-library slot is real —
+`geometry/harmonics.py:295-297` is the classic **semi-naive O(L³)** SHT, whose Legendre stage is exactly
+where a fast Legendre transform applies — but the corpus operates at **L = 8** (filing 05's own figure;
+tests cover L ≤ 10). That is two orders of magnitude below butterfly's GPU crossover, where it would be
+*slower*. And if a consumer ever does need high L, **the first fix is a three-term Legendre recurrence
+(O(L²) memory), not a butterfly** — the O(L³) cost there is a *storage* choice, not an algorithmic
+necessity. **Trigger to revisit: a consumer needing L ≳ 256.**
+
+### …but the re-evaluation surfaced the gap butterfly is a cousin of, and this one is live
+
+**Filing 25 (and genred's whole kernel-summation regime) accepts *quadratic time* as irreducible.** 25's
+own hard invariant: *"The double sum is :math:`O(NM)` in **time**; it must be :math:`O(N+M)` in
+**memory**"* — at a stated target of :math:`N \sim 10^5`–:math:`10^7`, *"evaluated at every step of an
+outer optimisation."* At :math:`N = 10^7` that is :math:`10^{14}` multiply-adds **per evaluation** —
+seconds per step on an L4 before the directional kernel's transcendentals, times thousands of steps.
+**The memory wall was fixed; the time wall was declared and left standing.** 25's stated upper target is
+not reachable by 25.
+
+The escape is the *other* branch of the hierarchical-matrix family — the one for **smooth** kernels,
+which is what these actually are: **kernel-independent hierarchical summation** (black-box / Chebyshev-
+interpolation FMM, :math:`\mathcal{H}^2`), giving :math:`O(N \log N)` or :math:`O(N)` for an **arbitrary**
+smooth kernel, deterministically and with exact gradients. Unlike a classical tree-code FMM, the
+interpolation-based form runs on a **fixed** tree with uniform per-node work — regular, batchable,
+differentiable, GPU-shaped. (25 already lists **random features** as one open option, but that is
+restricted to a *separable Gaussian* and buys an estimator variance that lands in the gradients.)
+
+**This is a prospective candidate on exactly the batch's stated standard: it opens a regime the corpus
+has declared itself unable to reach.** Its honest risk is the crossover — at :math:`N \sim 10^5` a
+brute-force :math:`O(N^2)` with perfect arithmetic intensity may still win on a GPU, so the case must be
+made at :math:`N \gtrsim 10^6` and the crossover measured, not asserted.
+
+**FILED as 32**, with that risk promoted to the filing's *first* section: a front-loaded go/no-go spike
+that bounds the method from below and the incumbent from above, and **is allowed to say no**. See the
+batch entry above.
 
 ---
 
